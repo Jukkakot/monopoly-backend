@@ -1,0 +1,459 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="1.357" tests="14" errors="0" skipped="0" failures="0">
+  <properties>
+    <property name="java.specification.version" value="21"/>
+    <property name="sun.cpu.isalist" value="amd64"/>
+    <property name="sun.jnu.encoding" value="Cp1252"/>
+    <property name="java.class.path" value="E:\Documents\ProcessingProjects\MonopolyBackend\target\test-classes;E:\Documents\ProcessingProjects\MonopolyBackend\target\classes;C:\Users\Jukka\.m2\repository\org\projectlombok\lombok\1.18.36\lombok-1.18.36.jar;C:\Users\Jukka\.m2\repository\ch\qos\logback\logback-classic\1.5.18\logback-classic-1.5.18.jar;C:\Users\Jukka\.m2\repository\ch\qos\logback\logback-core\1.5.18\logback-core-1.5.18.jar;C:\Users\Jukka\.m2\repository\org\slf4j\slf4j-api\2.0.17\slf4j-api-2.0.17.jar;C:\Users\Jukka\.m2\repository\com\fasterxml\jackson\core\jackson-databind\2.18.3\jackson-databind-2.18.3.jar;C:\Users\Jukka\.m2\repository\com\fasterxml\jackson\core\jackson-annotations\2.18.3\jackson-annotations-2.18.3.jar;C:\Users\Jukka\.m2\repository\com\fasterxml\jackson\core\jackson-core\2.18.3\jackson-core-2.18.3.jar;C:\Users\Jukka\.m2\repository\io\javalin\javalin\6.3.0\javalin-6.3.0.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-server\11.0.23\jetty-server-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-http\11.0.23\jetty-http-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-util\11.0.23\jetty-util-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-io\11.0.23\jetty-io-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\toolchain\jetty-jakarta-servlet-api\5.0.2\jetty-jakarta-servlet-api-5.0.2.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-jetty-server\11.0.23\websocket-jetty-server-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-servlet\11.0.23\jetty-servlet-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-security\11.0.23\jetty-security-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-webapp\11.0.23\jetty-webapp-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-xml\11.0.23\jetty-xml-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-jetty-api\11.0.23\websocket-jetty-api-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-jetty-common\11.0.23\websocket-jetty-common-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-core-common\11.0.23\websocket-core-common-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-servlet\11.0.23\websocket-servlet-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-core-server\11.0.23\websocket-core-server-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\kotlin\kotlin-stdlib-jdk8\1.9.25\kotlin-stdlib-jdk8-1.9.25.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\kotlin\kotlin-stdlib\1.9.25\kotlin-stdlib-1.9.25.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\annotations\13.0\annotations-13.0.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\kotlin\kotlin-stdlib-jdk7\1.9.25\kotlin-stdlib-jdk7-1.9.25.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter\5.12.2\junit-jupiter-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter-api\5.12.2\junit-jupiter-api-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\opentest4j\opentest4j\1.3.0\opentest4j-1.3.0.jar;C:\Users\Jukka\.m2\repository\org\junit\platform\junit-platform-commons\1.12.2\junit-platform-commons-1.12.2.jar;C:\Users\Jukka\.m2\repository\org\apiguardian\apiguardian-api\1.1.2\apiguardian-api-1.1.2.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter-params\5.12.2\junit-jupiter-params-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter-engine\5.12.2\junit-jupiter-engine-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\junit\platform\junit-platform-engine\1.12.2\junit-platform-engine-1.12.2.jar;"/>
+    <property name="java.vm.vendor" value="Eclipse Adoptium"/>
+    <property name="sun.arch.data.model" value="64"/>
+    <property name="monopoly.bot.think.delay.ms" value="0"/>
+    <property name="user.variant" value=""/>
+    <property name="java.vendor.url" value="https://adoptium.net/"/>
+    <property name="user.timezone" value="Europe/Helsinki"/>
+    <property name="user.country.format" value="FI"/>
+    <property name="os.name" value="Windows 11"/>
+    <property name="java.vm.specification.version" value="21"/>
+    <property name="sun.java.launcher" value="SUN_STANDARD"/>
+    <property name="user.country" value="US"/>
+    <property name="sun.boot.library.path" value="C:\Users\Jukka\.jdks\temurin-21.0.10\bin"/>
+    <property name="sun.java.command" value="C:\Users\Jukka\AppData\Local\Temp\surefire4191441789790496541\surefirebooter-20260507230807365_3.jar C:\Users\Jukka\AppData\Local\Temp\surefire4191441789790496541 2026-05-07T23-08-07_193-jvmRun1 surefire-20260507230807365_1tmp surefire_0-20260507230807365_2tmp"/>
+    <property name="jdk.debug" value="release"/>
+    <property name="surefire.test.class.path" value="E:\Documents\ProcessingProjects\MonopolyBackend\target\test-classes;E:\Documents\ProcessingProjects\MonopolyBackend\target\classes;C:\Users\Jukka\.m2\repository\org\projectlombok\lombok\1.18.36\lombok-1.18.36.jar;C:\Users\Jukka\.m2\repository\ch\qos\logback\logback-classic\1.5.18\logback-classic-1.5.18.jar;C:\Users\Jukka\.m2\repository\ch\qos\logback\logback-core\1.5.18\logback-core-1.5.18.jar;C:\Users\Jukka\.m2\repository\org\slf4j\slf4j-api\2.0.17\slf4j-api-2.0.17.jar;C:\Users\Jukka\.m2\repository\com\fasterxml\jackson\core\jackson-databind\2.18.3\jackson-databind-2.18.3.jar;C:\Users\Jukka\.m2\repository\com\fasterxml\jackson\core\jackson-annotations\2.18.3\jackson-annotations-2.18.3.jar;C:\Users\Jukka\.m2\repository\com\fasterxml\jackson\core\jackson-core\2.18.3\jackson-core-2.18.3.jar;C:\Users\Jukka\.m2\repository\io\javalin\javalin\6.3.0\javalin-6.3.0.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-server\11.0.23\jetty-server-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-http\11.0.23\jetty-http-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-util\11.0.23\jetty-util-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-io\11.0.23\jetty-io-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\toolchain\jetty-jakarta-servlet-api\5.0.2\jetty-jakarta-servlet-api-5.0.2.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-jetty-server\11.0.23\websocket-jetty-server-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-servlet\11.0.23\jetty-servlet-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-security\11.0.23\jetty-security-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-webapp\11.0.23\jetty-webapp-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\jetty-xml\11.0.23\jetty-xml-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-jetty-api\11.0.23\websocket-jetty-api-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-jetty-common\11.0.23\websocket-jetty-common-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-core-common\11.0.23\websocket-core-common-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-servlet\11.0.23\websocket-servlet-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\eclipse\jetty\websocket\websocket-core-server\11.0.23\websocket-core-server-11.0.23.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\kotlin\kotlin-stdlib-jdk8\1.9.25\kotlin-stdlib-jdk8-1.9.25.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\kotlin\kotlin-stdlib\1.9.25\kotlin-stdlib-1.9.25.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\annotations\13.0\annotations-13.0.jar;C:\Users\Jukka\.m2\repository\org\jetbrains\kotlin\kotlin-stdlib-jdk7\1.9.25\kotlin-stdlib-jdk7-1.9.25.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter\5.12.2\junit-jupiter-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter-api\5.12.2\junit-jupiter-api-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\opentest4j\opentest4j\1.3.0\opentest4j-1.3.0.jar;C:\Users\Jukka\.m2\repository\org\junit\platform\junit-platform-commons\1.12.2\junit-platform-commons-1.12.2.jar;C:\Users\Jukka\.m2\repository\org\apiguardian\apiguardian-api\1.1.2\apiguardian-api-1.1.2.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter-params\5.12.2\junit-jupiter-params-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\junit\jupiter\junit-jupiter-engine\5.12.2\junit-jupiter-engine-5.12.2.jar;C:\Users\Jukka\.m2\repository\org\junit\platform\junit-platform-engine\1.12.2\junit-platform-engine-1.12.2.jar;"/>
+    <property name="sun.cpu.endian" value="little"/>
+    <property name="user.home" value="C:\Users\Jukka"/>
+    <property name="user.language" value="en"/>
+    <property name="java.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.version.date" value="2026-01-20"/>
+    <property name="java.home" value="C:\Users\Jukka\.jdks\temurin-21.0.10"/>
+    <property name="file.separator" value="\"/>
+    <property name="basedir" value="E:\Documents\ProcessingProjects\MonopolyBackend"/>
+    <property name="java.vm.compressedOopsMode" value="32-bit"/>
+    <property name="line.separator" value="&#10;"/>
+    <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.specification.name" value="Java Platform API Specification"/>
+    <property name="surefire.real.class.path" value="C:\Users\Jukka\AppData\Local\Temp\surefire4191441789790496541\surefirebooter-20260507230807365_3.jar"/>
+    <property name="user.script" value=""/>
+    <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
+    <property name="java.runtime.version" value="21.0.10+7-LTS"/>
+    <property name="user.name" value="Jukka"/>
+    <property name="stdout.encoding" value="Cp1252"/>
+    <property name="path.separator" value=";"/>
+    <property name="os.version" value="10.0"/>
+    <property name="java.runtime.name" value="OpenJDK Runtime Environment"/>
+    <property name="file.encoding" value="UTF-8"/>
+    <property name="java.vm.name" value="OpenJDK 64-Bit Server VM"/>
+    <property name="java.vendor.version" value="Temurin-21.0.10+7"/>
+    <property name="localRepository" value="C:\Users\Jukka\.m2\repository"/>
+    <property name="java.vendor.url.bug" value="https://github.com/adoptium/adoptium-support/issues"/>
+    <property name="jetty.git.hash" value="6fcf5ccaebd7ca13a0cb96c96adca699a24080a0"/>
+    <property name="java.io.tmpdir" value="C:\Users\Jukka\AppData\Local\Temp\"/>
+    <property name="java.version" value="21.0.10"/>
+    <property name="user.dir" value="E:\Documents\ProcessingProjects\MonopolyBackend"/>
+    <property name="os.arch" value="amd64"/>
+    <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
+    <property name="user.language.format" value="fi"/>
+    <property name="sun.os.patch.level" value=""/>
+    <property name="native.encoding" value="Cp1252"/>
+    <property name="java.library.path" value="C:\Users\Jukka\.jdks\temurin-21.0.10\bin;C:\WINDOWS\Sun\Java\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\Users\Jukka\bin;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\local\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Users\Jukka\bin;C:\Program Files\PowerShell\7;C:\Python313\Scripts;C:\Python313;C:\Program Files\ImageMagick-7.1.0-Q16-HDRI;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0;C:\WINDOWS\System32\OpenSSH;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\WireGuard;C:\Program Files (x86)\PuTTY;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0;C:\WINDOWS\System32\OpenSSH;C:\Program Files\Git\cmd;C:\Program Files\nodejs;C:\ProgramData\chocolatey\bin;C:\tools\maven\apache-maven-3.9.14\bin;C:\Program Files\PowerShell\7;C:\Users\Jukka\.jdks\temurin-21.0.10\bin;C:\Users\Jukka\.jdks\temurin-21.0.10\bin;C:\Users\Jukka\.jdks\temurin-21.0.10\bin;C:\Users\Jukka\.jdks\temurin-21.0.10\bin;C:\Users\Jukka\AppData\Local\Microsoft\WindowsApps;C:\Users\Jukka\AppData\Local\Programs\Microsoft VS Code\bin;C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2024.1.1\bin;C:\Users\Jukka\AppData\Roaming\npm;C:\tools\maven\apache-maven-3.9.14\bin;C:\Program Files\PowerShell\7;C:\Users\Jukka\AppData\Local\Microsoft\WinGet\Packages\BurntSushi.ripgrep.MSVC_Microsoft.Winget.Source_8wekyb3d8bbwe\ripgrep-15.1.0-x86_64-pc-windows-msvc;C:\Program Files\Git\usr\bin\vendor_perl;C:\Program Files\Git\usr\bin\core_perl;C:\Users\Jukka\.claude\plugins\cache\claude-plugins-official\frontend-design\unknown\bin;."/>
+    <property name="java.vm.info" value="mixed mode, sharing"/>
+    <property name="stderr.encoding" value="Cp1252"/>
+    <property name="java.vendor" value="Eclipse Adoptium"/>
+    <property name="java.vm.version" value="21.0.10+7-LTS"/>
+    <property name="sun.io.unicode.encoding" value="UnicodeLittle"/>
+    <property name="java.class.version" value="65.0"/>
+  </properties>
+  <testcase name="listSessionsInitiallyEmpty" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.839">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.236 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.242 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.294 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.302 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@3cbcd8f3{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.366 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@3028e50e{HTTP/1.1, (http/1.1)}{0.0.0.0:61514}
+&amp#27;[34m23:08:10.368 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@4bb8855f{STARTING}[11.0.23,sto=0] @2824ms
+&amp#27;[34m23:08:10.368 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.368 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 218ms \o/
+&amp#27;[34m23:08:10.370 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61514/
+&amp#27;[34m23:08:10.380 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.380 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61514
+&amp#27;[34m23:08:10.654 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.654 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@4bb8855f{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.658 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@3028e50e{HTTP/1.1, (http/1.1)}{0.0.0.0:61514}
+&amp#27;[34m23:08:10.660 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@3cbcd8f3{/,null,STOPPED}
+&amp#27;[34m23:08:10.660 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.660 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="createSessionReturns201WithSessionId" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.072">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.663 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.663 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.665 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.666 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@7a0f244f{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@4e17913b{HTTP/1.1, (http/1.1)}{0.0.0.0:61516}
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@64f16277{STARTING}[11.0.23,sto=0] @3129ms
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 9ms \o/
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61516/
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.672 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61516
+&amp#27;[34m23:08:10.731 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.731 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@64f16277{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.732 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@4e17913b{HTTP/1.1, (http/1.1)}{0.0.0.0:61516}
+&amp#27;[34m23:08:10.732 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@7a0f244f{/,null,STOPPED}
+&amp#27;[34m23:08:10.732 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.732 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="toggleMortgageCommandRejectedForUnownedProperty" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.107">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.736 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.736 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.737 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.738 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@3ab6678b{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.743 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@3bfc6a5e{HTTP/1.1, (http/1.1)}{0.0.0.0:61518}
+&amp#27;[34m23:08:10.744 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@abff8b7{STARTING}[11.0.23,sto=0] @3200ms
+&amp#27;[34m23:08:10.744 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.744 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 9ms \o/
+&amp#27;[34m23:08:10.744 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61518/
+&amp#27;[34m23:08:10.744 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.744 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61518
+&amp#27;[34m23:08:10.837 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.837 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@abff8b7{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.839 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@3bfc6a5e{HTTP/1.1, (http/1.1)}{0.0.0.0:61518}
+&amp#27;[34m23:08:10.840 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@3ab6678b{/,null,STOPPED}
+&amp#27;[34m23:08:10.840 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.840 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="listSessionsContainsCreatedSession" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.026">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.843 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.843 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.845 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.845 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@3a01773b{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.850 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@acdcf71{HTTP/1.1, (http/1.1)}{0.0.0.0:61522}
+&amp#27;[34m23:08:10.850 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@4a14c44f{STARTING}[11.0.23,sto=0] @3307ms
+&amp#27;[34m23:08:10.850 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.851 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 7ms \o/
+&amp#27;[34m23:08:10.851 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61522/
+&amp#27;[34m23:08:10.851 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.851 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61522
+&amp#27;[34m23:08:10.865 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.865 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@4a14c44f{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.865 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@acdcf71{HTTP/1.1, (http/1.1)}{0.0.0.0:61522}
+&amp#27;[34m23:08:10.866 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@3a01773b{/,null,STOPPED}
+&amp#27;[34m23:08:10.866 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.866 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="snapshotForCreatedSession" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.037">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.869 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.869 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.871 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.871 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@523d6bdb{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@24934262{HTTP/1.1, (http/1.1)}{0.0.0.0:61525}
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@288214b1{STARTING}[11.0.23,sto=0] @3334ms
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 9ms \o/
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61525/
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.878 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61525
+&amp#27;[34m23:08:10.902 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.902 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@288214b1{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.902 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@24934262{HTTP/1.1, (http/1.1)}{0.0.0.0:61525}
+&amp#27;[34m23:08:10.903 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@523d6bdb{/,null,STOPPED}
+&amp#27;[34m23:08:10.903 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.903 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="commandForUnknownSessionReturns404" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.021">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.905 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.905 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.907 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.907 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@46c3a14d{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.912 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@7479b626{HTTP/1.1, (http/1.1)}{0.0.0.0:61528}
+&amp#27;[34m23:08:10.912 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@74dbb1ee{STARTING}[11.0.23,sto=0] @3370ms
+&amp#27;[34m23:08:10.912 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.912 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 7ms \o/
+&amp#27;[34m23:08:10.914 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61528/
+&amp#27;[34m23:08:10.914 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.914 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61528
+&amp#27;[34m23:08:10.921 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.921 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@74dbb1ee{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.923 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@7479b626{HTTP/1.1, (http/1.1)}{0.0.0.0:61528}
+&amp#27;[34m23:08:10.923 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@46c3a14d{/,null,STOPPED}
+&amp#27;[34m23:08:10.923 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.923 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="corsHeadersPresentOnSnapshot" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.035">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.926 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.927 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.928 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.928 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@778d82e9{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.933 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@670d4d38{HTTP/1.1, (http/1.1)}{0.0.0.0:61530}
+&amp#27;[34m23:08:10.933 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@43b40233{STARTING}[11.0.23,sto=0] @3390ms
+&amp#27;[34m23:08:10.933 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.933 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 7ms \o/
+&amp#27;[34m23:08:10.933 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61530/
+&amp#27;[34m23:08:10.934 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.934 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61530
+&amp#27;[34m23:08:10.957 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.957 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@43b40233{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.958 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@670d4d38{HTTP/1.1, (http/1.1)}{0.0.0.0:61530}
+&amp#27;[34m23:08:10.959 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@778d82e9{/,null,STOPPED}
+&amp#27;[34m23:08:10.959 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.959 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="unknownCommandTypeReturns400" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.026">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.962 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.962 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.963 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.964 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@7173ae5b{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@81b5db0{HTTP/1.1, (http/1.1)}{0.0.0.0:61533}
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@7139bd31{STARTING}[11.0.23,sto=0] @3426ms
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 9ms \o/
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61533/
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.970 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61533
+&amp#27;[34m23:08:10.983 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:10.983 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@7139bd31{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:10.985 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@81b5db0{HTTP/1.1, (http/1.1)}{0.0.0.0:61533}
+&amp#27;[34m23:08:10.985 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@7173ae5b{/,null,STOPPED}
+&amp#27;[34m23:08:10.985 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:10.985 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="rollDiceCommandAcceptedForCreatedSession" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.039">
+    <system-out><![CDATA[&amp#27;[34m23:08:10.989 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:10.989 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:10.990 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:10.991 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@10f19647{/,null,AVAILABLE}
+&amp#27;[34m23:08:10.996 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@34b27915{HTTP/1.1, (http/1.1)}{0.0.0.0:61536}
+&amp#27;[34m23:08:10.996 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@1b9776f5{STARTING}[11.0.23,sto=0] @3453ms
+&amp#27;[34m23:08:10.996 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:10.996 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 8ms \o/
+&amp#27;[34m23:08:10.996 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61536/
+&amp#27;[34m23:08:10.997 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:10.997 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61536
+&amp#27;[39m23:08:11.021 DEBUG&amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.a.s.t.DomainTurnActionGateway - rollDice player=player-2 die1=5 die2=4 total=9 doubles=false consecutive=0
+&amp#27;[34m23:08:11.024 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:11.024 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@1b9776f5{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:11.025 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@34b27915{HTTP/1.1, (http/1.1)}{0.0.0.0:61536}
+&amp#27;[34m23:08:11.025 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@10f19647{/,null,STOPPED}
+&amp#27;[34m23:08:11.025 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:11.025 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="buyBuildingRoundCommandRejectedForUnownedProperty" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.039">
+    <system-out><![CDATA[&amp#27;[34m23:08:11.028 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:11.028 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:11.029 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:11.030 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@5a2bd7c8{/,null,AVAILABLE}
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@772861aa{HTTP/1.1, (http/1.1)}{0.0.0.0:61540}
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@19962194{STARTING}[11.0.23,sto=0] @3493ms
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 9ms \o/
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61540/
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:11.036 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61540
+&amp#27;[34m23:08:11.062 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:11.063 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@19962194{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:11.064 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@772861aa{HTTP/1.1, (http/1.1)}{0.0.0.0:61540}
+&amp#27;[34m23:08:11.064 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@5a2bd7c8{/,null,STOPPED}
+&amp#27;[34m23:08:11.064 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:11.064 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="createSessionWithMissingNamesReturns400" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.02">
+    <system-out><![CDATA[&amp#27;[34m23:08:11.068 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:11.068 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:11.070 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:11.070 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@3cb8c8ce{/,null,AVAILABLE}
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@12c60152{HTTP/1.1, (http/1.1)}{0.0.0.0:61544}
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@6cd164a6{STARTING}[11.0.23,sto=0] @3533ms
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 10ms \o/
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61544/
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:11.077 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61544
+&amp#27;[34m23:08:11.082 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:11.082 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@6cd164a6{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:11.084 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@12c60152{HTTP/1.1, (http/1.1)}{0.0.0.0:61544}
+&amp#27;[34m23:08:11.084 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@3cb8c8ce{/,null,STOPPED}
+&amp#27;[34m23:08:11.084 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:11.084 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="snapshotForUnknownSessionReturns404" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.017">
+    <system-out><![CDATA[&amp#27;[34m23:08:11.088 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:11.088 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:11.089 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:11.089 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@36c0d0bd{/,null,AVAILABLE}
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@49fe3142{HTTP/1.1, (http/1.1)}{0.0.0.0:61546}
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@61c42416{STARTING}[11.0.23,sto=0] @3552ms
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 8ms \o/
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61546/
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:11.095 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61546
+&amp#27;[34m23:08:11.100 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:11.100 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@61c42416{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:11.101 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@49fe3142{HTTP/1.1, (http/1.1)}{0.0.0.0:61546}
+&amp#27;[34m23:08:11.102 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@36c0d0bd{/,null,STOPPED}
+&amp#27;[34m23:08:11.102 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:11.102 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="sseStreamForCreatedSessionPushesInitialSnapshot" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.056">
+    <system-out><![CDATA[&amp#27;[34m23:08:11.105 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:11.105 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:11.106 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:11.106 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@2ec3633f{/,null,AVAILABLE}
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@4487c0c2{HTTP/1.1, (http/1.1)}{0.0.0.0:61548}
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@3a08078c{STARTING}[11.0.23,sto=0] @3570ms
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 10ms \o/
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61548/
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:11.114 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61548
+&amp#27;[34m23:08:11.157 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:11.157 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@3a08078c{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:11.158 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@4487c0c2{HTTP/1.1, (http/1.1)}{0.0.0.0:61548}
+&amp#27;[34m23:08:11.158 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@2ec3633f{/,null,STOPPED}
+&amp#27;[34m23:08:11.158 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:11.158 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+  <testcase name="optionsPreflightReturns204" classname="fi.monopoly.server.session.SessionRegistryHttpIntegrationTest" time="0.018">
+    <system-out><![CDATA[&amp#27;[34m23:08:11.162 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Starting Javalin ...
+&amp#27;[34m23:08:11.162 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+&amp#27;[34m23:08:11.163 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.s.DefaultSessionIdManager - Session workerName=node0
+&amp#27;[34m23:08:11.164 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Started o.e.j.s.ServletContextHandler@684b31de{/,null,AVAILABLE}
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Started ServerConnector@3727f0ee{HTTP/1.1, (http/1.1)}{0.0.0.0:61551}
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Started Server@fb713e7{STARTING}[11.0.23,sto=0] @3627ms
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin started in 9ms \o/
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Listening on http://localhost:61551/
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 623 days old. Consider checking for a newer version.).
+&amp#27;[34m23:08:11.170 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server started on port 61551
+&amp#27;[34m23:08:11.176 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Stopping Javalin ...
+&amp#27;[34m23:08:11.176 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.jetty.server.Server - Stopped Server@fb713e7{STOPPING}[11.0.23,sto=0]
+&amp#27;[34m23:08:11.177 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.AbstractConnector - Stopped ServerConnector@3727f0ee{HTTP/1.1, (http/1.1)}{0.0.0.0:61551}
+&amp#27;[34m23:08:11.177 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m o.e.j.s.h.ContextHandler - Stopped o.e.j.s.ServletContextHandler@684b31de{/,null,STOPPED}
+&amp#27;[34m23:08:11.177 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m io.javalin.Javalin - Javalin has stopped
+&amp#27;[34m23:08:11.177 INFO &amp#27;[0;39m &amp#27;[1;36m[turn=]&amp#27;[0;39m f.m.s.t.SessionHttpServer - Session HTTP server stopped
+]]></system-out>
+  </testcase>
+</testsuite>

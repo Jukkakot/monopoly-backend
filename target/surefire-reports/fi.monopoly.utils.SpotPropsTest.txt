@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: fi.monopoly.utils.SpotPropsTest
+-------------------------------------------------------------------------------
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in fi.monopoly.utils.SpotPropsTest

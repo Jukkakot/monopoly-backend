@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: fi.monopoly.server.transport.SessionCommandSerializerTest
+-------------------------------------------------------------------------------
+Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in fi.monopoly.server.transport.SessionCommandSerializerTest

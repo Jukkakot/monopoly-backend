@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: fi.monopoly.server.transport.SessionHttpServerTest
+-------------------------------------------------------------------------------
+Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.145 s -- in fi.monopoly.server.transport.SessionHttpServerTest
