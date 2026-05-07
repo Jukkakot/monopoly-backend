@@ -95,6 +95,33 @@ public final class SessionHttpServer {
         app.options("/*", ctx -> ctx.status(204));
 
         app.get("/health", ctx -> ctx.json(Map.of("status", "ok")));
+        app.get("/openapi.yaml", ctx -> {
+            ctx.contentType("text/yaml");
+            var stream = getClass().getResourceAsStream("/openapi.yaml");
+            if (stream != null) ctx.result(stream);
+            else ctx.status(404).result("openapi.yaml not found");
+        });
+        app.get("/docs", ctx -> {
+            ctx.contentType("text/html");
+            ctx.result("""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <title>Monopoly API</title>
+                  <meta charset="utf-8"/>
+                  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+                </head>
+                <body>
+                  <div id="swagger-ui"></div>
+                  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+                  <script>
+                    SwaggerUIBundle({ url: '/openapi.yaml', dom_id: '#swagger-ui', tryItOutEnabled: true,
+                                      layout: 'BaseLayout', deepLinking: true });
+                  </script>
+                </body>
+                </html>
+                """);
+        });
 
         // Single-session endpoints — only registered when single-session params are wired up
         if (commandPort != null && sessionUpdates != null && snapshotSupplier != null) {
