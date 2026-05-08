@@ -31,7 +31,8 @@ import java.util.stream.Collectors;
  *       is opened and turn phase moves to {@code RESOLVING_DEBT}</li>
  *   <li>Mortgaged property — no rent, player continues</li>
  *   <li>Tax spots — direct deduction or debt if insufficient cash</li>
- *   <li>Chance/Community cards — not yet modelled; treated as no-op for now</li>
+ *   <li>Chance/Community cards — full deck with MONEY, MOVE, MOVE_NEAREST, MOVE_BACK_3,
+ *       GO_JAIL, OUT_OF_JAIL, REPAIR_PROPERTIES, and ALL_PLAYERS_MONEY card types</li>
  *   <li>Doubles — player re-rolls; third consecutive doubles → jail</li>
  *   <li>In-jail turn — doubles escape jail; last forced round deducts €50 fine</li>
  * </ul>

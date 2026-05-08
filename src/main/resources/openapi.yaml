@@ -60,6 +60,37 @@ paths:
                   status:
                     type: string
                     example: ok
+                  sessions:
+                    type: integer
+                    description: Number of currently active sessions (-1 in single-session mode)
+                  uptimeSeconds:
+                    type: integer
+                    format: int64
+                    description: Seconds since server start
+                  version:
+                    type: string
+                    example: 1.0-SNAPSHOT
+
+  /metrics:
+    get:
+      tags: [meta]
+      summary: Prometheus-compatible metrics
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics in Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: |
+                  Counters and gauges in the standard Prometheus text format.
+                  Exposed metrics: `monopoly_commands_total`,
+                  `monopoly_commands_accepted_total`,
+                  `monopoly_commands_rejected_total`,
+                  `monopoly_sessions_created_total`,
+                  `monopoly_sessions_active`,
+                  `monopoly_uptime_seconds`.
 
   /sessions:
     get:
@@ -98,6 +129,26 @@ paths:
                 $ref: '#/components/schemas/CreateSessionResponse'
         '400':
           description: Missing or empty `names` field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sessions/{sessionId}:
+    delete:
+      tags: [meta]
+      summary: Delete (terminate) a session
+      operationId: deleteSession
+      description: |
+        Stops all bot drivers for the session and removes it from the registry.
+        Idempotent within the TTL window — a second call on the same ID returns 404.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '204':
+          description: Session deleted successfully (no body)
+        '404':
+          description: Session not found
           content:
             application/json:
               schema:
@@ -178,9 +229,10 @@ paths:
       operationId: streamEvents
       description: |
         Opens a persistent SSE connection. The server immediately pushes the
-        current snapshot as the first event, then pushes a new snapshot after
-        every accepted command. A `": heartbeat"` comment is sent every 30 s
-        to keep proxies from closing idle connections.
+        current snapshot as the first event (unless `Last-Event-ID` matches the
+        current `version`), then pushes a new snapshot after every accepted
+        command. A `": heartbeat"` comment is sent every 30 s to keep proxies
+        from closing idle connections.
 
         Each event is a single `data:` line containing a full
         `ClientSessionSnapshot` JSON object followed by two newlines.
@@ -189,8 +241,22 @@ paths:
         data: {"sessionId":"...","version":5,"status":"IN_PROGRESS",...}
 
         ```
+
+        On reconnect, pass the last received `version` value as the
+        `Last-Event-ID` request header to avoid replaying an already-known
+        snapshot.
       parameters:
         - $ref: '#/components/parameters/sessionId'
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: |
+            Version of the last snapshot the client successfully received.
+            If the server's current snapshot version equals this value the
+            initial push is skipped, avoiding a redundant replay on reconnect.
       responses:
         '200':
           description: SSE stream (never terminates until client disconnects)
@@ -257,7 +323,7 @@ components:
           type: array
           items:
             type: string
-            enum: [NORMAL, STRONG]
+            enum: [EASY, NORMAL, STRONG]
           description: |
             Bot difficulty per seat. Only meaningful for `BOT` seats.
             Missing entries default to `NORMAL`.
@@ -557,7 +623,7 @@ components:
             type: string
         status:
           type: string
-          enum: [BIDDING, RESOLVING, RESOLVED]
+          enum: [ACTIVE, WON_PENDING_RESOLUTION]
         winningBid:
           type: integer
         winningPlayerId:
@@ -682,6 +748,8 @@ components:
           BuyBuildingRound:                 '#/components/schemas/BuyBuildingRoundCommand'
           ToggleMortgage:                   '#/components/schemas/ToggleMortgageCommand'
           RefreshSessionView:               '#/components/schemas/RefreshSessionViewCommand'
+          UseGetOutOfJailCard:              '#/components/schemas/UseGetOutOfJailCardCommand'
+          PayJailFine:                      '#/components/schemas/PayJailFineCommand'
       oneOf:
         - $ref: '#/components/schemas/RollDiceCommand'
         - $ref: '#/components/schemas/EndTurnCommand'
@@ -705,6 +773,8 @@ components:
         - $ref: '#/components/schemas/BuyBuildingRoundCommand'
         - $ref: '#/components/schemas/ToggleMortgageCommand'
         - $ref: '#/components/schemas/RefreshSessionViewCommand'
+        - $ref: '#/components/schemas/UseGetOutOfJailCardCommand'
+        - $ref: '#/components/schemas/PayJailFineCommand'
 
     # Base shared by most commands
     BaseCommand:
@@ -717,6 +787,14 @@ components:
         sessionId:
           type: string
           format: uuid
+        commandId:
+          type: string
+          format: uuid
+          description: |
+            Optional client-generated idempotency key. If provided and the
+            server has already processed a command with this ID for this
+            session, the original result is returned without re-executing
+            the command. Useful to safely retry after a network error.
 
     BaseActorCommand:
       allOf:
@@ -1169,3 +1247,41 @@ components:
             type:
               type: string
               enum: [RefreshSessionView]
+
+    # ── Jail ──────────────────────────────────────────────────────────────────
+
+    UseGetOutOfJailCardCommand:
+      title: UseGetOutOfJailCard
+      description: |
+        Use a "Get Out of Jail Free" card to leave jail without rolling doubles
+        or paying the fine. Only valid during `WAITING_FOR_ROLL` when the player
+        is in jail and holds at least one such card.
+      allOf:
+        - $ref: '#/components/schemas/BaseActorCommand'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [UseGetOutOfJailCard]
+      example:
+        type: UseGetOutOfJailCard
+        sessionId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        actorPlayerId: player-1
+
+    PayJailFineCommand:
+      title: PayJailFine
+      description: |
+        Pay the €50 jail fine to leave jail immediately before rolling.
+        Only valid during `WAITING_FOR_ROLL` when the player is in jail and
+        has at least €50.
+      allOf:
+        - $ref: '#/components/schemas/BaseActorCommand'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [PayJailFine]
+      example:
+        type: PayJailFine
+        sessionId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        actorPlayerId: player-1
