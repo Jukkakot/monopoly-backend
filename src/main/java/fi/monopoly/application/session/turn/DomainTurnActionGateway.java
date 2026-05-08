@@ -129,6 +129,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             if (next == null) return state;
             return state.toBuilder()
                     .turn(new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                    .lastCardMessage(null)
                     .build();
         });
         return true;

@@ -5,6 +5,7 @@ import fi.monopoly.domain.session.BotDifficulty;
 import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.domain.session.SeatState;
 import fi.monopoly.domain.session.SessionState;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.List;
@@ -12,6 +13,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -20,12 +24,30 @@ import java.util.stream.Collectors;
  * <p>Sessions are created on demand via {@link #create} and identified by a random UUID.
  * The registry owns the {@link SessionCommandPublisher} lifecycle for each session.
  * If any seat is {@link SeatKind#BOT}, a {@link PureDomainBotDriver} is also started.</p>
+ *
+ * <p>Sessions are automatically evicted after being idle for
+ * {@code monopoly.session.ttl.minutes} minutes (default 120). Activity is tracked
+ * whenever a publisher is fetched via {@link #get}.</p>
  */
+@Slf4j
 public final class SessionRegistry {
+
+    private static final long TTL_MINUTES =
+            Long.getLong("monopoly.session.ttl.minutes", 120L);
+    private static final long CLEANUP_INTERVAL_MINUTES = 5L;
 
     private record Entry(SessionCommandPublisher publisher, List<String> playerNames, PureDomainBotDriver botDriver) {}
 
     private final ConcurrentHashMap<String, Entry> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> lastActivityAt = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService cleaner;
+
+    public SessionRegistry() {
+        cleaner = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofVirtual().name("session-cleaner").factory());
+        cleaner.scheduleAtFixedRate(this::evictIdleSessions,
+                CLEANUP_INTERVAL_MINUTES, CLEANUP_INTERVAL_MINUTES, TimeUnit.MINUTES);
+    }
 
     /**
      * Creates a new all-human session with the given player names and colours.
@@ -57,6 +79,7 @@ public final class SessionRegistry {
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, difficultyMap);
         sessions.put(sessionId, new Entry(publisher, List.copyOf(names), botDriver));
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
         return sessionId;
     }
 
@@ -74,6 +97,9 @@ public final class SessionRegistry {
 
     public Optional<SessionCommandPublisher> get(String sessionId) {
         Entry entry = sessions.get(sessionId);
+        if (entry != null) {
+            lastActivityAt.put(sessionId, System.currentTimeMillis());
+        }
         return Optional.ofNullable(entry).map(Entry::publisher);
     }
 
@@ -88,16 +114,38 @@ public final class SessionRegistry {
 
     public void remove(String sessionId) {
         Entry entry = sessions.remove(sessionId);
+        lastActivityAt.remove(sessionId);
         if (entry != null && entry.botDriver() != null) {
             entry.botDriver().stop();
         }
     }
 
-    /** Stops all bot drivers and clears all sessions. Call when the server shuts down. */
+    /** Stops all bot drivers, clears all sessions, and shuts down the cleanup scheduler. */
     public void shutdown() {
+        cleaner.shutdownNow();
         sessions.values().forEach(e -> {
             if (e.botDriver() != null) e.botDriver().stop();
         });
         sessions.clear();
+        lastActivityAt.clear();
+    }
+
+    // -------------------------------------------------------------------------
+    // TTL cleanup
+    // -------------------------------------------------------------------------
+
+    private void evictIdleSessions() {
+        long cutoff = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(TTL_MINUTES);
+        lastActivityAt.entrySet().removeIf(entry -> {
+            if (entry.getValue() < cutoff) {
+                log.info("Evicting idle session {} (idle > {} min)", entry.getKey().substring(0, 8), TTL_MINUTES);
+                Entry session = sessions.remove(entry.getKey());
+                if (session != null && session.botDriver() != null) {
+                    session.botDriver().stop();
+                }
+                return true;
+            }
+            return false;
+        });
     }
 }
