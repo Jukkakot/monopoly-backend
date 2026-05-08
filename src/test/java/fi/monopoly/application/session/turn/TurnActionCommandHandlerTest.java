@@ -206,5 +206,10 @@ class TurnActionCommandHandlerTest {
             toggledMortgage = SpotType.RR1.name().equals(propertyId);
             return toggledMortgage;
         }
+
+        @Override
+        public boolean useGetOutOfJailCard() {
+            return true;
+        }
     }
 }

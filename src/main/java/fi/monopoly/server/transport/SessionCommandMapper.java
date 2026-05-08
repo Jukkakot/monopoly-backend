@@ -113,6 +113,9 @@ public final class SessionCommandMapper {
                     node.path("actorPlayerId").asText(),
                     node.path("propertyId").asText());
             case "RefreshSessionView" -> new RefreshSessionViewCommand(sessionId);
+            case "UseGetOutOfJailCard" -> new UseGetOutOfJailCardCommand(
+                    sessionId,
+                    node.path("actorPlayerId").asText());
             default -> throw new IllegalArgumentException("Unknown command type: " + type);
         };
     }

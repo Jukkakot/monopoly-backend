@@ -26,7 +26,8 @@ public final class TurnActionCommandHandler {
         return command instanceof RollDiceCommand
                 || command instanceof EndTurnCommand
                 || command instanceof BuyBuildingRoundCommand
-                || command instanceof ToggleMortgageCommand;
+                || command instanceof ToggleMortgageCommand
+                || command instanceof UseGetOutOfJailCardCommand;
     }
 
     public CommandResult handle(SessionCommand command) {
@@ -41,6 +42,9 @@ public final class TurnActionCommandHandler {
         }
         if (command instanceof ToggleMortgageCommand toggleMortgageCommand) {
             return handleToggleMortgage(toggleMortgageCommand);
+        }
+        if (command instanceof UseGetOutOfJailCardCommand useCardCommand) {
+            return handleUseGetOutOfJailCard(useCardCommand);
         }
         return rejected("UNSUPPORTED_TURN_ACTION", "Turn action command is not supported");
     }
@@ -114,6 +118,26 @@ public final class TurnActionCommandHandler {
             return rejected("MORTGAGE_TOGGLE_FAILED", "Mortgage action failed");
         }
         return accepted("MortgageToggled", command.propertyId());
+    }
+
+    private CommandResult handleUseGetOutOfJailCard(UseGetOutOfJailCardCommand command) {
+        if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
+            return rejected("WRONG_TURN_ACTOR", "Only the active player can use a get-out-of-jail card");
+        }
+        SessionState state = currentStateSupplier.get();
+        if (state.turn().phase() != TurnPhase.WAITING_FOR_ROLL) {
+            return rejected("CARD_NOT_ALLOWED", "Card can only be used during the rolling phase");
+        }
+        PlayerSnapshot player = findPlayer(state, command.actorPlayerId());
+        if (player == null || !player.inJail()) {
+            return rejected("NOT_IN_JAIL", "Player is not in jail");
+        }
+        if (player.getOutOfJailCards() <= 0) {
+            return rejected("NO_CARD", "Player has no get-out-of-jail cards");
+        }
+        return gateway.useGetOutOfJailCard()
+                ? accepted("GetOutOfJailCardUsed", command.actorPlayerId())
+                : rejected("CARD_USE_FAILED", "Get-out-of-jail card could not be used");
     }
 
     private static PropertyStateSnapshot findPropertyOwnedBy(SessionState state, String propertyId, String actorPlayerId) {

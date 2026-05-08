@@ -245,6 +245,31 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         return true;
     }
 
+    @Override
+    public boolean useGetOutOfJailCard() {
+        SessionState state = store.get();
+        String activePlayerId = state.turn().activePlayerId();
+        if (activePlayerId == null) return false;
+
+        PlayerSnapshot activePlayer = findPlayer(state, activePlayerId);
+        if (activePlayer == null || !activePlayer.inJail() || activePlayer.getOutOfJailCards() <= 0) return false;
+
+        store.update(s -> {
+            List<PlayerSnapshot> updated = s.players().stream()
+                    .map(p -> activePlayerId.equals(p.playerId())
+                            ? new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash(),
+                                    p.boardIndex(), p.bankrupt(), p.eliminated(), false, 0,
+                                    p.getOutOfJailCards() - 1, p.ownedPropertyIds())
+                            : p)
+                    .toList();
+            return s.toBuilder()
+                    .players(updated)
+                    .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                    .build();
+        });
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers: jail
     // -------------------------------------------------------------------------
