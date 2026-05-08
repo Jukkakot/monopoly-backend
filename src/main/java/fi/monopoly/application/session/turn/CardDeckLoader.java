@@ -52,6 +52,39 @@ public final class CardDeckLoader {
     }
 
     /**
+     * Returns the display text for a card entry (the part before the first semicolon).
+     */
+    public static String cardText(String bundleName, String cardKey) {
+        String[] parts = cardKey.split(":", 2);
+        if (parts.length != 2) return "";
+        CardType ct;
+        try {
+            ct = CardType.valueOf(parts[0]);
+        } catch (IllegalArgumentException e) {
+            return "";
+        }
+        int idx;
+        try {
+            idx = Integer.parseInt(parts[1]);
+        } catch (NumberFormatException e) {
+            return "";
+        }
+        ResourceBundle bundle;
+        try {
+            bundle = ResourceBundle.getBundle(bundleName, DEFAULT_LOCALE);
+        } catch (MissingResourceException e) {
+            return "";
+        }
+        String raw = getBundleValue(bundle, ct.name());
+        if (raw == null || raw.isBlank()) return "";
+        List<String> entries = splitEntries(raw);
+        if (idx >= entries.size()) return "";
+        String entry = entries.get(idx);
+        String[] valueParts = entry.split(VALUE_DELIMITER);
+        return valueParts.length > 0 ? valueParts[0].trim() : "";
+    }
+
+    /**
      * Parses the raw values list for a given card entry in a deck.
      *
      * <p>Given a card key {@code "MONEY:0"} and bundle name, returns the list of

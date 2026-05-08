@@ -10,4 +10,6 @@ public interface TurnActionGateway {
     boolean toggleMortgage(String propertyId);
 
     boolean useGetOutOfJailCard();
+
+    boolean payJailFine();
 }

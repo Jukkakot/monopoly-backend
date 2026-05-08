@@ -270,6 +270,33 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         return true;
     }
 
+    @Override
+    public boolean payJailFine() {
+        SessionState state = store.get();
+        String activePlayerId = state.turn().activePlayerId();
+        if (activePlayerId == null) return false;
+
+        PlayerSnapshot activePlayer = findPlayer(state, activePlayerId);
+        if (activePlayer == null || !activePlayer.inJail()) return false;
+        if (activePlayer.cash() < GET_OUT_OF_JAIL_FEE) return false;
+
+        store.update(s -> {
+            List<PlayerSnapshot> updated = s.players().stream()
+                    .map(p -> activePlayerId.equals(p.playerId())
+                            ? new PlayerSnapshot(p.playerId(), p.seatId(), p.name(),
+                                    p.cash() - GET_OUT_OF_JAIL_FEE,
+                                    p.boardIndex(), p.bankrupt(), p.eliminated(), false, 0,
+                                    p.getOutOfJailCards(), p.ownedPropertyIds())
+                            : p)
+                    .toList();
+            return s.toBuilder()
+                    .players(updated)
+                    .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                    .build();
+        });
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers: jail
     // -------------------------------------------------------------------------
@@ -414,8 +441,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             return;
         }
         List<String> values = CardDeckLoader.cardValues(bundleName, cardKey);
+        String cardText = CardDeckLoader.cardText(bundleName, cardKey);
         log.info("Player {} drew {} card [{}] values={}", playerId, bundleName, cardKey, values);
 
+        store.update(s -> s.toBuilder().lastCardMessage(cardText).build());
         applyCardEffect(playerId, cardType, values, isDoubles, consecutiveDoubles, diceTotal);
     }
 

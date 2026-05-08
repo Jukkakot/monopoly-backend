@@ -116,6 +116,9 @@ public final class SessionCommandMapper {
             case "UseGetOutOfJailCard" -> new UseGetOutOfJailCardCommand(
                     sessionId,
                     node.path("actorPlayerId").asText());
+            case "PayJailFine" -> new PayJailFineCommand(
+                    sessionId,
+                    node.path("actorPlayerId").asText());
             default -> throw new IllegalArgumentException("Unknown command type: " + type);
         };
     }

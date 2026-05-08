@@ -211,5 +211,10 @@ class TurnActionCommandHandlerTest {
         public boolean useGetOutOfJailCard() {
             return true;
         }
+
+        @Override
+        public boolean payJailFine() {
+            return true;
+        }
     }
 }

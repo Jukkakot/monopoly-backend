@@ -27,7 +27,8 @@ public final class TurnActionCommandHandler {
                 || command instanceof EndTurnCommand
                 || command instanceof BuyBuildingRoundCommand
                 || command instanceof ToggleMortgageCommand
-                || command instanceof UseGetOutOfJailCardCommand;
+                || command instanceof UseGetOutOfJailCardCommand
+                || command instanceof PayJailFineCommand;
     }
 
     public CommandResult handle(SessionCommand command) {
@@ -45,6 +46,9 @@ public final class TurnActionCommandHandler {
         }
         if (command instanceof UseGetOutOfJailCardCommand useCardCommand) {
             return handleUseGetOutOfJailCard(useCardCommand);
+        }
+        if (command instanceof PayJailFineCommand payFineCommand) {
+            return handlePayJailFine(payFineCommand);
         }
         return rejected("UNSUPPORTED_TURN_ACTION", "Turn action command is not supported");
     }
@@ -138,6 +142,26 @@ public final class TurnActionCommandHandler {
         return gateway.useGetOutOfJailCard()
                 ? accepted("GetOutOfJailCardUsed", command.actorPlayerId())
                 : rejected("CARD_USE_FAILED", "Get-out-of-jail card could not be used");
+    }
+
+    private CommandResult handlePayJailFine(PayJailFineCommand command) {
+        if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
+            return rejected("WRONG_TURN_ACTOR", "Only the active player can pay the jail fine");
+        }
+        SessionState state = currentStateSupplier.get();
+        if (state.turn().phase() != TurnPhase.WAITING_FOR_ROLL) {
+            return rejected("FINE_NOT_ALLOWED", "Jail fine can only be paid during the rolling phase");
+        }
+        PlayerSnapshot player = findPlayer(state, command.actorPlayerId());
+        if (player == null || !player.inJail()) {
+            return rejected("NOT_IN_JAIL", "Player is not in jail");
+        }
+        if (player.cash() < 50) {
+            return rejected("INSUFFICIENT_FUNDS", "Not enough cash to pay the jail fine (need €50)");
+        }
+        return gateway.payJailFine()
+                ? accepted("JailFinePaid", command.actorPlayerId())
+                : rejected("FINE_PAYMENT_FAILED", "Jail fine payment failed");
     }
 
     private static PropertyStateSnapshot findPropertyOwnedBy(SessionState state, String propertyId, String actorPlayerId) {

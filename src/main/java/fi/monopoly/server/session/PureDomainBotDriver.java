@@ -82,6 +82,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 initialState.sessionId().substring(0, 8), botIds,
                 botIds.stream().collect(java.util.stream.Collectors.toMap(
                         id -> id, id -> difficulties.getOrDefault(id, BotDifficulty.NORMAL))));
+        // Trigger initial check so a bot-first turn starts without waiting for a human command.
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(initialState, true));
         return driver;
     }
 
