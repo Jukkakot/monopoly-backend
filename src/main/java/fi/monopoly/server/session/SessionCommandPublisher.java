@@ -7,9 +7,12 @@ import fi.monopoly.client.session.ClientSessionSnapshot;
 import fi.monopoly.client.session.ClientSessionUpdates;
 import fi.monopoly.client.session.SessionCommandPort;
 import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.server.transport.GlobalMetrics;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -40,6 +43,15 @@ public final class SessionCommandPublisher implements SessionCommandPort, Client
     private final SessionCommandPort delegate;
     private final List<ClientSessionListener> listeners = new CopyOnWriteArrayList<>();
 
+    /** LRU cache for command-id deduplication. Max 1024 entries. */
+    @SuppressWarnings("serial")
+    private final Map<String, CommandResult> commandIdCache = new LinkedHashMap<>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, CommandResult> eldest) {
+            return size() > 1024;
+        }
+    };
+
     public SessionCommandPublisher(SessionCommandPort delegate) {
         this.delegate = delegate;
     }
@@ -47,8 +59,29 @@ public final class SessionCommandPublisher implements SessionCommandPort, Client
     @Override
     public synchronized CommandResult handle(SessionCommand command) {
         CommandResult result = delegate.handle(command);
+        GlobalMetrics.recordCommand(result.accepted());
         if (result.accepted()) {
             publishSnapshot();
+        }
+        return result;
+    }
+
+    /**
+     * Idempotent variant of {@link #handle}: if {@code commandId} is non-null and was seen
+     * before, returns the cached result without re-executing the command.
+     */
+    public synchronized CommandResult handleIdempotent(SessionCommand command, String commandId) {
+        if (commandId != null) {
+            CommandResult cached = commandIdCache.get(commandId);
+            if (cached != null) return cached;
+        }
+        CommandResult result = delegate.handle(command);
+        GlobalMetrics.recordCommand(result.accepted());
+        if (result.accepted()) {
+            publishSnapshot();
+        }
+        if (commandId != null) {
+            commandIdCache.put(commandId, result);
         }
         return result;
     }

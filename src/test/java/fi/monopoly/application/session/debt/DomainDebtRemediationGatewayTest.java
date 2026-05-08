@@ -259,6 +259,43 @@ class DomainDebtRemediationGatewayTest {
         assertFalse(new DomainDebtRemediationGateway(store).canSellBuildingRoundsAcrossSet("B1", 2, PLAYER_1));
     }
 
+    @Test
+    void canSellRoundsReturnsFalseForZeroRounds() {
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 500), null,
+                debt(PLAYER_1, null, 200),
+                List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 3, 0),
+                        new PropertyStateSnapshot("B2", PLAYER_1, false, 3, 0)));
+        assertFalse(new DomainDebtRemediationGateway(store).canSellBuildingRoundsAcrossSet("B1", 0, PLAYER_1));
+    }
+
+    @Test
+    void canSellRoundsReturnsFalseForNonStreet() {
+        // RR1 is a railroad, not a STREET placeType
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 500), null,
+                debt(PLAYER_1, null, 200),
+                List.of(new PropertyStateSnapshot("RR1", PLAYER_1, false, 0, 0)));
+        assertFalse(new DomainDebtRemediationGateway(store).canSellBuildingRoundsAcrossSet("RR1", 1, PLAYER_1));
+    }
+
+    @Test
+    void canSellRoundsReturnsFalseWhenOnePropertyOwnedByOtherPlayer() {
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 500), player(PLAYER_2, 200),
+                debt(PLAYER_1, null, 200),
+                List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 2, 0),
+                        new PropertyStateSnapshot("B2", PLAYER_2, false, 2, 0)));
+        assertFalse(new DomainDebtRemediationGateway(store).canSellBuildingRoundsAcrossSet("B1", 1, PLAYER_1));
+    }
+
+    @Test
+    void canSellRoundsAcceptsHotelAsLevel5() {
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 500), null,
+                debt(PLAYER_1, null, 200),
+                List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 0, 1),
+                        new PropertyStateSnapshot("B2", PLAYER_1, false, 0, 1)));
+        assertTrue(new DomainDebtRemediationGateway(store).canSellBuildingRoundsAcrossSet("B1", 5, PLAYER_1));
+        assertFalse(new DomainDebtRemediationGateway(store).canSellBuildingRoundsAcrossSet("B1", 6, PLAYER_1));
+    }
+
     // -------------------------------------------------------------------------
     // sellBuildingRoundsAcrossSet
     // -------------------------------------------------------------------------
@@ -275,6 +312,40 @@ class DomainDebtRemediationGatewayTest {
         assertEquals(2, propertyById(store.get(), "B1").houseCount());
         assertEquals(2, propertyById(store.get(), "B2").houseCount());
         assertEquals(100 + 2 * (B1_HOUSE_PRICE / 2), playerById(store.get(), PLAYER_1).cash());
+    }
+
+    @Test
+    void sellBuildingRoundsDowngradeHotelToHouses() {
+        // B1+B2 each have 1 hotel (level 5). Sell 1 round → level 4 = 4 houses.
+        // Proceeds = 2 * (50/2) = 50
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 100), null,
+                debt(PLAYER_1, null, 200),
+                List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 0, 1),
+                        new PropertyStateSnapshot("B2", PLAYER_1, false, 0, 1)));
+        new DomainDebtRemediationGateway(store).sellBuildingRoundsAcrossSet("B1", 1);
+
+        PropertyStateSnapshot b1 = propertyById(store.get(), "B1");
+        PropertyStateSnapshot b2 = propertyById(store.get(), "B2");
+        assertEquals(4, b1.houseCount());
+        assertEquals(0, b1.hotelCount());
+        assertEquals(4, b2.houseCount());
+        assertEquals(100 + 2 * (B1_HOUSE_PRICE / 2), playerById(store.get(), PLAYER_1).cash());
+    }
+
+    @Test
+    void sellBuildingRoundsOnlyAffectsMatchingColorSet() {
+        // B1+B2 (brown) each have 2 houses; LB1 (light-blue) has 3 houses.
+        // Selling rounds on B1 must not touch LB1.
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 100), null,
+                debt(PLAYER_1, null, 200),
+                List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 2, 0),
+                        new PropertyStateSnapshot("B2", PLAYER_1, false, 2, 0),
+                        new PropertyStateSnapshot("LB1", PLAYER_1, false, 3, 0)));
+        new DomainDebtRemediationGateway(store).sellBuildingRoundsAcrossSet("B1", 2);
+
+        assertEquals(0, propertyById(store.get(), "B1").houseCount());
+        assertEquals(0, propertyById(store.get(), "B2").houseCount());
+        assertEquals(3, propertyById(store.get(), "LB1").houseCount(), "LB1 must not be touched");
     }
 
     // -------------------------------------------------------------------------

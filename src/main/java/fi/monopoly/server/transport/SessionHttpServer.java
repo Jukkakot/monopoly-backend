@@ -1,5 +1,6 @@
 package fi.monopoly.server.transport;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import fi.monopoly.application.command.SessionCommand;
@@ -53,6 +54,8 @@ public final class SessionHttpServer {
     private final SessionCommandMapper commandMapper;
     private final SessionRegistry registry;
 
+    private final long startTimeMs = System.currentTimeMillis();
+
     private Javalin app;
 
     /** Single-session constructor (backward-compatible). No {@code /sessions} endpoints. */
@@ -89,17 +92,31 @@ public final class SessionHttpServer {
         // CORS — unconditional, matching old behavior (browsers require Origin header anyway)
         app.before(ctx -> {
             ctx.header("Access-Control-Allow-Origin", "*");
-            ctx.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            ctx.header("Access-Control-Allow-Headers", "Content-Type");
+            ctx.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+            ctx.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
         });
         app.options("/*", ctx -> ctx.status(204));
 
-        app.get("/health", ctx -> ctx.json(Map.of("status", "ok")));
+        app.get("/health", ctx -> {
+            int activeSessions = registry != null ? registry.list().size() : -1;
+            long uptimeSeconds = (System.currentTimeMillis() - startTimeMs) / 1000;
+            ctx.json(Map.of(
+                    "status", "ok",
+                    "sessions", activeSessions,
+                    "uptimeSeconds", uptimeSeconds,
+                    "version", "1.0-SNAPSHOT"
+            ));
+        });
         app.get("/openapi.yaml", ctx -> {
             ctx.contentType("text/yaml");
             var stream = getClass().getResourceAsStream("/openapi.yaml");
             if (stream != null) ctx.result(stream);
             else ctx.status(404).result("openapi.yaml not found");
+        });
+        app.get("/metrics", ctx -> {
+            int activeSessions = registry != null ? registry.list().size() : 0;
+            ctx.contentType("text/plain; version=0.0.4; charset=utf-8")
+               .result(GlobalMetrics.prometheusText(activeSessions));
         });
         app.get("/docs", ctx -> {
             ctx.contentType("text/html");
@@ -134,6 +151,12 @@ public final class SessionHttpServer {
         if (registry != null) {
             app.get("/sessions", ctx -> ctx.json(registry.list()));
             app.post("/sessions", this::handleSessionsCreate);
+            app.delete("/sessions/{id}", ctx -> {
+                String id = ctx.pathParam("id");
+                if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+                registry.remove(id);
+                ctx.status(204);
+            });
             app.post("/sessions/{id}/command", ctx ->
                     handleCommandFor(ctx, requireSession(ctx)));
             app.get("/sessions/{id}/snapshot", ctx ->
@@ -166,8 +189,17 @@ public final class SessionHttpServer {
 
     private void handleCommandFor(Context ctx, SessionCommandPort port) {
         try {
-            SessionCommand command = commandMapper.fromJson(ctx.bodyAsBytes());
-            CommandResult result = port.handle(command);
+            byte[] body = ctx.bodyAsBytes();
+            SessionCommand command = commandMapper.fromJson(body);
+
+            CommandResult result;
+            if (port instanceof SessionCommandPublisher publisher) {
+                String commandId = extractCommandId(body);
+                result = publisher.handleIdempotent(command, commandId);
+            } else {
+                result = port.handle(command);
+            }
+
             ctx.status(result.accepted() ? 200 : 422)
                .json(new CommandResultView(result.accepted(), result.rejections()));
         } catch (IllegalArgumentException e) {
@@ -176,6 +208,15 @@ public final class SessionHttpServer {
             log.error("Error handling command", e);
             ctx.status(500).json(Map.of("error", "Internal server error"));
         }
+    }
+
+    private String extractCommandId(byte[] body) {
+        try {
+            JsonNode node = objectMapper.readTree(body);
+            JsonNode cid = node.get("commandId");
+            if (cid != null && !cid.isNull() && cid.isTextual()) return cid.asText();
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private void handleSessionsCreate(Context ctx) {
@@ -224,10 +265,15 @@ public final class SessionHttpServer {
     // -------------------------------------------------------------------------
 
     /**
-     * Sets up an SSE connection: subscribes to session updates, sends the initial snapshot,
+     * Sets up an SSE connection: subscribes to session updates, sends the initial snapshot
+     * (unless the client already has the current version via {@code Last-Event-ID}),
      * then calls {@link SseClient#keepAlive()} to hold the connection open asynchronously.
      * Future snapshots are pushed directly from the listener callback. The listener is removed
      * when the client disconnects (via the {@code onClose} hook).
+     *
+     * <p>Each SSE event carries the full {@link ClientSessionSnapshot} including its
+     * {@code version} field. Clients that reconnect should pass the version they last received
+     * as the {@code Last-Event-ID} header to avoid replaying an already-known snapshot.</p>
      */
     private void streamEvents(
             SseClient client,
@@ -245,9 +291,22 @@ public final class SessionHttpServer {
         updates.addListener(listener);
         client.onClose(() -> updates.removeListener(listener));
         try {
-            client.sendEvent(snapshotSupplier.get());
+            ClientSessionSnapshot current = snapshotSupplier.get();
+            long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
+            if (clientVersion < current.version()) {
+                client.sendEvent(current);
+            }
         } catch (Exception ignored) {}
         client.keepAlive();
+    }
+
+    private static long parseLastEventId(String header) {
+        if (header == null || header.isBlank()) return -1L;
+        try {
+            return Long.parseLong(header.trim());
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 
     // -------------------------------------------------------------------------

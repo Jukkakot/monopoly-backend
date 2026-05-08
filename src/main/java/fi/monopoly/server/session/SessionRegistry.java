@@ -5,6 +5,7 @@ import fi.monopoly.domain.session.BotDifficulty;
 import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.domain.session.SeatState;
 import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.server.transport.GlobalMetrics;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -80,6 +81,7 @@ public final class SessionRegistry {
                 publisher, initialState, difficultyMap);
         sessions.put(sessionId, new Entry(publisher, List.copyOf(names), botDriver));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
+        GlobalMetrics.recordSessionCreated();
         return sessionId;
     }
 

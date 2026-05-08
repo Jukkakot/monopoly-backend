@@ -2,7 +2,6 @@
 
     <property name="LOG_DIR" value="${user.dir}/logs/app"/>
     <property name="CONSOLE_LOG_PATTERN" value="%highlight(%d{HH:mm:ss.SSS} %-5level) %boldCyan([turn=%X{turnPlayer:-}]) %logger{28} - %msg%n"/>
-    <property name="FILE_LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [turn=%X{turnPlayer:-}] %logger{28} - %msg%n"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
@@ -14,11 +13,9 @@
     </appender>
 
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <encoder>
-            <pattern>${FILE_LOG_PATTERN}</pattern>
-        </encoder>
+        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_DIR}/monopoly.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <fileNamePattern>${LOG_DIR}/monopoly.%d{yyyy-MM-dd}.jsonl</fileNamePattern>
             <maxHistory>10</maxHistory>
             <totalSizeCap>200MB</totalSizeCap>
             <cleanHistoryOnStart>true</cleanHistoryOnStart>
@@ -36,11 +33,9 @@
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>ERROR</level>
         </filter>
-        <encoder>
-            <pattern>${FILE_LOG_PATTERN}</pattern>
-        </encoder>
+        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_DIR}/ERROR-monopoly.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <fileNamePattern>${LOG_DIR}/ERROR-monopoly.%d{yyyy-MM-dd}.jsonl</fileNamePattern>
             <maxHistory>10</maxHistory>
             <totalSizeCap>100MB</totalSizeCap>
             <cleanHistoryOnStart>true</cleanHistoryOnStart>
