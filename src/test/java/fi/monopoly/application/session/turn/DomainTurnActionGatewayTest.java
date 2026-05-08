@@ -665,6 +665,11 @@ class DomainTurnActionGatewayTest {
                 cash, JAIL_INDEX, false, false, true, jailRoundsRemaining, 0, List.of());
     }
 
+    private static PlayerSnapshot playerInJailWithCard(String playerId, int cash, int jailRoundsRemaining, int cards) {
+        return new PlayerSnapshot(playerId, "seat-0", playerId,
+                cash, JAIL_INDEX, false, false, true, jailRoundsRemaining, cards, List.of());
+    }
+
     private static PlayerSnapshot playerById(SessionState state, String playerId) {
         return state.players().stream()
                 .filter(p -> playerId.equals(p.playerId()))
@@ -785,6 +790,90 @@ class DomainTurnActionGatewayTest {
 
         assertEquals(1510, playerById(store.get(), PLAYER_1).cash()); // +10
         assertEquals(990, playerById(store.get(), PLAYER_2).cash());   // -10
+    }
+
+    // -------------------------------------------------------------------------
+    // useGetOutOfJailCard
+    // -------------------------------------------------------------------------
+
+    @Test
+    void useGetOutOfJailCardReleasesPlayerAndConsumesCard() {
+        InMemorySessionState store = storeWith(playerInJailWithCard(PLAYER_1, 1500, 2, 1));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        assertTrue(gateway.useGetOutOfJailCard());
+
+        PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
+        assertFalse(updated.inJail());
+        assertEquals(0, updated.jailRoundsRemaining());
+        assertEquals(0, updated.getOutOfJailCards());
+        assertEquals(TurnPhase.WAITING_FOR_ROLL, store.get().turn().phase());
+    }
+
+    @Test
+    void useGetOutOfJailCardReturnsFalseWhenNotInJail() {
+        InMemorySessionState store = storeWith(player(PLAYER_1, GO_INDEX, 1500));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        assertFalse(gateway.useGetOutOfJailCard());
+    }
+
+    @Test
+    void useGetOutOfJailCardReturnsFalseWhenNoCardHeld() {
+        InMemorySessionState store = storeWith(playerInJail(PLAYER_1, 1500, 2));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        assertFalse(gateway.useGetOutOfJailCard());
+    }
+
+    // -------------------------------------------------------------------------
+    // payJailFine
+    // -------------------------------------------------------------------------
+
+    @Test
+    void payJailFineReleasesPlayerAndDeductsFiftyEuros() {
+        InMemorySessionState store = storeWith(playerInJail(PLAYER_1, 1500, 2));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        assertTrue(gateway.payJailFine());
+
+        PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
+        assertFalse(updated.inJail());
+        assertEquals(0, updated.jailRoundsRemaining());
+        assertEquals(1450, updated.cash());
+        assertEquals(TurnPhase.WAITING_FOR_ROLL, store.get().turn().phase());
+    }
+
+    @Test
+    void payJailFineReturnsFalseWhenNotInJail() {
+        InMemorySessionState store = storeWith(player(PLAYER_1, GO_INDEX, 1500));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        assertFalse(gateway.payJailFine());
+    }
+
+    @Test
+    void payJailFineReturnsFalseWhenInsufficientCash() {
+        InMemorySessionState store = storeWith(playerInJail(PLAYER_1, 30, 2));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        assertFalse(gateway.payJailFine());
+    }
+
+    // -------------------------------------------------------------------------
+    // endTurn — lastCardMessage cleared
+    // -------------------------------------------------------------------------
+
+    @Test
+    void endTurnClearsLastCardMessage() {
+        InMemorySessionState store = storeWithTwoPlayers(
+                player(PLAYER_1, GO_INDEX, 1500), player(PLAYER_2, GO_INDEX, 1500), null);
+        store.update(s -> s.toBuilder().lastCardMessage("Advance to GO").build());
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 2);
+
+        gateway.endTurn();
+
+        assertNull(store.get().lastCardMessage());
     }
 
     // -------------------------------------------------------------------------

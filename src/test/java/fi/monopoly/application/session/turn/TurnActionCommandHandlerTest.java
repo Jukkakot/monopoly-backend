@@ -2,8 +2,10 @@ package fi.monopoly.application.session.turn;
 
 import fi.monopoly.application.command.BuyBuildingRoundCommand;
 import fi.monopoly.application.command.EndTurnCommand;
+import fi.monopoly.application.command.PayJailFineCommand;
 import fi.monopoly.application.command.RollDiceCommand;
 import fi.monopoly.application.command.ToggleMortgageCommand;
+import fi.monopoly.application.command.UseGetOutOfJailCardCommand;
 import fi.monopoly.domain.session.ControlMode;
 import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
@@ -109,6 +111,132 @@ class TurnActionCommandHandlerTest {
         assertFalse(gateway.toggledMortgage);
     }
 
+    // -------------------------------------------------------------------------
+    // UseGetOutOfJailCard
+    // -------------------------------------------------------------------------
+
+    @Test
+    void acceptsUseGetOutOfJailCardWhenInJailAndHasCard() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_ROLL, 1, 200), gateway);
+
+        var result = handler.handle(new UseGetOutOfJailCardCommand("local-session", "player-1"));
+        assertTrue(result.accepted());
+        assertTrue(gateway.usedJailCard);
+    }
+
+    @Test
+    void rejectsUseGetOutOfJailCardWhenNotInJail() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionState(TurnPhase.WAITING_FOR_ROLL), gateway);
+
+        var result = handler.handle(new UseGetOutOfJailCardCommand("local-session", "player-1"));
+        assertFalse(result.accepted());
+        assertEquals("NOT_IN_JAIL", result.rejections().getFirst().code());
+        assertFalse(gateway.usedJailCard);
+    }
+
+    @Test
+    void rejectsUseGetOutOfJailCardWhenNoCard() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_ROLL, 0, 200), gateway);
+
+        var result = handler.handle(new UseGetOutOfJailCardCommand("local-session", "player-1"));
+        assertFalse(result.accepted());
+        assertEquals("NO_CARD", result.rejections().getFirst().code());
+        assertFalse(gateway.usedJailCard);
+    }
+
+    @Test
+    void rejectsUseGetOutOfJailCardInWrongPhase() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_END_TURN, 1, 200), gateway);
+
+        var result = handler.handle(new UseGetOutOfJailCardCommand("local-session", "player-1"));
+        assertFalse(result.accepted());
+        assertEquals("CARD_NOT_ALLOWED", result.rejections().getFirst().code());
+        assertFalse(gateway.usedJailCard);
+    }
+
+    @Test
+    void rejectsUseGetOutOfJailCardForWrongActor() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_ROLL, 1, 200), gateway);
+
+        var result = handler.handle(new UseGetOutOfJailCardCommand("local-session", "player-2"));
+        assertFalse(result.accepted());
+        assertEquals("WRONG_TURN_ACTOR", result.rejections().getFirst().code());
+        assertFalse(gateway.usedJailCard);
+    }
+
+    // -------------------------------------------------------------------------
+    // PayJailFine
+    // -------------------------------------------------------------------------
+
+    @Test
+    void acceptsPayJailFineWhenInJailAndHasCash() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_ROLL, 0, 200), gateway);
+
+        var result = handler.handle(new PayJailFineCommand("local-session", "player-1"));
+        assertTrue(result.accepted());
+        assertTrue(gateway.paidJailFine);
+    }
+
+    @Test
+    void rejectsPayJailFineWhenNotInJail() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionState(TurnPhase.WAITING_FOR_ROLL), gateway);
+
+        var result = handler.handle(new PayJailFineCommand("local-session", "player-1"));
+        assertFalse(result.accepted());
+        assertEquals("NOT_IN_JAIL", result.rejections().getFirst().code());
+        assertFalse(gateway.paidJailFine);
+    }
+
+    @Test
+    void rejectsPayJailFineWhenInsufficientCash() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_ROLL, 0, 30), gateway);
+
+        var result = handler.handle(new PayJailFineCommand("local-session", "player-1"));
+        assertFalse(result.accepted());
+        assertEquals("INSUFFICIENT_FUNDS", result.rejections().getFirst().code());
+        assertFalse(gateway.paidJailFine);
+    }
+
+    @Test
+    void rejectsPayJailFineInWrongPhase() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_END_TURN, 0, 200), gateway);
+
+        var result = handler.handle(new PayJailFineCommand("local-session", "player-1"));
+        assertFalse(result.accepted());
+        assertEquals("FINE_NOT_ALLOWED", result.rejections().getFirst().code());
+        assertFalse(gateway.paidJailFine);
+    }
+
+    @Test
+    void rejectsPayJailFineForWrongActor() {
+        FakeGateway gateway = new FakeGateway();
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session",
+                () -> sessionStateInJail(TurnPhase.WAITING_FOR_ROLL, 0, 200), gateway);
+
+        var result = handler.handle(new PayJailFineCommand("local-session", "player-2"));
+        assertFalse(result.accepted());
+        assertEquals("WRONG_TURN_ACTOR", result.rejections().getFirst().code());
+        assertFalse(gateway.paidJailFine);
+    }
+
     @Test
     void rejectsMortgageOfStreetWhenColorGroupHasBuildings() {
         FakeGateway gateway = new FakeGateway();
@@ -133,6 +261,23 @@ class TurnActionCommandHandlerTest {
                 SessionStatus.IN_PROGRESS,
                 List.of(new SeatState("seat-1", 0, "player-1", SeatKind.BOT, ControlMode.MANUAL, "Bot", "STRONG", "#FFC0CB")),
                 List.of(new PlayerSnapshot("player-1", "seat-1", "Bot", 1500, SpotType.GO_SPOT.ordinal(), false, false, false, 0, 0, List.of())),
+                List.of(),
+                new TurnState("player-1", phase, false, false),
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+    }
+
+    private SessionState sessionStateInJail(TurnPhase phase, int jailCards, int cash) {
+        return new SessionState(
+                "local-session",
+                0L,
+                SessionStatus.IN_PROGRESS,
+                List.of(new SeatState("seat-1", 0, "player-1", SeatKind.BOT, ControlMode.MANUAL, "Bot", "STRONG", "#FFC0CB")),
+                List.of(new PlayerSnapshot("player-1", "seat-1", "Bot", cash, 10 /* JAIL */, false, false, true, 2, jailCards, List.of())),
                 List.of(),
                 new TurnState("player-1", phase, false, false),
                 null,
@@ -182,6 +327,8 @@ class TurnActionCommandHandlerTest {
         private boolean endedTurn;
         private boolean boughtBuildingRound;
         private boolean toggledMortgage;
+        private boolean usedJailCard;
+        private boolean paidJailFine;
 
         @Override
         public boolean rollDice() {
@@ -209,11 +356,13 @@ class TurnActionCommandHandlerTest {
 
         @Override
         public boolean useGetOutOfJailCard() {
+            usedJailCard = true;
             return true;
         }
 
         @Override
         public boolean payJailFine() {
+            paidJailFine = true;
             return true;
         }
     }

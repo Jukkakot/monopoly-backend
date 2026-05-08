@@ -156,6 +156,52 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // EASY mode: passes some auction bids even when affordable
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void easyBotPassesSomeAuctionBidsOverManyTrials() throws InterruptedException {
+        int bids = 0;
+        int passes = 0;
+        int trials = 20;
+
+        for (int i = 0; i < trials; i++) {
+            OneShotRecorder recorder = new OneShotRecorder();
+            SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+            AuctionState auction = new AuctionState(
+                    "auction-" + i, "B1", "other-player",
+                    BOT_PLAYER, null,
+                    10, 10,
+                    Set.of(), List.of(BOT_PLAYER),
+                    AuctionStatus.ACTIVE,
+                    0, null
+            );
+            SessionState state = buildState(
+                    new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false),
+                    null, null, List.of());
+            state = state.toBuilder()
+                    .auctionState(auction)
+                    .players(List.of(new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 1, false, false, false, 0, 0, List.of())))
+                    .build();
+            recorder.initState(state);
+
+            PureDomainBotDriver d = PureDomainBotDriver.createAndRegisterIfNeeded(
+                    publisher, state, Map.of(BOT_PLAYER, BotDifficulty.EASY));
+            d.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+            recorder.firstCommand.await(3, TimeUnit.SECONDS);
+            d.stop();
+
+            bids += (int) recorder.commands.stream().filter(c -> c instanceof PlaceAuctionBidCommand).count();
+            passes += (int) recorder.commands.stream().filter(c -> c instanceof PassAuctionCommand).count();
+        }
+
+        assertTrue(passes > 0, "EASY bot should pass at least some affordable bids over " + trials + " trials");
+        assertTrue(bids > 0, "EASY bot should still bid some affordable auctions over " + trials + " trials");
+    }
+
+    // -------------------------------------------------------------------------
     // NORMAL mode: unmortgages when owns full group
     // -------------------------------------------------------------------------
 

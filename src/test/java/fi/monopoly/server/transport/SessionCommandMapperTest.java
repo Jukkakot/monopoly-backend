@@ -208,6 +208,24 @@ class SessionCommandMapperTest {
     }
 
     @Test
+    void useGetOutOfJailCard() throws IOException {
+        var cmd = (UseGetOutOfJailCardCommand) mapper.fromJson("""
+                {"type":"UseGetOutOfJailCard","sessionId":"s1","actorPlayerId":"p1"}
+                """.getBytes());
+        assertEquals("s1", cmd.sessionId());
+        assertEquals("p1", cmd.actorPlayerId());
+    }
+
+    @Test
+    void payJailFine() throws IOException {
+        var cmd = (PayJailFineCommand) mapper.fromJson("""
+                {"type":"PayJailFine","sessionId":"s1","actorPlayerId":"p1"}
+                """.getBytes());
+        assertEquals("s1", cmd.sessionId());
+        assertEquals("p1", cmd.actorPlayerId());
+    }
+
+    @Test
     void unknownTypeThrows() {
         assertThrows(IllegalArgumentException.class, () ->
                 mapper.fromJson("{\"type\":\"UnknownCommand\",\"sessionId\":\"s1\"}".getBytes()));
