@@ -8,5 +8,5 @@ RUN mvn package -DskipTests -q
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /build/target/monopoly-backend.jar monopoly-backend.jar
-EXPOSE 8080
+EXPOSE 10000
 ENTRYPOINT ["java", "-jar", "monopoly-backend.jar"]

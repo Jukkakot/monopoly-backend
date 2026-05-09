@@ -43,9 +43,9 @@ public final class BackendMain {
             try {
                 return Integer.parseInt(env.trim());
             } catch (NumberFormatException e) {
-                log.warn("Invalid PORT env var '{}', using 8080", env);
+                log.warn("Invalid PORT env var '{}', using 10000", env);
             }
         }
-        return 8080;
+        return 10000;
     }
 }
