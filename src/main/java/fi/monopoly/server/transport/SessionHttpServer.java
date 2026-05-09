@@ -85,90 +85,88 @@ public final class SessionHttpServer {
 
     public void start() {
         app = Javalin.create(config -> {
-            config.useVirtualThreads = true;
+            config.concurrency.useVirtualThreads = true;
             config.jsonMapper(new JavalinJackson(objectMapper, false));
-        });
 
-        // CORS — unconditional, matching old behavior (browsers require Origin header anyway)
-        app.before(ctx -> {
-            ctx.header("Access-Control-Allow-Origin", "*");
-            ctx.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-            ctx.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
-        });
-        app.options("/*", ctx -> ctx.status(204));
-
-        app.get("/health", ctx -> {
-            int activeSessions = registry != null ? registry.list().size() : -1;
-            long uptimeSeconds = (System.currentTimeMillis() - startTimeMs) / 1000;
-            ctx.json(Map.of(
-                    "status", "ok",
-                    "sessions", activeSessions,
-                    "uptimeSeconds", uptimeSeconds,
-                    "version", "1.0-SNAPSHOT"
-            ));
-        });
-        app.get("/openapi.yaml", ctx -> {
-            ctx.contentType("text/yaml");
-            var stream = getClass().getResourceAsStream("/openapi.yaml");
-            if (stream != null) ctx.result(stream);
-            else ctx.status(404).result("openapi.yaml not found");
-        });
-        app.get("/metrics", ctx -> {
-            int activeSessions = registry != null ? registry.list().size() : 0;
-            ctx.contentType("text/plain; version=0.0.4; charset=utf-8")
-               .result(GlobalMetrics.prometheusText(activeSessions));
-        });
-        app.get("/docs", ctx -> {
-            ctx.contentType("text/html");
-            ctx.result("""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                  <title>Monopoly API</title>
-                  <meta charset="utf-8"/>
-                  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-                </head>
-                <body>
-                  <div id="swagger-ui"></div>
-                  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-                  <script>
-                    SwaggerUIBundle({ url: '/openapi.yaml', dom_id: '#swagger-ui', tryItOutEnabled: true,
-                                      layout: 'BaseLayout', deepLinking: true });
-                  </script>
-                </body>
-                </html>
-                """);
-        });
-
-        // Single-session endpoints — only registered when single-session params are wired up
-        if (commandPort != null && sessionUpdates != null && snapshotSupplier != null) {
-            app.post("/command", ctx -> handleCommandFor(ctx, commandPort));
-            app.get("/snapshot", ctx -> ctx.json(snapshotSupplier.get()));
-            app.sse("/events", client -> streamEvents(client, sessionUpdates, snapshotSupplier));
-        }
-
-        // Multi-session endpoints
-        if (registry != null) {
-            app.get("/sessions", ctx -> ctx.json(registry.list()));
-            app.post("/sessions", this::handleSessionsCreate);
-            app.delete("/sessions/{id}", ctx -> {
-                String id = ctx.pathParam("id");
-                if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-                registry.remove(id);
-                ctx.status(204);
+            // CORS — unconditional, matching old behavior (browsers require Origin header anyway)
+            config.routes.before(ctx -> {
+                ctx.header("Access-Control-Allow-Origin", "*");
+                ctx.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+                ctx.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
             });
-            app.post("/sessions/{id}/command", ctx ->
-                    handleCommandFor(ctx, requireSession(ctx)));
-            app.get("/sessions/{id}/snapshot", ctx ->
-                    ctx.json(requireSession(ctx).currentSnapshot()));
-            app.sse("/sessions/{id}/events", client -> {
-                Optional<SessionCommandPublisher> pub = registry.get(client.ctx().pathParam("id"));
-                if (pub.isEmpty()) return;
-                streamEvents(client, pub.get(), pub.get()::currentSnapshot);
-            });
-        }
+            config.routes.options("/*", ctx -> ctx.status(204));
 
-        app.start(port);
+            config.routes.get("/health", ctx -> {
+                int activeSessions = registry != null ? registry.list().size() : -1;
+                long uptimeSeconds = (System.currentTimeMillis() - startTimeMs) / 1000;
+                ctx.json(Map.of(
+                        "status", "ok",
+                        "sessions", activeSessions,
+                        "uptimeSeconds", uptimeSeconds,
+                        "version", "1.0-SNAPSHOT"
+                ));
+            });
+            config.routes.get("/openapi.yaml", ctx -> {
+                ctx.contentType("text/yaml");
+                var stream = getClass().getResourceAsStream("/openapi.yaml");
+                if (stream != null) ctx.result(stream);
+                else ctx.status(404).result("openapi.yaml not found");
+            });
+            config.routes.get("/metrics", ctx -> {
+                int activeSessions = registry != null ? registry.list().size() : 0;
+                ctx.contentType("text/plain; version=0.0.4; charset=utf-8")
+                   .result(GlobalMetrics.prometheusText(activeSessions));
+            });
+            config.routes.get("/docs", ctx -> {
+                ctx.contentType("text/html");
+                ctx.result("""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                      <title>Monopoly API</title>
+                      <meta charset="utf-8"/>
+                      <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+                    </head>
+                    <body>
+                      <div id="swagger-ui"></div>
+                      <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+                      <script>
+                        SwaggerUIBundle({ url: '/openapi.yaml', dom_id: '#swagger-ui', tryItOutEnabled: true,
+                                          layout: 'BaseLayout', deepLinking: true });
+                      </script>
+                    </body>
+                    </html>
+                    """);
+            });
+
+            // Single-session endpoints — only registered when single-session params are wired up
+            if (commandPort != null && sessionUpdates != null && snapshotSupplier != null) {
+                config.routes.post("/command", ctx -> handleCommandFor(ctx, commandPort));
+                config.routes.get("/snapshot", ctx -> ctx.json(snapshotSupplier.get()));
+                config.routes.sse("/events", client -> streamEvents(client, sessionUpdates, snapshotSupplier));
+            }
+
+            // Multi-session endpoints
+            if (registry != null) {
+                config.routes.get("/sessions", ctx -> ctx.json(registry.list()));
+                config.routes.post("/sessions", this::handleSessionsCreate);
+                config.routes.delete("/sessions/{id}", ctx -> {
+                    String id = ctx.pathParam("id");
+                    if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+                    registry.remove(id);
+                    ctx.status(204);
+                });
+                config.routes.post("/sessions/{id}/command", ctx ->
+                        handleCommandFor(ctx, requireSession(ctx)));
+                config.routes.get("/sessions/{id}/snapshot", ctx ->
+                        ctx.json(requireSession(ctx).currentSnapshot()));
+                config.routes.sse("/sessions/{id}/events", client -> {
+                    Optional<SessionCommandPublisher> pub = registry.get(client.ctx().pathParam("id"));
+                    if (pub.isEmpty()) return;
+                    streamEvents(client, pub.get(), pub.get()::currentSnapshot);
+                });
+            }
+        }).start(port);
         log.info("Session HTTP server started on port {}", port);
     }
 
