@@ -188,7 +188,8 @@ public final class SessionHttpServer {
     private void handleCommandFor(Context ctx, SessionCommandPort port) {
         try {
             byte[] body = ctx.bodyAsBytes();
-            SessionCommand command = commandMapper.fromJson(body);
+            String pathSessionId = ctx.pathParamMap().containsKey("id") ? ctx.pathParam("id") : null;
+            SessionCommand command = commandMapper.fromJson(body, pathSessionId);
 
             CommandResult result;
             if (port instanceof SessionCommandPublisher publisher) {

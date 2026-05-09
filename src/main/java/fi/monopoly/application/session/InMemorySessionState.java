@@ -24,6 +24,7 @@ public final class InMemorySessionState implements SessionStateStore {
 
     @Override
     public synchronized void update(UnaryOperator<SessionState> mutator) {
-        state = mutator.apply(state);
+        SessionState next = mutator.apply(state);
+        state = next.toBuilder().version(state.version() + 1).build();
     }
 }

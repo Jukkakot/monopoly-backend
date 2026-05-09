@@ -16,9 +16,11 @@ info:
 
     ## Commands
 
-    All commands share a `type` discriminator field and a `sessionId` field.
-    Most also require `actorPlayerId`. The server returns HTTP 200 with
-    `accepted: true` on success, or HTTP 422 with rejection details on failure.
+    All commands share a `type` discriminator field. Most also require
+    `actorPlayerId`. When submitting via `POST /sessions/{id}/command` the
+    `sessionId` body field is optional — the server fills it from the URL path.
+    The server returns HTTP 200 with `accepted: true` on success, or HTTP 422
+    with rejection details on failure.
 
     ## CORS
 
@@ -779,7 +781,7 @@ components:
     # Base shared by most commands
     BaseCommand:
       type: object
-      required: [type, sessionId]
+      required: [type]
       properties:
         type:
           type: string
@@ -787,6 +789,10 @@ components:
         sessionId:
           type: string
           format: uuid
+          description: |
+            Session identifier. Optional when submitting via
+            `POST /sessions/{id}/command` — the server uses the path parameter.
+            Required when using the single-session `POST /command` endpoint.
         commandId:
           type: string
           format: uuid

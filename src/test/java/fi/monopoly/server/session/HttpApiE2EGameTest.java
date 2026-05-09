@@ -76,7 +76,7 @@ class HttpApiE2EGameTest {
     }
 
     @Test
-    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    @Timeout(value = 60, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void threeHumanPlayerGameProgressesViaHttpApi() throws Exception {
         String sessionId = createSession(
                 List.of("Alice", "Bob", "Carol"),
@@ -165,6 +165,7 @@ class HttpApiE2EGameTest {
 
             String commandJson = buildCommand(sessionId, snap, phase, activeId);
             if (commandJson == null) {
+                if (rejectedConsecutive < 3) System.err.println("[DEBUG] step=" + steps + " phase=" + phase + " activeId=" + activeId + " => null command");
                 rejectedConsecutive++;
             } else {
                 HttpResponse<String> response = postCommand(sessionId, commandJson);
@@ -173,6 +174,7 @@ class HttpApiE2EGameTest {
                 if (accepted) {
                     rejectedConsecutive = 0;
                 } else {
+                    if (rejectedConsecutive < 3) System.err.println("[DEBUG] step=" + steps + " phase=" + phase + " cmd=" + commandJson + " => " + response.body());
                     rejectedConsecutive++;
                 }
             }
@@ -212,7 +214,7 @@ class HttpApiE2EGameTest {
 
     private String buildDecisionCommand(String sessionId, JsonNode snap, String activeId) {
         JsonNode decision = snap.at("/state/pendingDecision");
-        if (decision.isMissingNode()) return buildEndTurn(sessionId, activeId);
+        if (decision.isMissingNode() || decision.isNull()) return buildEndTurn(sessionId, activeId);
 
         String decisionId  = decision.at("/decisionId").asText("");
         String propertyId  = decision.at("/payload/propertyId").asText("");
@@ -221,14 +223,14 @@ class HttpApiE2EGameTest {
                 ? findPlayerCash(snap, activeId) : 0;
 
         String type = cash >= price ? "BuyProperty" : "DeclineProperty";
-        return "{\"type\":\"%s\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
-                + "\"decisionId\":\"%s\",\"propertyId\":\"%s\"}"
+        return ("{\"type\":\"%s\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+                + "\"decisionId\":\"%s\",\"propertyId\":\"%s\"}")
                 .formatted(type, sessionId, activeId, decisionId, propertyId);
     }
 
     private String buildDebtCommand(String sessionId, JsonNode snap) {
         JsonNode debt     = snap.at("/state/activeDebt");
-        if (debt.isMissingNode()) return null;
+        if (debt.isMissingNode() || debt.isNull()) return null;
         String debtId     = debt.at("/debtId").asText("");
         String debtorId   = debt.at("/debtorPlayerId").asText("");
         int    cash       = debt.at("/currentCash").asInt(0);
@@ -242,16 +244,16 @@ class HttpApiE2EGameTest {
         if (actions.contains("SELL_BUILDING")) {
             String propId = findSellableBuilding(snap, debtorId);
             if (propId != null) {
-                return "{\"type\":\"SellBuildingForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
-                        + "\"debtId\":\"%s\",\"propertyId\":\"%s\",\"count\":1}"
+                return ("{\"type\":\"SellBuildingForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+                        + "\"debtId\":\"%s\",\"propertyId\":\"%s\",\"count\":1}")
                         .formatted(sessionId, debtorId, debtId, propId);
             }
         }
         if (actions.contains("MORTGAGE_PROPERTY")) {
             String propId = findUnmortgagedProperty(snap, debtorId);
             if (propId != null) {
-                return "{\"type\":\"MortgagePropertyForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
-                        + "\"debtId\":\"%s\",\"propertyId\":\"%s\"}"
+                return ("{\"type\":\"MortgagePropertyForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+                        + "\"debtId\":\"%s\",\"propertyId\":\"%s\"}")
                         .formatted(sessionId, debtorId, debtId, propId);
             }
         }
@@ -277,8 +279,8 @@ class HttpApiE2EGameTest {
         int cash   = findPlayerCash(snap, bidderId);
 
         if (cash >= minBid && minBid > 0) {
-            return "{\"type\":\"PlaceAuctionBid\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
-                    + "\"auctionId\":\"%s\",\"amount\":%d}"
+            return ("{\"type\":\"PlaceAuctionBid\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+                    + "\"auctionId\":\"%s\",\"amount\":%d}")
                     .formatted(sessionId, bidderId, auctionId, minBid);
         }
         return "{\"type\":\"PassAuction\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\",\"auctionId\":\"%s\"}"

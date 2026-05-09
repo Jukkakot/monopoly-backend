@@ -18,9 +18,18 @@ public final class SessionCommandMapper {
     private final ObjectMapper objectMapper;
 
     public SessionCommand fromJson(byte[] json) throws IOException {
+        return fromJson(json, null);
+    }
+
+    /**
+     * Like {@link #fromJson(byte[])}, but uses {@code pathSessionId} when present so that
+     * callers on path-based routes (e.g. {@code POST /sessions/{id}/command}) don't need to
+     * repeat the session id inside the request body.
+     */
+    public SessionCommand fromJson(byte[] json, String pathSessionId) throws IOException {
         JsonNode node = objectMapper.readTree(json);
         String type = node.path("type").asText();
-        String sessionId = node.path("sessionId").asText();
+        String sessionId = pathSessionId != null ? pathSessionId : node.path("sessionId").asText();
         return switch (type) {
             case "RollDice" -> new RollDiceCommand(
                     sessionId,

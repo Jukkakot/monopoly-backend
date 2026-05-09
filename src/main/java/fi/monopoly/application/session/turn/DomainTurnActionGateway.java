@@ -84,11 +84,11 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         int newConsecutive = isDoubles ? state.turn().consecutiveDoubles() + 1 : 0;
 
         log.debug("rollDice player={} die1={} die2={} total={} doubles={} consecutive={}",
-                activePlayerId, die1, die2, total, isDoubles, newConsecutive);
+                activePlayer.name(), die1, die2, total, isDoubles, newConsecutive);
 
         // Third consecutive doubles → jail without collecting GO
         if (newConsecutive >= MAX_CONSECUTIVE_DOUBLES) {
-            log.info("Player {} sent to jail for {} consecutive doubles", activePlayerId, newConsecutive);
+            log.info("Player {} sent to jail for {} consecutive doubles", activePlayer.name(), newConsecutive);
             store.update(s -> applyGoToJail(s, activePlayerId));
             return true;
         }
@@ -106,7 +106,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         SpotType landedSpot = SpotType.SPOT_TYPES.get(newIndex);
 
         if (landedSpot == SpotType.GO_TO_JAIL) {
-            log.info("Player {} landed on Go To Jail", activePlayerId);
+            log.info("Player {} landed on Go To Jail", activePlayer.name());
             // No GO reward even if passed GO on the way to GO_TO_JAIL (standard rules)
             store.update(s -> applyGoToJail(s, activePlayerId));
             return true;
@@ -308,7 +308,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         int roundsLeft = activePlayer.jailRoundsRemaining();
 
         if (isDoubles) {
-            log.info("Player {} rolled doubles and escapes jail", playerId);
+            log.info("Player {} rolled doubles and escapes jail", activePlayer.name());
             int rawNew = JAIL_INDEX + total;
             int newIndex = rawNew % BOARD_SIZE;
             boolean passedGo = rawNew >= BOARD_SIZE;
@@ -327,7 +327,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
             }
         } else if (roundsLeft <= 1) {
-            log.info("Player {} must pay jail fine (last round), total={}", playerId, total);
+            log.info("Player {} must pay jail fine (last round), total={}", activePlayer.name(), total);
             int rawNew = JAIL_INDEX + total;
             int newIndex = rawNew % BOARD_SIZE;
             boolean passedGo = rawNew >= BOARD_SIZE;
@@ -345,7 +345,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
             }
         } else {
-            log.debug("Player {} stays in jail, roundsLeft → {}", playerId, roundsLeft - 1);
+            log.debug("Player {} stays in jail, roundsLeft → {}", activePlayer.name(), roundsLeft - 1);
             store.update(s -> {
                 List<PlayerSnapshot> updated = s.players().stream()
                         .map(p -> playerId.equals(p.playerId())
@@ -444,7 +444,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         }
         List<String> values = CardDeckLoader.cardValues(bundleName, cardKey);
         String cardText = CardDeckLoader.cardText(bundleName, cardKey);
-        log.info("Player {} drew {} card [{}] values={}", playerId, bundleName, cardKey, values);
+        PlayerSnapshot cardPlayer = findPlayer(state, playerId);
+        log.info("Player {} drew {} card [{}] values={}", cardPlayer != null ? cardPlayer.name() : playerId, bundleName, cardKey, values);
 
         store.update(s -> s.toBuilder().lastCardMessage(cardText).build());
         applyCardEffect(playerId, cardType, values, isDoubles, consecutiveDoubles, diceTotal);
