@@ -326,6 +326,7 @@ class TurnActionCommandHandlerTest {
         private boolean rolledDice;
         private boolean endedTurn;
         private boolean boughtBuildingRound;
+        private boolean soldBuildingRound;
         private boolean toggledMortgage;
         private boolean usedJailCard;
         private boolean paidJailFine;
@@ -346,6 +347,12 @@ class TurnActionCommandHandlerTest {
         public boolean buyBuildingRound(String propertyId) {
             boughtBuildingRound = SpotType.O1.name().equals(propertyId);
             return boughtBuildingRound;
+        }
+
+        @Override
+        public boolean sellBuildingRound(String propertyId) {
+            soldBuildingRound = SpotType.O1.name().equals(propertyId);
+            return soldBuildingRound;
         }
 
         @Override
