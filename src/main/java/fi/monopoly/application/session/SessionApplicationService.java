@@ -208,7 +208,10 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 && (command instanceof RollDiceCommand
                 || command instanceof EndTurnCommand
                 || command instanceof BuyBuildingRoundCommand
-                || command instanceof ToggleMortgageCommand)) {
+                || command instanceof SellBuildingRoundCommand
+                || command instanceof ToggleMortgageCommand
+                || command instanceof UseGetOutOfJailCardCommand
+                || command instanceof PayJailFineCommand)) {
             return turnActionCommandHandler.handle(command);
         }
         if (command instanceof RefreshSessionViewCommand refreshSessionViewCommand) {
