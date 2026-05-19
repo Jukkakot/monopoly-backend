@@ -26,6 +26,7 @@ public final class TurnActionCommandHandler {
         return command instanceof RollDiceCommand
                 || command instanceof EndTurnCommand
                 || command instanceof BuyBuildingRoundCommand
+                || command instanceof SellBuildingRoundCommand
                 || command instanceof ToggleMortgageCommand
                 || command instanceof UseGetOutOfJailCardCommand
                 || command instanceof PayJailFineCommand;
@@ -40,6 +41,9 @@ public final class TurnActionCommandHandler {
         }
         if (command instanceof BuyBuildingRoundCommand buyBuildingRoundCommand) {
             return handleBuyBuildingRound(buyBuildingRoundCommand);
+        }
+        if (command instanceof SellBuildingRoundCommand sellBuildingRoundCommand) {
+            return handleSellBuildingRound(sellBuildingRoundCommand);
         }
         if (command instanceof ToggleMortgageCommand toggleMortgageCommand) {
             return handleToggleMortgage(toggleMortgageCommand);
@@ -85,6 +89,16 @@ public final class TurnActionCommandHandler {
             return rejected("BUILD_ROUND_FAILED", "Building round purchase failed");
         }
         return accepted("BuildingRoundBought", command.propertyId());
+    }
+
+    private CommandResult handleSellBuildingRound(SellBuildingRoundCommand command) {
+        if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
+            return rejected("WRONG_TURN_ACTOR", "Only the active player can sell buildings");
+        }
+        if (!gateway.sellBuildingRound(command.propertyId())) {
+            return rejected("SELL_ROUND_FAILED", "Building round sale failed");
+        }
+        return accepted("BuildingRoundSold", command.propertyId());
     }
 
     private CommandResult handleToggleMortgage(ToggleMortgageCommand command) {

@@ -127,6 +127,11 @@ public final class SessionCommandSerializer {
                 node.put("actorPlayerId", c.actorPlayerId());
                 node.put("propertyId", c.propertyId());
             }
+            case SellBuildingRoundCommand c -> {
+                node.put("type", "SellBuildingRound");
+                node.put("actorPlayerId", c.actorPlayerId());
+                node.put("propertyId", c.propertyId());
+            }
             case ToggleMortgageCommand c -> {
                 node.put("type", "ToggleMortgage");
                 node.put("actorPlayerId", c.actorPlayerId());

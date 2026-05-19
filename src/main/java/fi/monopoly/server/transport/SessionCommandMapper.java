@@ -117,6 +117,10 @@ public final class SessionCommandMapper {
                     sessionId,
                     node.path("actorPlayerId").asText(),
                     node.path("propertyId").asText());
+            case "SellBuildingRound" -> new SellBuildingRoundCommand(
+                    sessionId,
+                    node.path("actorPlayerId").asText(),
+                    node.path("propertyId").asText());
             case "ToggleMortgage" -> new ToggleMortgageCommand(
                     sessionId,
                     node.path("actorPlayerId").asText(),

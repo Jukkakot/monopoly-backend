@@ -209,6 +209,89 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     }
 
     @Override
+    public boolean sellBuildingRound(String propertyId) {
+        SpotType spotType;
+        try {
+            spotType = SpotType.valueOf(propertyId);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        if (spotType.streetType.placeType != PlaceType.STREET) return false;
+
+        SessionState state = store.get();
+        String activePlayerId = state.turn().activePlayerId();
+        if (activePlayerId == null) return false;
+
+        PropertyStateSnapshot targetProp = findProperty(state, propertyId);
+        if (targetProp == null) return false;
+        if (!activePlayerId.equals(targetProp.ownerPlayerId())) return false;
+        if (targetProp.houseCount() == 0 && targetProp.hotelCount() == 0) return false;
+
+        List<SpotType> colorSet = spotsOfType(spotType.streetType);
+
+        // Even building rule: this property must be at the MAX level in the group
+        int targetLevel = targetProp.hotelCount() > 0 ? 5 : targetProp.houseCount();
+        int maxLevelInSet = colorSet.stream()
+                .mapToInt(s -> {
+                    PropertyStateSnapshot p = findProperty(state, s.name());
+                    return (p == null) ? 0 : (p.hotelCount() > 0 ? 5 : p.houseCount());
+                })
+                .max().orElse(0);
+        if (targetLevel < maxLevelInSet) return false;
+
+        int housePrice = spotType.getIntegerProperty("housePrice");
+        if (housePrice <= 0) return false;
+
+        int saleProceeds = housePrice / 2;
+        boolean sellingHotel = targetProp.hotelCount() > 0;
+
+        if (sellingHotel) {
+            // Hotel → 4 houses (need bank house supply)
+            int totalHouses = state.properties().stream().mapToInt(PropertyStateSnapshot::houseCount).sum();
+            if (totalHouses + 4 > BANK_HOUSE_SUPPLY) {
+                // Not enough houses in bank — hotel can still be sold but becomes 0 (rare rule variant)
+                store.update(s -> {
+                    List<PropertyStateSnapshot> updatedProps = s.properties().stream()
+                            .map(p -> p.propertyId().equals(propertyId)
+                                    ? new PropertyStateSnapshot(p.propertyId(), p.ownerPlayerId(), p.mortgaged(), 0, 0)
+                                    : p)
+                            .toList();
+                    return s.toBuilder()
+                            .properties(updatedProps)
+                            .players(updateCash(s.players(), activePlayerId, saleProceeds))
+                            .build();
+                });
+            } else {
+                store.update(s -> {
+                    List<PropertyStateSnapshot> updatedProps = s.properties().stream()
+                            .map(p -> p.propertyId().equals(propertyId)
+                                    ? new PropertyStateSnapshot(p.propertyId(), p.ownerPlayerId(), p.mortgaged(), 4, 0)
+                                    : p)
+                            .toList();
+                    return s.toBuilder()
+                            .properties(updatedProps)
+                            .players(updateCash(s.players(), activePlayerId, saleProceeds))
+                            .build();
+                });
+            }
+        } else {
+            store.update(s -> {
+                List<PropertyStateSnapshot> updatedProps = s.properties().stream()
+                        .map(p -> p.propertyId().equals(propertyId)
+                                ? new PropertyStateSnapshot(p.propertyId(), p.ownerPlayerId(), p.mortgaged(),
+                                        p.houseCount() - 1, 0)
+                                : p)
+                        .toList();
+                return s.toBuilder()
+                        .properties(updatedProps)
+                        .players(updateCash(s.players(), activePlayerId, saleProceeds))
+                        .build();
+            });
+        }
+        return true;
+    }
+
+    @Override
     public boolean toggleMortgage(String propertyId) {
         try {
             SpotType.valueOf(propertyId);
