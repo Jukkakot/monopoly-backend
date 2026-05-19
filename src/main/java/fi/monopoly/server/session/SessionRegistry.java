@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -72,7 +71,7 @@ public final class SessionRegistry {
      */
     public String create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
                          List<BotDifficulty> difficulties) {
-        String sessionId = UUID.randomUUID().toString();
+        String sessionId = SessionIdGenerator.generate();
         SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, initialState);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
@@ -140,7 +139,7 @@ public final class SessionRegistry {
         long cutoff = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(TTL_MINUTES);
         lastActivityAt.entrySet().removeIf(entry -> {
             if (entry.getValue() < cutoff) {
-                log.info("Evicting idle session {} (idle > {} min)", entry.getKey().substring(0, 8), TTL_MINUTES);
+                log.info("Evicting idle session {} (idle > {} min)", entry.getKey(), TTL_MINUTES);
                 Entry session = sessions.remove(entry.getKey());
                 if (session != null && session.botDriver() != null) {
                     session.botDriver().stop();
