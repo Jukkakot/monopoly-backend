@@ -25,6 +25,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
     private volatile DebtStateModel activeDebt;
     private volatile TradeState tradeState;
     private volatile TurnContinuationState turnContinuation;
+    private volatile SessionStatus statusOverride;
 
     public OverlaySessionStateStore(Supplier<SessionState> baseSupplier) {
         this.baseSupplier = baseSupplier;
@@ -43,7 +44,9 @@ public final class OverlaySessionStateStore implements SessionStateStore {
             pd = null;
         }
         TurnState turn = computeTurnPhase(base.turn(), pd, as, ad, ts);
+        SessionStatus status = statusOverride != null ? statusOverride : base.status();
         return base.toBuilder()
+                .status(status)
                 .turn(turn)
                 .pendingDecision(pd)
                 .auctionState(as)
@@ -81,6 +84,10 @@ public final class OverlaySessionStateStore implements SessionStateStore {
 
     public void setTurnContinuation(TurnContinuationState tcs) {
         this.turnContinuation = tcs;
+    }
+
+    public void setStatusOverride(SessionStatus status) {
+        this.statusOverride = status;
     }
 
     public boolean hasAuctionState() {

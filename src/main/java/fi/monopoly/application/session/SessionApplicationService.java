@@ -214,6 +214,13 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 || command instanceof PayJailFineCommand)) {
             return turnActionCommandHandler.handle(command);
         }
+        if (command instanceof AbortGameCommand abortCmd) {
+            if (!sessionId.equals(abortCmd.sessionId())) {
+                return rejected("WRONG_SESSION", "Command session does not match active session");
+            }
+            overlay.setStatusOverride(SessionStatus.GAME_OVER);
+            return accepted();
+        }
         if (command instanceof RefreshSessionViewCommand refreshSessionViewCommand) {
             if (!sessionId.equals(refreshSessionViewCommand.sessionId())) {
                 return rejected("WRONG_SESSION", "Command session does not match active session");

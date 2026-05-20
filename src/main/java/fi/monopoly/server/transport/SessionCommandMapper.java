@@ -132,6 +132,9 @@ public final class SessionCommandMapper {
             case "PayJailFine" -> new PayJailFineCommand(
                     sessionId,
                     node.path("actorPlayerId").asText());
+            case "AbortGame" -> new AbortGameCommand(
+                    sessionId,
+                    node.path("actorPlayerId").asText());
             default -> throw new IllegalArgumentException("Unknown command type: " + type);
         };
     }
