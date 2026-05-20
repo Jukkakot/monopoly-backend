@@ -17,7 +17,7 @@ import java.util.*;
  */
 public final class CardDeckLoader {
 
-    private static final Locale DEFAULT_LOCALE = Locale.ENGLISH;
+    private static final Locale DEFAULT_LOCALE = Locale.forLanguageTag("fi");
     private static final String ENTRY_DELIMITER = "#";
     private static final String VALUE_DELIMITER = ";";
 
