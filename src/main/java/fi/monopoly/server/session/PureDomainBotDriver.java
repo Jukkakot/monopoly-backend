@@ -38,8 +38,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public final class PureDomainBotDriver implements ClientSessionListener {
 
-    private static final long BOT_THINK_DELAY_MS =
-            Long.getLong("monopoly.bot.think.delay.ms", 600L);
+    /** Fallback delay used when situational logic cannot determine a better value. */
+    private static final long BOT_FALLBACK_DELAY_MS =
+            Long.getLong("monopoly.bot.think.delay.ms", 700L);
 
     private final SessionCommandPublisher publisher;
     private final String sessionId;
@@ -113,7 +114,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (!pendingAction.compareAndSet(false, true)) {
             return;
         }
-        scheduler.schedule(this::takeStep, BOT_THINK_DELAY_MS, TimeUnit.MILLISECONDS);
+        scheduler.schedule(this::takeStep, computeDelay(snapshot.state()), TimeUnit.MILLISECONDS);
     }
 
     // -------------------------------------------------------------------------
@@ -421,6 +422,87 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         } else {
             publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Delay computation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Computes a human-like delay before the bot acts, based on what the current state demands.
+     * Harder bots react slightly faster; easier bots are more hesitant.
+     * A ±20 % random jitter is applied on top.
+     */
+    private long computeDelay(SessionState state) {
+        if (BOT_FALLBACK_DELAY_MS == 0) return 0;  // instant mode (tests / system property = 0)
+        long base = computeBaseDelay(state);
+        String actorId = resolveActorId(state);
+        BotDifficulty diff = actorId != null
+                ? difficulties.getOrDefault(actorId, BotDifficulty.NORMAL)
+                : BotDifficulty.NORMAL;
+        double diffMult = switch (diff) {
+            case EASY   -> 1.25;   // hesitant, slower
+            case NORMAL -> 1.0;
+            case STRONG -> 0.80;   // more decisive
+        };
+        long scaled = Math.max(200L, (long) (base * diffMult));
+        long jitter = (long) (scaled * 0.20);
+        return scaled + ThreadLocalRandom.current().nextLong(-jitter, jitter + 1);
+    }
+
+    private long computeBaseDelay(SessionState state) {
+        // Trade decision: evaluating someone else's offer — most deliberate action
+        if (state.tradeState() != null) {
+            TradeState trade = state.tradeState();
+            if (trade.decisionRequiredFromPlayerId() != null) {
+                return 2200;  // reading the offer, weighing it
+            }
+            if (trade.status() == TradeStatus.EDITING) {
+                return 900;   // filling in individual offer steps
+            }
+        }
+
+        // Debt: stress level depends on available options
+        if (state.activeDebt() != null) {
+            DebtStateModel debt = state.activeDebt();
+            List<DebtAction> allowed = debt.allowedActions();
+            if (allowed.size() == 1 && allowed.contains(DebtAction.DECLARE_BANKRUPTCY)) {
+                return 3500;  // dramatic — last resort
+            }
+            if (allowed.contains(DebtAction.PAY_DEBT_NOW)
+                    && debt.currentCash() >= debt.amountRemaining()) {
+                return 800;   // has money, just pays
+            }
+            return 2000;      // needs to liquidate assets, thinking hard
+        }
+
+        // Auction
+        if (state.auctionState() != null) {
+            AuctionState auction = state.auctionState();
+            if (auction.status() == AuctionStatus.WON_PENDING_RESOLUTION) {
+                return 500;   // winner confirming pickup — quick
+            }
+            return 1100;      // deciding whether to bid
+        }
+
+        // Normal turn phases
+        if (state.turn() == null) return BOT_FALLBACK_DELAY_MS;
+        return switch (state.turn().phase()) {
+            case WAITING_FOR_ROLL -> 1200;  // pause before throwing dice
+            case WAITING_FOR_DECISION -> {
+                // Buying a property: longer think when affordable, quick decline when broke
+                PendingDecision decision = state.pendingDecision();
+                if (decision != null
+                        && decision.payload() instanceof PropertyPurchaseDecisionPayload purchase) {
+                    PlayerSnapshot actor = findPlayer(state, state.turn().activePlayerId());
+                    int cash = actor != null ? actor.cash() : 0;
+                    yield cash >= purchase.price() ? 2000 : 700;
+                }
+                yield 900;
+            }
+            case WAITING_FOR_END_TURN -> 700;  // reviewing board briefly before ending
+            default -> BOT_FALLBACK_DELAY_MS;
+        };
     }
 
     // -------------------------------------------------------------------------
