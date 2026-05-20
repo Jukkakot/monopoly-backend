@@ -558,7 +558,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         PlayerSnapshot cardPlayer = findPlayer(state, playerId);
         log.info("Player {} drew {} card [{}] values={}", cardPlayer != null ? cardPlayer.name() : playerId, bundleName, cardKey, values);
 
-        store.update(s -> s.toBuilder().lastCardMessage(cardText).build());
+        final String fullCardKey = bundleName + ":" + cardKey;
+        store.update(s -> s.toBuilder().lastCardMessage(cardText).lastCardKey(fullCardKey).build());
         applyCardEffect(playerId, cardType, values, isDoubles, consecutiveDoubles, diceTotal);
     }
 
