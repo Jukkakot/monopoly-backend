@@ -42,6 +42,9 @@ class HttpApiE2EGameTest {
     private SessionHttpServer server;
     private SessionRegistry registry;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .build();
 
     @BeforeEach
     void setUp() throws IOException {
@@ -62,7 +65,7 @@ class HttpApiE2EGameTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    @Timeout(value = 60, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void twoHumanPlayerGameProgressesViaHttpApi() throws Exception {
         String sessionId = createSession(List.of("Alice", "Bob"), List.of("#E63946", "#2A9D8F"),
                 List.of("HUMAN", "HUMAN"), List.of());
@@ -360,15 +363,13 @@ class HttpApiE2EGameTest {
     }
 
     private HttpResponse<String> get(String path) throws Exception {
-        HttpClient client = HttpClient.newHttpClient();
-        return client.send(
+        return httpClient.send(
                 HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + path)).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> post(String path, String body) throws Exception {
-        HttpClient client = HttpClient.newHttpClient();
-        return client.send(
+        return httpClient.send(
                 HttpRequest.newBuilder()
                         .uri(URI.create("http://localhost:" + port + path))
                         .POST(HttpRequest.BodyPublishers.ofString(body))

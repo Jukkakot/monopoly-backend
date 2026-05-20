@@ -64,6 +64,7 @@ public final class PureDomainSessionFactory {
                         service.openPropertyPurchaseDecision(playerId, propertyId, displayName, price, message, continuation)
         );
         service.configureTurnActionFlow(turnActionGateway);
+        service.configurePostPropertyPurchasePause(turnActionGateway::pauseAfterPropertyPurchase);
 
         service.configureDebtRemediationFlow(new DomainDebtRemediationGateway(store));
         service.configureTradeFlow(new DomainTradeGateway(store));

@@ -111,6 +111,12 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
         this.turnContinuationGateway = gateway;
     }
 
+    public void configurePostPropertyPurchasePause(java.util.function.Consumer<TurnContinuationState> pauseAction) {
+        if (propertyPurchaseCommandHandler != null) {
+            propertyPurchaseCommandHandler.setPostPurchasePauseAction(pauseAction);
+        }
+    }
+
     public PendingDecision openPropertyPurchaseDecision(
             String playerId,
             String propertyId,

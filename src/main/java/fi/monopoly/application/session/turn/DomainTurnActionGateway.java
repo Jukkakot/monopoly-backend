@@ -52,6 +52,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     private final SessionStateStore store;
     private final PropertyPurchaseFlow propertyPurchaseFlow;
     private final IntSupplier singleDieSupplier;
+    private TurnContinuationState pendingPostPurchaseContinuation;
 
     public DomainTurnActionGateway(SessionStateStore store, PropertyPurchaseFlow propertyPurchaseFlow) {
         this(store, propertyPurchaseFlow, () -> 1 + ThreadLocalRandom.current().nextInt(6));
@@ -123,8 +124,35 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         return true;
     }
 
+    public void pauseAfterPropertyPurchase(TurnContinuationState continuation) {
+        pendingPostPurchaseContinuation = continuation;
+        store.update(s -> s.toBuilder()
+                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, s.turn().consecutiveDoubles()))
+                .build());
+    }
+
     @Override
     public boolean endTurn() {
+        TurnContinuationState pending = pendingPostPurchaseContinuation;
+        pendingPostPurchaseContinuation = null;
+        if (pending != null) {
+            switch (pending.completionAction()) {
+                case APPLY_TURN_FOLLOW_UP -> store.update(s -> s.toBuilder()
+                        .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles()))
+                        .lastCardMessage(null)
+                        .build());
+                case END_TURN_WITH_SWITCH -> store.update(s -> {
+                    String next = DomainTurnContinuationGateway.nextActivePlayerId(s, s.turn().activePlayerId());
+                    if (next == null) return s;
+                    return s.toBuilder()
+                            .turn(new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                            .lastCardMessage(null)
+                            .build();
+                });
+                default -> { /* fall through to normal end-turn */ }
+            }
+            return true;
+        }
         store.update(state -> {
             String next = DomainTurnContinuationGateway.nextActivePlayerId(state, state.turn().activePlayerId());
             if (next == null) return state;

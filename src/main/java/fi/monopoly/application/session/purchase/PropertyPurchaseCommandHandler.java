@@ -32,6 +32,11 @@ public final class PropertyPurchaseCommandHandler {
     private final PropertyPurchaseGateway gateway;
     private final AuctionCommandHandler auctionCommandHandler;
     private PropertyPurchaseContext activeContext;
+    private Consumer<TurnContinuationState> postPurchasePauseAction;
+
+    public void setPostPurchasePauseAction(Consumer<TurnContinuationState> action) {
+        this.postPurchasePauseAction = action;
+    }
 
     public PendingDecision openDecision(
             String playerId,
@@ -112,7 +117,11 @@ public final class PropertyPurchaseCommandHandler {
         auctionStateSetter.accept(null);
         turnContinuationSetter.accept(null);
         activeContext = null;
-        turnContinuationResolver.accept(continuationState);
+        if (postPurchasePauseAction != null) {
+            postPurchasePauseAction.accept(continuationState);
+        } else {
+            turnContinuationResolver.accept(continuationState);
+        }
         return new CommandResult(
                 true,
                 currentStateSupplier.get(),
