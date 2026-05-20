@@ -45,7 +45,10 @@ public final class PureDomainSessionFactory {
      * routed to those handlers will be rejected with {@code UNSUPPORTED_COMMAND}.</p>
      */
     public static SessionApplicationService create(String sessionId, SessionState initialState) {
-        InMemorySessionState store = new InMemorySessionState(initialState);
+        return create(sessionId, new InMemorySessionState(initialState));
+    }
+
+    public static SessionApplicationService create(String sessionId, InMemorySessionState store) {
         OverlaySessionStateStore overlay = new OverlaySessionStateStore(store::get);
 
         SessionApplicationService service = new SessionApplicationService(sessionId, overlay);
@@ -156,6 +159,39 @@ public final class PureDomainSessionFactory {
      */
     static List<Integer> determineStartOrder(List<Integer> candidates, Random rng) {
         return StartingOrderDeterminer.determineStartOrder(candidates, rng);
+    }
+
+    /**
+     * Builds a LOBBY state with {@code seatCount} unclaimed seats.
+     *
+     * <p>Each seat is pre-assigned a colour but has no player name yet ({@code joined=false}).
+     * Players claim seats via the {@code POST /sessions/{id}/join} endpoint. The session
+     * transitions to {@code IN_PROGRESS} when {@code POST /sessions/{id}/start} is called.</p>
+     */
+    public static SessionState lobbyInitialState(String sessionId, int seatCount, List<String> colors) {
+        List<SeatState> seats = new ArrayList<>();
+        List<PlayerSnapshot> players = new ArrayList<>();
+        List<PropertyStateSnapshot> properties = SpotType.SPOT_TYPES.stream()
+                .filter(s -> s.isProperty)
+                .map(s -> new PropertyStateSnapshot(s.name(), null, false, 0, 0))
+                .toList();
+        for (int i = 0; i < seatCount; i++) {
+            String color = i < colors.size() ? colors.get(i) : "#AAAAAA";
+            String playerId = "player-" + (i + 1);
+            String seatId = "seat-" + i;
+            seats.add(new SeatState(seatId, i, playerId, SeatKind.HUMAN, ControlMode.MANUAL,
+                    null, "HUMAN", color, false));
+            players.add(new PlayerSnapshot(playerId, seatId, "", 1500, 0, false, false, false, 0, 0, List.of()));
+        }
+        return SessionState.builder()
+                .sessionId(sessionId)
+                .version(0L)
+                .status(SessionStatus.LOBBY)
+                .seats(seats)
+                .players(players)
+                .properties(properties)
+                .turn(new TurnState(null, TurnPhase.WAITING_FOR_ROLL, false, false, 0))
+                .build();
     }
 
     /**

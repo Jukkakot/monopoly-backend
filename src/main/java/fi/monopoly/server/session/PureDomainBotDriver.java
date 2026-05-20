@@ -103,7 +103,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     @Override
     public void onSnapshotChanged(ClientSessionSnapshot snapshot) {
         SessionState state = snapshot.state();
-        if (state == null || state.status() == SessionStatus.GAME_OVER) {
+        if (state == null || state.status() == SessionStatus.GAME_OVER
+                || state.status() == SessionStatus.LOBBY) {
             return;
         }
         if (!needsBotAction(state)) {
@@ -122,7 +123,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private void takeStep() {
         pendingAction.set(false);
         SessionState state = publisher.currentState();
-        if (state == null || state.status() == SessionStatus.GAME_OVER) {
+        if (state == null || state.status() == SessionStatus.GAME_OVER
+                || state.status() == SessionStatus.LOBBY) {
             return;
         }
         if (!needsBotAction(state)) {

@@ -1,10 +1,8 @@
 package fi.monopoly.server.session;
 
+import fi.monopoly.application.session.InMemorySessionState;
 import fi.monopoly.application.session.SessionApplicationService;
-import fi.monopoly.domain.session.BotDifficulty;
-import fi.monopoly.domain.session.SeatKind;
-import fi.monopoly.domain.session.SeatState;
-import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.domain.session.*;
 import fi.monopoly.server.transport.GlobalMetrics;
 import lombok.extern.slf4j.Slf4j;
 
@@ -36,7 +34,7 @@ public final class SessionRegistry {
             Long.getLong("monopoly.session.ttl.minutes", 120L);
     private static final long CLEANUP_INTERVAL_MINUTES = 5L;
 
-    private record Entry(SessionCommandPublisher publisher, List<String> playerNames, PureDomainBotDriver botDriver) {}
+    private record Entry(SessionCommandPublisher publisher, InMemorySessionState baseStore, List<String> playerNames, PureDomainBotDriver botDriver) {}
 
     private final ConcurrentHashMap<String, Entry> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastActivityAt = new ConcurrentHashMap<>();
@@ -73,15 +71,111 @@ public final class SessionRegistry {
                          List<BotDifficulty> difficulties) {
         String sessionId = SessionIdGenerator.generate();
         SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds);
-        SessionApplicationService service = PureDomainSessionFactory.create(sessionId, initialState);
+        InMemorySessionState baseStore = new InMemorySessionState(initialState);
+        SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
         Map<String, BotDifficulty> difficultyMap = buildDifficultyMap(initialState, difficulties);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, difficultyMap);
-        sessions.put(sessionId, new Entry(publisher, List.copyOf(names), botDriver));
+        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
         return sessionId;
+    }
+
+    /**
+     * Creates a new lobby session with {@code seatCount} unclaimed seats.
+     * Players join via {@link #joinLobby} and the host starts via {@link #startLobbyGame}.
+     */
+    public String createLobby(int seatCount, List<String> colors) {
+        String sessionId = SessionIdGenerator.generate();
+        SessionState initialState = PureDomainSessionFactory.lobbyInitialState(sessionId, seatCount, colors);
+        InMemorySessionState baseStore = new InMemorySessionState(initialState);
+        SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
+        SessionCommandPublisher publisher = new SessionCommandPublisher(service);
+        sessions.put(sessionId, new Entry(publisher, baseStore, List.of(), null));
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+        GlobalMetrics.recordSessionCreated();
+        return sessionId;
+    }
+
+    /**
+     * Claims the first available (unjoined) seat in a LOBBY session.
+     *
+     * @return the claimed {@link SeatState} with updated name/color, or empty if no seat available
+     */
+    public java.util.Optional<SeatState> joinLobby(String sessionId, String name, String color) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return java.util.Optional.empty();
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+
+        final SeatState[] claimed = {null};
+        entry.baseStore().update(state -> {
+            if (state.status() != SessionStatus.LOBBY) return state;
+            SeatState free = state.seats().stream()
+                    .filter(s -> !s.joined())
+                    .findFirst()
+                    .orElse(null);
+            if (free == null) return state;
+            String effectiveColor = (color != null && !color.isBlank()) ? color : free.tokenColorHex();
+            SeatState updated = new SeatState(free.seatId(), free.seatIndex(), free.playerId(),
+                    free.seatKind(), free.controlMode(), name, free.controllerProfileId(),
+                    effectiveColor, true);
+            claimed[0] = updated;
+            List<SeatState> newSeats = state.seats().stream()
+                    .map(s -> s.seatId().equals(free.seatId()) ? updated : s)
+                    .toList();
+            // Update player displayName too
+            List<PlayerSnapshot> newPlayers = state.players().stream()
+                    .map(p -> p.seatId().equals(free.seatId())
+                            ? new PlayerSnapshot(p.playerId(), p.seatId(), name, p.cash(),
+                                    p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                    p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds())
+                            : p)
+                    .toList();
+            return state.toBuilder().seats(newSeats).players(newPlayers).build();
+        });
+        if (claimed[0] == null) return java.util.Optional.empty();
+        entry.publisher().notifyListeners();
+        return java.util.Optional.of(claimed[0]);
+    }
+
+    /**
+     * Starts a lobby game: converts unjoined seats to BOT seats, determines turn order,
+     * transitions status to {@code IN_PROGRESS}, and starts bot drivers.
+     *
+     * @return false if session not found, not in LOBBY state, or fewer than 2 seats joined
+     */
+    public boolean startLobbyGame(String sessionId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return false;
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+
+        SessionState current = entry.baseStore().get();
+        if (current.status() != SessionStatus.LOBBY) return false;
+        long joinedCount = current.seats().stream().filter(SeatState::joined).count();
+        if (joinedCount < 2) return false;
+
+        // Build new game state from joined players + convert unjoined to bots
+        List<String> names = current.seats().stream()
+                .map(s -> s.joined() ? s.displayName() : "Botti " + (s.seatIndex() + 1))
+                .toList();
+        List<String> colors = current.seats().stream().map(SeatState::tokenColorHex).toList();
+        List<SeatKind> kinds = current.seats().stream()
+                .map(s -> s.joined() ? SeatKind.HUMAN : SeatKind.BOT)
+                .toList();
+
+        SessionState gameState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, kinds);
+        entry.baseStore().update(ignored -> gameState);
+
+        Map<String, BotDifficulty> diffMap = new HashMap<>();
+        PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
+                entry.publisher(), gameState, diffMap);
+        sessions.put(sessionId, new Entry(entry.publisher(), entry.baseStore(),
+                names.stream().filter(n -> !n.startsWith("Botti ")).toList(), botDriver));
+
+        entry.publisher().notifyListeners();
+        return true;
     }
 
     private static Map<String, BotDifficulty> buildDifficultyMap(

@@ -8,11 +8,19 @@ info:
 
     ## Session lifecycle
 
-    1. `POST /sessions` to create a session with player names and colours.
-    2. Open `GET /sessions/{id}/events` for a Server-Sent Events stream — the server
-       pushes a full `ClientSessionSnapshot` after every accepted command.
-    3. Submit game actions via `POST /sessions/{id}/command`.
-    4. Poll `GET /sessions/{id}/snapshot` at any time for the current state.
+    ### Immediate start (existing behaviour)
+    1. `POST /sessions` with `names`, `colors`, `seatKinds`, `difficulties`.
+    2. Open `GET /sessions/{id}/events` for SSE updates.
+    3. Submit actions via `POST /sessions/{id}/command`.
+
+    ### Lobby / waiting-room mode (new)
+    1. `POST /sessions` with `lobbyMode: true`, `seatCount`, `colors` — creates a `LOBBY` session.
+    2. Each human player calls `POST /sessions/{id}/join` with their name and colour.
+       The response contains their `playerId` — store it (e.g. in `localStorage`).
+    3. Open `GET /sessions/{id}/events` to watch other players join in real time.
+    4. Any player calls `POST /sessions/{id}/start` once everyone is ready (min 2 joined).
+       Empty seats are filled with bots automatically.
+    5. Game transitions to `IN_PROGRESS` and proceeds normally.
 
     ## Commands
 
@@ -156,6 +164,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /sessions/{sessionId}/join:
+    post:
+      tags: [session]
+      summary: Join a lobby session
+      operationId: joinLobby
+      description: |
+        Claims the first available (unjoined) seat in a `LOBBY` session.
+        Returns the `playerId` assigned to this browser client — store it in
+        `localStorage` keyed by `sessionId` to identify yourself in subsequent commands.
+        Triggers an SSE event so other connected clients see the updated lobby state.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinLobbyRequest'
+            example:
+              name: Jukka
+              color: '#E63946'
+      responses:
+        '200':
+          description: Seat claimed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JoinLobbyResponse'
+        '400':
+          description: Missing or empty `name`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: No available seats or session is not in `LOBBY` state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sessions/{sessionId}/start:
+    post:
+      tags: [session]
+      summary: Start a lobby game
+      operationId: startLobby
+      description: |
+        Transitions a `LOBBY` session to `IN_PROGRESS`.
+        Any unjoined seats are filled with bot players automatically.
+        Requires at least 2 joined players.
+        Triggers an SSE event to all connected clients with the new game state.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Game started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  started:
+                    type: boolean
+                    example: true
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Session not in `LOBBY` state or fewer than 2 players joined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sessions/{sessionId}/command:
     post:
       tags: [session]
@@ -293,15 +384,20 @@ components:
 
     CreateSessionRequest:
       type: object
-      required: [names]
+      description: |
+        Two modes of operation:
+        - **Immediate start** (default): provide `names` (required), `colors`, `seatKinds`, `difficulties`.
+        - **Lobby mode**: set `lobbyMode: true`, provide `seatCount` and `colors`. Players join later via `POST /sessions/{id}/join`.
       properties:
         names:
           type: array
           minItems: 2
-          maxItems: 4
+          maxItems: 6
           items:
             type: string
-          description: Player display names in seat order
+          description: |
+            Player display names in seat order (required for immediate-start mode;
+            omit or set `lobbyMode: true` for lobby mode).
           example: [Jukka, Botti]
         colors:
           type: array
@@ -309,8 +405,7 @@ components:
             type: string
           description: |
             CSS hex colours for each seat (e.g. `#E63946`).
-            If fewer colours than names are provided the server falls back to
-            a default grey for the remaining seats.
+            Falls back to grey for unspecified seats.
           example: ['#E63946', '#2A9D8F', '#E9C46A', '#264653']
         seatKinds:
           type: array
@@ -318,8 +413,7 @@ components:
             type: string
             enum: [HUMAN, BOT]
           description: |
-            Seat kinds per player. Missing entries default to `HUMAN`.
-            A `BOT` seat gets a `PureDomainBotDriver` attached automatically.
+            Seat kinds per player (immediate-start only). Missing entries default to `HUMAN`.
           example: [HUMAN, BOT]
         difficulties:
           type: array
@@ -327,9 +421,20 @@ components:
             type: string
             enum: [EASY, NORMAL, STRONG]
           description: |
-            Bot difficulty per seat. Only meaningful for `BOT` seats.
-            Missing entries default to `NORMAL`.
+            Bot difficulty per seat. Missing entries default to `NORMAL`.
           example: [NORMAL, STRONG]
+        lobbyMode:
+          type: boolean
+          default: false
+          description: |
+            When `true`, creates a lobby session in `LOBBY` state.
+            `names`, `seatKinds`, and `difficulties` are ignored; use `seatCount` instead.
+        seatCount:
+          type: integer
+          minimum: 2
+          maximum: 6
+          default: 4
+          description: Number of seat slots to create (lobby mode only).
 
     CreateSessionResponse:
       type: object
@@ -455,7 +560,7 @@ components:
 
     SeatState:
       type: object
-      required: [seatId, seatIndex, playerId, seatKind, controlMode, displayName]
+      required: [seatId, seatIndex, playerId, seatKind, controlMode, joined]
       properties:
         seatId:
           type: string
@@ -468,12 +573,14 @@ components:
           example: player-1
         seatKind:
           type: string
-          enum: [HUMAN, COMPUTER]
+          enum: [HUMAN, BOT]
         controlMode:
           type: string
           enum: [MANUAL, AUTOMATIC]
         displayName:
           type: string
+          nullable: true
+          description: Player name. `null` for unclaimed lobby seats.
           example: Jukka
         controllerProfileId:
           type: string
@@ -481,6 +588,41 @@ components:
         tokenColorHex:
           type: string
           description: CSS hex colour for this seat's token
+          example: '#E63946'
+        joined:
+          type: boolean
+          description: |
+            `true` when the seat is claimed by a human or assigned to a bot.
+            `false` only in `LOBBY` sessions for available seats.
+          example: true
+
+    JoinLobbyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Display name for the player
+          example: Jukka
+        color:
+          type: string
+          description: |
+            Preferred CSS hex colour. If omitted or blank, the seat's pre-assigned colour is used.
+          example: '#E63946'
+
+    JoinLobbyResponse:
+      type: object
+      required: [playerId, seatId, tokenColorHex]
+      properties:
+        playerId:
+          type: string
+          description: The player ID assigned to this client. Store in localStorage keyed by sessionId.
+          example: player-1
+        seatId:
+          type: string
+          example: seat-0
+        tokenColorHex:
+          type: string
           example: '#E63946'
 
     PlayerSnapshot:
@@ -709,7 +851,12 @@ components:
 
     SessionStatus:
       type: string
-      enum: [IN_PROGRESS, GAME_OVER]
+      enum: [LOBBY, IN_PROGRESS, PAUSED, GAME_OVER]
+      description: |
+        - `LOBBY` — waiting for players to join before the game starts
+        - `IN_PROGRESS` — game is actively being played
+        - `PAUSED` — game is paused (reserved, not currently used by the HTTP server)
+        - `GAME_OVER` — game has ended
 
     TurnPhase:
       type: string
@@ -752,6 +899,8 @@ components:
           RefreshSessionView:               '#/components/schemas/RefreshSessionViewCommand'
           UseGetOutOfJailCard:              '#/components/schemas/UseGetOutOfJailCardCommand'
           PayJailFine:                      '#/components/schemas/PayJailFineCommand'
+          SellBuildingRound:                '#/components/schemas/SellBuildingRoundCommand'
+          AbortGame:                        '#/components/schemas/AbortGameCommand'
       oneOf:
         - $ref: '#/components/schemas/RollDiceCommand'
         - $ref: '#/components/schemas/EndTurnCommand'
@@ -777,6 +926,8 @@ components:
         - $ref: '#/components/schemas/RefreshSessionViewCommand'
         - $ref: '#/components/schemas/UseGetOutOfJailCardCommand'
         - $ref: '#/components/schemas/PayJailFineCommand'
+        - $ref: '#/components/schemas/SellBuildingRoundCommand'
+        - $ref: '#/components/schemas/AbortGameCommand'
 
     # Base shared by most commands
     BaseCommand:
@@ -1289,5 +1440,45 @@ components:
               enum: [PayJailFine]
       example:
         type: PayJailFine
+        sessionId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        actorPlayerId: player-1
+
+    SellBuildingRoundCommand:
+      title: SellBuildingRound
+      description: |
+        Sell one building from every property in the colour group (one round),
+        returning half the house price per building. Follows the even-building rule.
+        Valid during `WAITING_FOR_ROLL` and `WAITING_FOR_END_TURN`.
+      allOf:
+        - $ref: '#/components/schemas/BaseActorCommand'
+        - type: object
+          required: [propertyId]
+          properties:
+            type:
+              type: string
+              enum: [SellBuildingRound]
+            propertyId:
+              type: string
+      example:
+        type: SellBuildingRound
+        sessionId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        actorPlayerId: player-1
+        propertyId: O1
+
+    AbortGameCommand:
+      title: AbortGame
+      description: |
+        Immediately ends the game for all players, setting the session status to `GAME_OVER`.
+        Can be called by any player at any time during `IN_PROGRESS`.
+        This action is irreversible.
+      allOf:
+        - $ref: '#/components/schemas/BaseActorCommand'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [AbortGame]
+      example:
+        type: AbortGame
         sessionId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
         actorPlayerId: player-1

@@ -105,6 +105,11 @@ public final class SessionCommandPublisher implements SessionCommandPort, Client
         listeners.remove(listener);
     }
 
+    /** Called by registry-level operations (lobby join/start) that modify base state directly. */
+    synchronized void notifyListeners() {
+        publishSnapshot();
+    }
+
     private void publishSnapshot() {
         ClientSessionSnapshot snapshot = currentSnapshot();
         for (ClientSessionListener listener : listeners) {

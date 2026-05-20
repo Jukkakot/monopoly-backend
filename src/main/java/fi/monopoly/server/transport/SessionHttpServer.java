@@ -156,6 +156,8 @@ public final class SessionHttpServer {
                     registry.remove(id);
                     ctx.status(204);
                 });
+                config.routes.post("/sessions/{id}/join", this::handleLobbyJoin);
+                config.routes.post("/sessions/{id}/start", this::handleLobbyStart);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
                 config.routes.get("/sessions/{id}/snapshot", ctx ->
@@ -227,6 +229,17 @@ public final class SessionHttpServer {
             @SuppressWarnings("unchecked")
             List<String> colors = request.get("colors") != null
                     ? (List<String>) request.get("colors") : List.of();
+            Boolean lobbyMode = request.get("lobbyMode") instanceof Boolean b ? b : Boolean.FALSE;
+            if (Boolean.TRUE.equals(lobbyMode)) {
+                int seatCount = request.get("seatCount") instanceof Number n ? n.intValue() : (names != null ? names.size() : 4);
+                seatCount = Math.max(2, Math.min(6, seatCount));
+                @SuppressWarnings("unchecked")
+                List<String> lobbyColors = request.get("colors") != null
+                        ? (List<String>) request.get("colors") : List.of();
+                String sessionId = registry.createLobby(seatCount, lobbyColors);
+                ctx.status(201).json(Map.of("sessionId", sessionId));
+                return;
+            }
             if (names == null || names.isEmpty()) {
                 ctx.status(400).json(Map.of("error", "names is required"));
                 return;
@@ -255,6 +268,51 @@ public final class SessionHttpServer {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             log.error("Error creating session", e);
+            ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
+    private void handleLobbyJoin(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            String name = body.get("name") instanceof String s ? s.trim() : "";
+            String color = body.get("color") instanceof String s ? s : null;
+            if (name.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "name is required"));
+                return;
+            }
+            registry.joinLobby(id, name, color)
+                    .ifPresentOrElse(
+                            seat -> ctx.status(200).json(Map.of(
+                                    "playerId", seat.playerId(),
+                                    "seatId", seat.seatId(),
+                                    "tokenColorHex", seat.tokenColorHex())),
+                            () -> ctx.status(409).json(Map.of("error", "No available seats or session not in LOBBY state")));
+        } catch (NotFoundResponse e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error joining lobby", e);
+            ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
+    private void handleLobbyStart(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+            boolean started = registry.startLobbyGame(id);
+            if (started) {
+                ctx.status(200).json(Map.of("started", true));
+            } else {
+                ctx.status(409).json(Map.of("error", "Session not in LOBBY state or fewer than 2 players joined"));
+            }
+        } catch (NotFoundResponse e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error starting lobby game", e);
             ctx.status(500).json(Map.of("error", "Internal server error"));
         }
     }
