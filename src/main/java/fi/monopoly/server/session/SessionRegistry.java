@@ -82,7 +82,7 @@ public final class SessionRegistry {
                                List<BotDifficulty> difficulties) {
         String sessionId = SessionIdGenerator.generate();
         String hostToken = UUID.randomUUID().toString();
-        SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds);
+        SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds, difficulties);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
@@ -133,7 +133,7 @@ public final class SessionRegistry {
             String effectiveColor = (color != null && !color.isBlank()) ? color : free.tokenColorHex();
             SeatState updated = new SeatState(free.seatId(), free.seatIndex(), free.playerId(),
                     free.seatKind(), free.controlMode(), name, free.controllerProfileId(),
-                    effectiveColor, true);
+                    effectiveColor, true, null);
             claimed[0] = updated;
             List<SeatState> newSeats = state.seats().stream()
                     .map(s -> s.seatId().equals(free.seatId()) ? updated : s)

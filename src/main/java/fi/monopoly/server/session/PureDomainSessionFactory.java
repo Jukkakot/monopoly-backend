@@ -94,16 +94,30 @@ public final class PureDomainSessionFactory {
      * @param seatKinds per-player seat kinds; if shorter than playerNames the remaining seats default to {@link SeatKind#HUMAN}
      */
     public static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors, List<SeatKind> seatKinds) {
-        return initialGameState(sessionId, playerNames, colors, seatKinds, new Random());
+        return initialGameState(sessionId, playerNames, colors, seatKinds, List.of(), new Random());
+    }
+
+    /**
+     * Creates an initial game state with explicit seat kinds and per-seat bot difficulties.
+     */
+    public static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors,
+                                                List<SeatKind> seatKinds, List<BotDifficulty> difficulties) {
+        return initialGameState(sessionId, playerNames, colors, seatKinds, difficulties, new Random());
     }
 
     /** Package-private variant used in tests to pass a seeded {@link Random}. */
     static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors, Random rng) {
-        return initialGameState(sessionId, playerNames, colors, List.of(), rng);
+        return initialGameState(sessionId, playerNames, colors, List.of(), List.of(), rng);
     }
 
     /** Full variant with seat kinds and seeded RNG — used by tests and overloads above. */
     static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors, List<SeatKind> seatKinds, Random rng) {
+        return initialGameState(sessionId, playerNames, colors, seatKinds, List.of(), rng);
+    }
+
+    /** Full variant with seat kinds, difficulties, and seeded RNG. */
+    static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors,
+                                         List<SeatKind> seatKinds, List<BotDifficulty> difficulties, Random rng) {
         if (playerNames.isEmpty()) throw new IllegalArgumentException("At least one player is required");
 
         List<PropertyStateSnapshot> properties = SpotType.SPOT_TYPES.stream()
@@ -126,7 +140,9 @@ public final class PureDomainSessionFactory {
             String seatId = "seat-" + seatIndex;
             SeatKind kind = originalIndex < seatKinds.size() ? seatKinds.get(originalIndex) : SeatKind.HUMAN;
             String profile = kind == SeatKind.BOT ? "BOT" : "HUMAN";
-            seats.add(new SeatState(seatId, seatIndex, playerId, kind, ControlMode.MANUAL, name, profile, color));
+            BotDifficulty difficulty = (kind == SeatKind.BOT && originalIndex < difficulties.size())
+                    ? difficulties.get(originalIndex) : null;
+            seats.add(new SeatState(seatId, seatIndex, playerId, kind, ControlMode.MANUAL, name, profile, color, true, difficulty));
             players.add(new PlayerSnapshot(playerId, seatId, name, 1500, 0, false, false, false, 0, 0, List.of()));
         }
 

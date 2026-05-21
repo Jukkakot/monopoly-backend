@@ -6,6 +6,7 @@ import fi.monopoly.domain.session.AuctionStatus;
 import fi.monopoly.domain.session.ControlMode;
 import fi.monopoly.domain.session.DebtAction;
 import fi.monopoly.domain.session.DebtCreditorType;
+import fi.monopoly.domain.session.BotDifficulty;
 import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.domain.session.SessionStatus;
 import fi.monopoly.domain.session.TurnContinuationAction;
@@ -48,7 +49,8 @@ public record SessionSnapshot(
             ControlMode controlMode,
             String displayName,
             String controllerProfileId,
-            String tokenColorHex
+            String tokenColorHex,
+            BotDifficulty botDifficulty
     ) {
     }
 
