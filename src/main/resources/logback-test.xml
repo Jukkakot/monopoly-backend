@@ -1,8 +1,8 @@
 <configuration>
 
     <property name="LOG_DIR" value="${user.dir}/logs/test"/>
-    <property name="CONSOLE_LOG_PATTERN" value="%highlight(%d{HH:mm:ss.SSS} %-5level) %boldCyan([turn=%X{turnPlayer:-}]) %logger{28} - %msg%n"/>
-    <property name="FILE_LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [turn=%X{turnPlayer:-}] %logger{28} - %msg%n"/>
+    <property name="CONSOLE_LOG_PATTERN" value="%highlight(%d{HH:mm:ss.SSS} %-5level) %boldCyan([%X{session:-?}|%X{actor:-?}|%X{phase:-?}]) %logger{25} - %msg%n"/>
+    <property name="FILE_LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{session:-?}|%X{actor:-?}|%X{phase:-?}] %logger{25} - %msg%n"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
