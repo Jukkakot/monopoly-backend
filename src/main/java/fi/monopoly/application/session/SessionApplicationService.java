@@ -17,6 +17,7 @@ import fi.monopoly.application.session.turn.TurnContinuationGateway;
 import fi.monopoly.client.session.SessionCommandPort;
 import fi.monopoly.domain.decision.PendingDecision;
 import fi.monopoly.domain.session.*;
+import org.slf4j.MDC;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -182,6 +183,23 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
     }
 
     private CommandResult dispatch(SessionCommand command) {
+        MDC.put("session", sessionId);
+        String actor = command.actorPlayerId();
+        if (actor != null) MDC.put("actor", actor);
+        SessionState state = currentState();
+        if (state.turn() != null) MDC.put("phase", state.turn().phase().name());
+        MDC.put("cmd", command.getClass().getSimpleName().replace("Command", ""));
+        try {
+            return dispatchInner(command);
+        } finally {
+            MDC.remove("session");
+            MDC.remove("actor");
+            MDC.remove("phase");
+            MDC.remove("cmd");
+        }
+    }
+
+    private CommandResult dispatchInner(SessionCommand command) {
         if (propertyPurchaseCommandHandler != null
                 && (command instanceof BuyPropertyCommand || command instanceof DeclinePropertyCommand)) {
             return propertyPurchaseCommandHandler.handle(command);
