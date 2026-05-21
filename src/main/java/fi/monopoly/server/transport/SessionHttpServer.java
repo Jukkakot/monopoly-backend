@@ -10,6 +10,7 @@ import fi.monopoly.client.session.ClientSessionSnapshot;
 import fi.monopoly.client.session.ClientSessionUpdates;
 import fi.monopoly.client.session.SessionCommandPort;
 import fi.monopoly.server.session.SessionCommandPublisher;
+import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.server.session.SessionRegistry;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
@@ -18,6 +19,7 @@ import io.javalin.http.sse.SseClient;
 import io.javalin.json.JavalinJackson;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -251,12 +253,18 @@ public final class SessionHttpServer {
                     ? (List<String>) request.get("colors") : List.of();
             Boolean lobbyMode = request.get("lobbyMode") instanceof Boolean b ? b : Boolean.FALSE;
             if (Boolean.TRUE.equals(lobbyMode)) {
-                int seatCount = request.get("seatCount") instanceof Number n ? n.intValue() : (names != null ? names.size() : 4);
-                seatCount = Math.max(2, Math.min(6, seatCount));
                 @SuppressWarnings("unchecked")
-                List<String> lobbyColors = request.get("colors") != null
-                        ? (List<String>) request.get("colors") : List.of();
-                var result = registry.createLobby(seatCount, lobbyColors);
+                List<String> lobbyNames = request.get("names") != null ? (List<String>) request.get("names") : List.of("Pelaaja");
+                @SuppressWarnings("unchecked")
+                List<String> lobbyColors = request.get("colors") != null ? (List<String>) request.get("colors") : List.of();
+                @SuppressWarnings("unchecked")
+                List<String> kindStrings = request.get("seatKinds") != null ? (List<String>) request.get("seatKinds") : List.of();
+                List<SeatKind> lobbyKinds = new ArrayList<>();
+                for (int i = 0; i < lobbyNames.size(); i++) {
+                    String k = i < kindStrings.size() ? kindStrings.get(i) : "HUMAN";
+                    lobbyKinds.add("BOT".equals(k) ? SeatKind.BOT : SeatKind.HUMAN);
+                }
+                var result = registry.createLobby(lobbyNames, lobbyColors, lobbyKinds);
                 ctx.status(201).json(Map.of("sessionId", result.sessionId(), "hostToken", result.hostToken()));
                 return;
             }

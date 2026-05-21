@@ -99,10 +99,10 @@ public final class SessionRegistry {
      * Creates a new lobby session with {@code seatCount} unclaimed seats.
      * Players join via {@link #joinLobby} and the host starts via {@link #startLobbyGame}.
      */
-    public CreateResult createLobby(int seatCount, List<String> colors) {
+    public CreateResult createLobby(List<String> names, List<String> colors, List<SeatKind> kinds) {
         String sessionId = SessionIdGenerator.generate();
         String hostToken = UUID.randomUUID().toString();
-        SessionState initialState = PureDomainSessionFactory.lobbyInitialState(sessionId, seatCount, colors);
+        SessionState initialState = PureDomainSessionFactory.lobbyInitialState(sessionId, names, colors, kinds);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
@@ -179,27 +179,31 @@ public final class SessionRegistry {
 
         SessionState current = entry.baseStore().get();
         if (current.status() != SessionStatus.LOBBY) return false;
-        long joinedCount = current.seats().stream().filter(SeatState::joined).count();
-        if (joinedCount < 2) return false;
+        long humanJoinedCount = current.seats().stream()
+                .filter(s -> s.seatKind() == SeatKind.HUMAN && s.joined()).count();
+        if (humanJoinedCount < 1) return false;
 
-        // Build new game state from joined players + convert unjoined to bots
+        // Build new game state: use seat names/colors/kinds as-is (bots are pre-filled)
         List<String> names = current.seats().stream()
-                .map(s -> s.joined() ? s.displayName() : "Botti " + (s.seatIndex() + 1))
+                .map(s -> s.displayName() != null ? s.displayName() : "Botti " + (s.seatIndex() + 1))
                 .toList();
         List<String> colors = current.seats().stream().map(SeatState::tokenColorHex).toList();
-        List<SeatKind> kinds = current.seats().stream()
-                .map(s -> s.joined() ? SeatKind.HUMAN : SeatKind.BOT)
-                .toList();
+        List<SeatKind> kinds = current.seats().stream().map(SeatState::seatKind).toList();
 
         SessionState gameState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, kinds);
         entry.baseStore().update(ignored -> gameState);
 
+        // All bot seats get STRONG difficulty
         Map<String, BotDifficulty> diffMap = new HashMap<>();
+        gameState.seats().stream()
+                .filter(s -> s.seatKind() == SeatKind.BOT)
+                .forEach(s -> diffMap.put(s.playerId(), BotDifficulty.STRONG));
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, diffMap);
         sessions.put(sessionId, new Entry(entry.publisher(), entry.baseStore(),
-                names.stream().filter(n -> !n.startsWith("Botti ")).toList(), botDriver,
-                entry.hostToken(), entry.playerTokens()));
+                gameState.seats().stream().filter(s -> s.seatKind() == SeatKind.HUMAN)
+                        .map(SeatState::displayName).toList(),
+                botDriver, entry.hostToken(), entry.playerTokens()));
 
         entry.publisher().notifyListeners();
         return true;

@@ -186,7 +186,9 @@ public final class PureDomainSessionFactory {
      * Players claim seats via the {@code POST /sessions/{id}/join} endpoint. The session
      * transitions to {@code IN_PROGRESS} when {@code POST /sessions/{id}/start} is called.</p>
      */
-    public static SessionState lobbyInitialState(String sessionId, int seatCount, List<String> colors) {
+    public static SessionState lobbyInitialState(String sessionId, List<String> names,
+                                                   List<String> colors, List<SeatKind> kinds) {
+        int seatCount = names.size();
         List<SeatState> seats = new ArrayList<>();
         List<PlayerSnapshot> players = new ArrayList<>();
         List<PropertyStateSnapshot> properties = SpotType.SPOT_TYPES.stream()
@@ -195,11 +197,15 @@ public final class PureDomainSessionFactory {
                 .toList();
         for (int i = 0; i < seatCount; i++) {
             String color = i < colors.size() ? colors.get(i) : "#AAAAAA";
+            String name = i < names.size() ? names.get(i) : null;
+            SeatKind kind = i < kinds.size() ? kinds.get(i) : SeatKind.HUMAN;
             String playerId = "player-" + (i + 1);
             String seatId = "seat-" + i;
-            seats.add(new SeatState(seatId, i, playerId, SeatKind.HUMAN, ControlMode.MANUAL,
-                    null, "HUMAN", color, false));
-            players.add(new PlayerSnapshot(playerId, seatId, "", 1500, 0, false, false, false, 0, 0, List.of()));
+            boolean isBot = kind == SeatKind.BOT;
+            // Bot seats are pre-filled; human seats wait for players to join
+            seats.add(new SeatState(seatId, i, playerId, kind, isBot ? ControlMode.AUTOPLAY : ControlMode.MANUAL,
+                    isBot ? name : null, isBot ? "BOT" : "HUMAN", color, isBot));
+            players.add(new PlayerSnapshot(playerId, seatId, isBot ? (name != null ? name : "") : "", 1500, 0, false, false, false, 0, 0, List.of()));
         }
         return SessionState.builder()
                 .sessionId(sessionId)
