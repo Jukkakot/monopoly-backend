@@ -345,16 +345,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            for (PropertyStateSnapshot prop : state.properties()) {
-                if (!other.playerId().equals(prop.ownerPlayerId())) continue;
-                if (prop.mortgaged() || prop.houseCount() > 0 || prop.hotelCount() > 0) continue;
-                SpotType st = spotType(prop.propertyId());
-                if (st.streetType.placeType != PlaceType.STREET) continue;
-                if (botWouldBenefitFrom(state, botId, st.streetType)) {
-                    CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
-                    return result.accepted();
-                }
-            }
+            // Verify handleTradeEditing would actually find a target and afford an offer
+            String targetProp = findStrategicTargetProperty(state, botId, other.playerId());
+            if (targetProp == null) continue;
+            int price = SpotType.valueOf(targetProp).getIntegerProperty("price");
+            int available = Math.max(0, bot.cash() - MIN_CASH_RESERVE);
+            if (Math.min(price, available) < 10) continue;
+            CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
+            return result.accepted();
         }
         return false;
     }
