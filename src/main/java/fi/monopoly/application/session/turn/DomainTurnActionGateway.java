@@ -618,6 +618,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     }
 
     private void applyCardMoney(String playerId, int amount, boolean isDoubles, int consecutiveDoubles) {
+        log.debug("applyCardMoney player={} amount={}", playerId, amount);
         if (amount >= 0) {
             store.update(s -> s.toBuilder()
                     .players(updateCash(s.players(), playerId, amount))
@@ -651,6 +652,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         // Player always moves forward; if target is behind or is GO, they pass/land on GO
         boolean passedGo = targetIndex < player.boardIndex() || targetSpot == SpotType.GO_SPOT;
         int goBonus = passedGo ? GO_REWARD : 0;
+        log.debug("applyCardMove player={} target={} targetIndex={} fromIndex={} passedGo={} goBonus={}",
+                player.name(), targetSpot, targetIndex, player.boardIndex(), passedGo, goBonus);
 
         store.update(s -> s.toBuilder()
                 .players(updatePosition(s.players(), playerId, targetIndex, goBonus))
@@ -687,6 +690,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         // Nearest spot is always ahead or wraps — passes GO only if wrapped
         boolean passedGo = nearestIndex < currentIndex;
         int goBonus = passedGo ? GO_REWARD : 0;
+        log.debug("applyCardMoveNearest player={} type={} nearest={} nearestIndex={} fromIndex={} passedGo={}",
+                player.name(), typeStr, nearestSpot, nearestIndex, currentIndex, passedGo);
 
         final int finalNearestIndex = nearestIndex;
         final SpotType finalNearestSpot = nearestSpot;
@@ -703,6 +708,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
         int newIndex = (player.boardIndex() - spaces + BOARD_SIZE) % BOARD_SIZE;
         SpotType landedSpot = SpotType.SPOT_TYPES.get(newIndex);
+        log.debug("applyCardMoveBack player={} spaces={} fromIndex={} toIndex={} landedSpot={}",
+                player.name(), spaces, player.boardIndex(), newIndex, landedSpot);
 
         // Moving backward does not cross GO — no GO bonus
         store.update(s -> s.toBuilder()
@@ -798,6 +805,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
     private void applyRentOrDebt(SessionState state, String debtorId, String creditorId, int amount,
                                   boolean isDoubles, int consecutiveDoubles, String reason) {
+        log.debug("applyRentOrDebt debtor={} creditor={} amount={} reason={}", debtorId, creditorId, amount, reason);
         if (amount <= 0) {
             store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
             return;

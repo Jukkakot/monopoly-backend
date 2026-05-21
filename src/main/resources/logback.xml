@@ -54,7 +54,7 @@
         <appender-ref ref="ASYNC_ERROR_FILE"/>
     </root>
 
-    <logger name="fi.monopoly" level="INFO" additivity="false">
+    <logger name="fi.monopoly" level="DEBUG" additivity="false">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="ASYNC_FILE"/>
         <appender-ref ref="ASYNC_ERROR_FILE"/>
