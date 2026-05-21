@@ -1,15 +1,24 @@
 # Known Bugs
 
-## [INVESTIGATE] Bot GO_JAIL card incorrectly jails human player
+## [FIXED] MOVE card targeting GO_TO_JAIL spot did not jail the player
 
-**Reported:** User observed bot drawing a Chance/Community Chest "Go to jail" card, but the human player ended up in jail instead.
+**Root cause:** `applyLandingEffects` handled all CORNER spots with a generic advance-turn fallthrough.
+The `GO_TO_JAIL` spot-type check only existed in `rollDice` (before calling `applyLandingEffects`),
+so a card MOVE to GO_TO_JAIL would merely stand the player on spot 30 without jailing them.
 
-**Backend code review:** `applyGoToJail(state, playerId)` is called with correct playerId throughout. No obvious wrong-player reference found.
+**Fix:** Added explicit `landedSpot == SpotType.GO_TO_JAIL` check inside `applyLandingEffects`
+so the guard applies regardless of how the player arrived (dice, MOVE card, MOVE_NEAREST card).
 
-**Possible causes to investigate:**
-1. Frontend `useTokenAnimation.ts`: `_jailingPlayers`/`_animatingPlayers` are module-level sets — check if any race condition causes wrong player to get jail animation
-2. Event log (`events.ts`): might show wrong player name if `np.inJail && !pp.inJail` fires unexpectedly
-3. Race condition: two near-simultaneous state updates (bot jailed, then turn changes) arriving in wrong order on client SSE stream
-4. `applyCardMove` to GO_TO_JAIL spot goes through CORNER handler (does NOT jail) — verify this case separately
+---
 
-**Steps to reproduce:** Play with a NORMAL/STRONG bot, wait for bot to draw a GO_JAIL card.
+## [LIKELY NON-BUG] Bot GO_JAIL card appears to jail human player
+
+**Reported:** User observed bot drawing a GO_JAIL card; human appeared to end up in jail.
+
+**Analysis:**
+- Backend: `CardType.GO_JAIL` → `applyGoToJail(state, playerId)` with correct botPlayerId. No wrong-player path found.
+- Frontend animation: jail fly check is per-player-ID; only fires if `player.inJail` is true for that specific player.
+- Most likely explanation: human was **visiting jail** (boardIndex 10, inJail: false) when the bot flew in,
+  and the user mistook the bot token's jail-fly animation as affecting the human token at the same spot.
+
+**No code fix needed** unless a concrete reproduction with logs (debug-level now enabled) proves otherwise.

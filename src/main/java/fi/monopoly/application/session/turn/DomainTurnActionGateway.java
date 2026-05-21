@@ -511,6 +511,13 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             return;
         }
 
+        // GO_TO_JAIL corner — jail the player regardless of how they arrived
+        if (landedSpot == SpotType.GO_TO_JAIL) {
+            log.debug("applyLandingEffects GO_TO_JAIL player={}", playerId);
+            store.update(s -> applyGoToJail(s, playerId));
+            return;
+        }
+
         // CORNER (GO / JAIL visiting / FREE_PARKING) → advance turn
         store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
     }
