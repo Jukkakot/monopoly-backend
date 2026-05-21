@@ -40,7 +40,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     /** Fallback delay used when situational logic cannot determine a better value. */
     private static final long BOT_FALLBACK_DELAY_MS =
-            Long.getLong("monopoly.bot.think.delay.ms", 700L);
+            Long.getLong("monopoly.bot.think.delay.ms", 900L);
 
     private final SessionCommandPublisher publisher;
     private final String sessionId;
@@ -455,10 +455,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (state.tradeState() != null) {
             TradeState trade = state.tradeState();
             if (trade.decisionRequiredFromPlayerId() != null) {
-                return 2200;  // reading the offer, weighing it
+                return 2900;  // reading the offer, weighing it
             }
             if (trade.status() == TradeStatus.EDITING) {
-                return 900;   // filling in individual offer steps
+                return 1200;  // filling in individual offer steps
             }
         }
 
@@ -467,28 +467,28 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             DebtStateModel debt = state.activeDebt();
             List<DebtAction> allowed = debt.allowedActions();
             if (allowed.size() == 1 && allowed.contains(DebtAction.DECLARE_BANKRUPTCY)) {
-                return 3500;  // dramatic — last resort
+                return 4500;  // dramatic — last resort
             }
             if (allowed.contains(DebtAction.PAY_DEBT_NOW)
                     && debt.currentCash() >= debt.amountRemaining()) {
-                return 800;   // has money, just pays
+                return 1050;  // has money, just pays
             }
-            return 2000;      // needs to liquidate assets, thinking hard
+            return 2600;      // needs to liquidate assets, thinking hard
         }
 
         // Auction
         if (state.auctionState() != null) {
             AuctionState auction = state.auctionState();
             if (auction.status() == AuctionStatus.WON_PENDING_RESOLUTION) {
-                return 500;   // winner confirming pickup — quick
+                return 650;   // winner confirming pickup — quick
             }
-            return 1100;      // deciding whether to bid
+            return 1450;      // deciding whether to bid
         }
 
         // Normal turn phases
         if (state.turn() == null) return BOT_FALLBACK_DELAY_MS;
         return switch (state.turn().phase()) {
-            case WAITING_FOR_ROLL -> 1200;  // pause before throwing dice
+            case WAITING_FOR_ROLL -> 1550;  // pause before throwing dice
             case WAITING_FOR_DECISION -> {
                 // Buying a property: longer think when affordable, quick decline when broke
                 PendingDecision decision = state.pendingDecision();
@@ -496,11 +496,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                         && decision.payload() instanceof PropertyPurchaseDecisionPayload purchase) {
                     PlayerSnapshot actor = findPlayer(state, state.turn().activePlayerId());
                     int cash = actor != null ? actor.cash() : 0;
-                    yield cash >= purchase.price() ? 2000 : 700;
+                    yield cash >= purchase.price() ? 2600 : 900;
                 }
-                yield 900;
+                yield 1200;
             }
-            case WAITING_FOR_END_TURN -> 700;  // reviewing board briefly before ending
+            case WAITING_FOR_END_TURN -> 900;  // reviewing board briefly before ending
             default -> BOT_FALLBACK_DELAY_MS;
         };
     }
