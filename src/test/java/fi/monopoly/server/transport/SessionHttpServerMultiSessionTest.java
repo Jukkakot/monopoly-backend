@@ -49,7 +49,7 @@ class SessionHttpServerMultiSessionTest {
         String before = get("/health").body();
         assertTrue(before.contains("\"sessions\":0"), "should start at 0 sessions");
 
-        registry.create(List.of("Alice", "Bob"), List.of());
+        registry.create(List.of("Alice", "Bob"), List.of()).sessionId();
 
         String after = get("/health").body();
         assertTrue(after.contains("\"sessions\":1"), "should reflect 1 session after creation");
@@ -78,7 +78,7 @@ class SessionHttpServerMultiSessionTest {
 
     @Test
     void deleteSession_returns204AndSessionIsGone() throws Exception {
-        String sessionId = registry.create(List.of("Alice", "Bob"), List.of());
+        String sessionId = registry.create(List.of("Alice", "Bob"), List.of()).sessionId();
 
         HttpResponse<String> deleteResponse = delete("/sessions/" + sessionId);
         assertEquals(204, deleteResponse.statusCode());
@@ -96,7 +96,7 @@ class SessionHttpServerMultiSessionTest {
 
     @Test
     void deleteSession_removedSessionNoLongerInList() throws Exception {
-        String sessionId = registry.create(List.of("Alice", "Bob"), List.of());
+        String sessionId = registry.create(List.of("Alice", "Bob"), List.of()).sessionId();
 
         String beforeDelete = get("/sessions").body();
         assertTrue(beforeDelete.contains(sessionId));

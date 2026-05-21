@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -34,7 +35,17 @@ public final class SessionRegistry {
             Long.getLong("monopoly.session.ttl.minutes", 120L);
     private static final long CLEANUP_INTERVAL_MINUTES = 5L;
 
-    private record Entry(SessionCommandPublisher publisher, InMemorySessionState baseStore, List<String> playerNames, PureDomainBotDriver botDriver) {}
+    public record CreateResult(String sessionId, String hostToken) {}
+    public record JoinResult(SeatState seat, String playerToken) {}
+
+    private record Entry(
+            SessionCommandPublisher publisher,
+            InMemorySessionState baseStore,
+            List<String> playerNames,
+            PureDomainBotDriver botDriver,
+            String hostToken,
+            ConcurrentHashMap<String, String> playerTokens
+    ) {}
 
     private final ConcurrentHashMap<String, Entry> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastActivityAt = new ConcurrentHashMap<>();
@@ -50,7 +61,7 @@ public final class SessionRegistry {
     /**
      * Creates a new all-human session with the given player names and colours.
      */
-    public String create(List<String> names, List<String> colors) {
+    public CreateResult create(List<String> names, List<String> colors) {
         return create(names, colors, List.of());
     }
 
@@ -58,7 +69,7 @@ public final class SessionRegistry {
      * Creates a new session with explicit seat kinds. Seats not covered by {@code seatKinds}
      * default to {@link SeatKind#HUMAN}. Bot seats get a {@link PureDomainBotDriver} attached.
      */
-    public String create(List<String> names, List<String> colors, List<SeatKind> seatKinds) {
+    public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds) {
         return create(names, colors, seatKinds, List.of());
     }
 
@@ -67,9 +78,10 @@ public final class SessionRegistry {
      * {@code difficulties} is indexed by seat position; missing entries default to
      * {@link BotDifficulty#NORMAL}.
      */
-    public String create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
-                         List<BotDifficulty> difficulties) {
+    public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
+                               List<BotDifficulty> difficulties) {
         String sessionId = SessionIdGenerator.generate();
+        String hostToken = UUID.randomUUID().toString();
         SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
@@ -77,36 +89,37 @@ public final class SessionRegistry {
         Map<String, BotDifficulty> difficultyMap = buildDifficultyMap(initialState, difficulties);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, difficultyMap);
-        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver));
+        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, new ConcurrentHashMap<>()));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
-        return sessionId;
+        return new CreateResult(sessionId, hostToken);
     }
 
     /**
      * Creates a new lobby session with {@code seatCount} unclaimed seats.
      * Players join via {@link #joinLobby} and the host starts via {@link #startLobbyGame}.
      */
-    public String createLobby(int seatCount, List<String> colors) {
+    public CreateResult createLobby(int seatCount, List<String> colors) {
         String sessionId = SessionIdGenerator.generate();
+        String hostToken = UUID.randomUUID().toString();
         SessionState initialState = PureDomainSessionFactory.lobbyInitialState(sessionId, seatCount, colors);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
-        sessions.put(sessionId, new Entry(publisher, baseStore, List.of(), null));
+        sessions.put(sessionId, new Entry(publisher, baseStore, List.of(), null, hostToken, new ConcurrentHashMap<>()));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
-        return sessionId;
+        return new CreateResult(sessionId, hostToken);
     }
 
     /**
      * Claims the first available (unjoined) seat in a LOBBY session.
      *
-     * @return the claimed {@link SeatState} with updated name/color, or empty if no seat available
+     * @return the claimed seat and a fresh player token, or empty if no seat available
      */
-    public java.util.Optional<SeatState> joinLobby(String sessionId, String name, String color) {
+    public Optional<JoinResult> joinLobby(String sessionId, String name, String color) {
         Entry entry = sessions.get(sessionId);
-        if (entry == null) return java.util.Optional.empty();
+        if (entry == null) return Optional.empty();
         lastActivityAt.put(sessionId, System.currentTimeMillis());
 
         final SeatState[] claimed = {null};
@@ -125,7 +138,6 @@ public final class SessionRegistry {
             List<SeatState> newSeats = state.seats().stream()
                     .map(s -> s.seatId().equals(free.seatId()) ? updated : s)
                     .toList();
-            // Update player displayName too
             List<PlayerSnapshot> newPlayers = state.players().stream()
                     .map(p -> p.seatId().equals(free.seatId())
                             ? new PlayerSnapshot(p.playerId(), p.seatId(), name, p.cash(),
@@ -135,9 +147,23 @@ public final class SessionRegistry {
                     .toList();
             return state.toBuilder().seats(newSeats).players(newPlayers).build();
         });
-        if (claimed[0] == null) return java.util.Optional.empty();
+        if (claimed[0] == null) return Optional.empty();
+        String playerToken = UUID.randomUUID().toString();
+        entry.playerTokens().put(claimed[0].playerId(), playerToken);
         entry.publisher().notifyListeners();
-        return java.util.Optional.of(claimed[0]);
+        return Optional.of(new JoinResult(claimed[0], playerToken));
+    }
+
+    public boolean validatePlayerToken(String sessionId, String playerId, String token) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.playerTokens().isEmpty()) return true;
+        return token != null && token.equals(entry.playerTokens().get(playerId));
+    }
+
+    public boolean validateHostToken(String sessionId, String token) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.hostToken() == null) return true;
+        return token != null && token.equals(entry.hostToken());
     }
 
     /**
@@ -172,7 +198,8 @@ public final class SessionRegistry {
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, diffMap);
         sessions.put(sessionId, new Entry(entry.publisher(), entry.baseStore(),
-                names.stream().filter(n -> !n.startsWith("Botti ")).toList(), botDriver));
+                names.stream().filter(n -> !n.startsWith("Botti ")).toList(), botDriver,
+                entry.hostToken(), entry.playerTokens()));
 
         entry.publisher().notifyListeners();
         return true;

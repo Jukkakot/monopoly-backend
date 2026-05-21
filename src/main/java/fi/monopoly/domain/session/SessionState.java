@@ -24,7 +24,8 @@ public record SessionState(
         List<String> chanceDeck,
         List<String> communityDeck,
         String lastCardMessage,
-        String lastCardKey
+        String lastCardKey,
+        String hostPlayerId
 ) {
     public SessionState {
         seats = List.copyOf(seats);
@@ -51,7 +52,7 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                null, winnerPlayerId, null, null, null, null);
+                null, winnerPlayerId, null, null, null, null, null);
     }
 
     /** Backward-compat: with turnContinuationState, no card decks. */
@@ -72,6 +73,6 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                turnContinuationState, winnerPlayerId, null, null, null, null);
+                turnContinuationState, winnerPlayerId, null, null, null, null, null);
     }
 }

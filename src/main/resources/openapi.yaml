@@ -438,12 +438,16 @@ components:
 
     CreateSessionResponse:
       type: object
-      required: [sessionId]
+      required: [sessionId, hostToken]
       properties:
         sessionId:
           type: string
           format: uuid
           example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        hostToken:
+          type: string
+          format: uuid
+          description: Secret token granting host/admin privileges (e.g. AbortGame). Store in localStorage.
 
     SessionSummary:
       type: object
@@ -612,11 +616,11 @@ components:
 
     JoinLobbyResponse:
       type: object
-      required: [playerId, seatId, tokenColorHex]
+      required: [playerId, seatId, tokenColorHex, playerToken]
       properties:
         playerId:
           type: string
-          description: The player ID assigned to this client. Store in localStorage keyed by sessionId.
+          description: The player ID assigned to this client. Store in sessionStorage keyed by sessionId.
           example: player-1
         seatId:
           type: string
@@ -624,6 +628,10 @@ components:
         tokenColorHex:
           type: string
           example: '#E63946'
+        playerToken:
+          type: string
+          format: uuid
+          description: Secret token authenticating this player for all game commands. Store in sessionStorage.
 
     PlayerSnapshot:
       type: object

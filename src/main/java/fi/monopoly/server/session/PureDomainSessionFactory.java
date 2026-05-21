@@ -143,6 +143,7 @@ public final class PureDomainSessionFactory {
                 .turn(new TurnState(firstPlayerId, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
                 .chanceDeck(chanceDeck)
                 .communityDeck(communityDeck)
+                .hostPlayerId("player-1")
                 .build();
     }
 

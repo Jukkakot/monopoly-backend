@@ -68,10 +68,10 @@ public final class EmbeddedSessionServer {
      */
     public String create(List<String> playerNames, List<String> colors, List<SeatKind> seatKinds,
                          List<BotDifficulty> difficulties) {
-        String sessionId = registry.create(playerNames, colors, seatKinds, difficulties);
+        var result = registry.create(playerNames, colors, seatKinds, difficulties);
         log.info("Created session {} with players {} seatKinds={} difficulties={}",
-                sessionId.substring(0, 8), playerNames, seatKinds, difficulties);
-        return sessionId;
+                result.sessionId().substring(0, 8), playerNames, seatKinds, difficulties);
+        return result.sessionId();
     }
 
     public int port() {

@@ -191,6 +191,26 @@ public final class SessionHttpServer {
         try {
             byte[] body = ctx.bodyAsBytes();
             String pathSessionId = ctx.pathParamMap().containsKey("id") ? ctx.pathParam("id") : null;
+
+            if (registry != null && pathSessionId != null) {
+                JsonNode tokenNode = objectMapper.readTree(body);
+                String commandType = tokenNode.path("type").asText();
+                if ("AbortGame".equals(commandType)) {
+                    String hostToken = tokenNode.path("hostToken").asText(null);
+                    if (!registry.validateHostToken(pathSessionId, hostToken)) {
+                        ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
+                        return;
+                    }
+                } else {
+                    String actorPlayerId = tokenNode.path("actorPlayerId").asText(null);
+                    String playerToken = tokenNode.path("playerToken").asText(null);
+                    if (actorPlayerId != null && !registry.validatePlayerToken(pathSessionId, actorPlayerId, playerToken)) {
+                        ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
+                        return;
+                    }
+                }
+            }
+
             SessionCommand command = commandMapper.fromJson(body, pathSessionId);
 
             CommandResult result;
@@ -236,8 +256,8 @@ public final class SessionHttpServer {
                 @SuppressWarnings("unchecked")
                 List<String> lobbyColors = request.get("colors") != null
                         ? (List<String>) request.get("colors") : List.of();
-                String sessionId = registry.createLobby(seatCount, lobbyColors);
-                ctx.status(201).json(Map.of("sessionId", sessionId));
+                var result = registry.createLobby(seatCount, lobbyColors);
+                ctx.status(201).json(Map.of("sessionId", result.sessionId(), "hostToken", result.hostToken()));
                 return;
             }
             if (names == null || names.isEmpty()) {
@@ -262,8 +282,8 @@ public final class SessionHttpServer {
                         catch (IllegalArgumentException e) { return fi.monopoly.domain.session.BotDifficulty.NORMAL; }
                     }).toList();
 
-            String sessionId = registry.create(names, colors, seatKinds, difficulties);
-            ctx.status(201).json(Map.of("sessionId", sessionId));
+            var result = registry.create(names, colors, seatKinds, difficulties);
+            ctx.status(201).json(Map.of("sessionId", result.sessionId(), "hostToken", result.hostToken()));
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -286,10 +306,11 @@ public final class SessionHttpServer {
             }
             registry.joinLobby(id, name, color)
                     .ifPresentOrElse(
-                            seat -> ctx.status(200).json(Map.of(
-                                    "playerId", seat.playerId(),
-                                    "seatId", seat.seatId(),
-                                    "tokenColorHex", seat.tokenColorHex())),
+                            r -> ctx.status(200).json(Map.of(
+                                    "playerId", r.seat().playerId(),
+                                    "seatId", r.seat().seatId(),
+                                    "tokenColorHex", r.seat().tokenColorHex(),
+                                    "playerToken", r.playerToken())),
                             () -> ctx.status(409).json(Map.of("error", "No available seats or session not in LOBBY state")));
         } catch (NotFoundResponse e) {
             throw e;
