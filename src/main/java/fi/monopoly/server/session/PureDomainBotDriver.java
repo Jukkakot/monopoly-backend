@@ -190,6 +190,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         switch (phase) {
             case WAITING_FOR_ROLL -> publisher.handle(new RollDiceCommand(sessionId, activeId));
+            case WAITING_FOR_CARD_ACK -> publisher.handle(new AcknowledgeCardCommand(sessionId, activeId));
             case WAITING_FOR_END_TURN -> {
                 if (!isEasy(activeId) && tryUnmortgageGreedy(state, activeId)) return;
                 if (!isEasy(activeId) && tryBuildGreedy(state, activeId)) return;
@@ -487,6 +488,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (state.turn() == null) return BOT_FALLBACK_DELAY_MS;
         return switch (state.turn().phase()) {
             case WAITING_FOR_ROLL -> 1550;  // pause before throwing dice
+            case WAITING_FOR_CARD_ACK -> 1800;  // reading the card
             case WAITING_FOR_DECISION -> {
                 // Buying a property: longer think when affordable, quick decline when broke
                 PendingDecision decision = state.pendingDecision();

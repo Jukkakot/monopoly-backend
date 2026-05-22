@@ -14,4 +14,6 @@ public interface TurnActionGateway {
     boolean useGetOutOfJailCard();
 
     boolean payJailFine();
+
+    boolean acknowledgeCard();
 }

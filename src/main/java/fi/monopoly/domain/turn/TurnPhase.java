@@ -2,6 +2,7 @@ package fi.monopoly.domain.turn;
 
 public enum TurnPhase {
     WAITING_FOR_ROLL,
+    WAITING_FOR_CARD_ACK,
     WAITING_FOR_DECISION,
     WAITING_FOR_AUCTION,
     RESOLVING_DEBT,

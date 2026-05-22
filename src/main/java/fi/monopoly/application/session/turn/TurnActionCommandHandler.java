@@ -29,7 +29,8 @@ public final class TurnActionCommandHandler {
                 || command instanceof SellBuildingRoundCommand
                 || command instanceof ToggleMortgageCommand
                 || command instanceof UseGetOutOfJailCardCommand
-                || command instanceof PayJailFineCommand;
+                || command instanceof PayJailFineCommand
+                || command instanceof AcknowledgeCardCommand;
     }
 
     public CommandResult handle(SessionCommand command) {
@@ -53,6 +54,9 @@ public final class TurnActionCommandHandler {
         }
         if (command instanceof PayJailFineCommand payFineCommand) {
             return handlePayJailFine(payFineCommand);
+        }
+        if (command instanceof AcknowledgeCardCommand ackCommand) {
+            return handleAcknowledgeCard(ackCommand);
         }
         return rejected("UNSUPPORTED_TURN_ACTION", "Turn action command is not supported");
     }
@@ -208,8 +212,22 @@ public final class TurnActionCommandHandler {
                 && Objects.equals(state.turn().activePlayerId(), actorPlayerId);
     }
 
+    private CommandResult handleAcknowledgeCard(AcknowledgeCardCommand command) {
+        if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
+            return rejected("WRONG_TURN_ACTOR", "Only the active player can acknowledge the card");
+        }
+        SessionState state = currentStateSupplier.get();
+        if (state.turn().phase() != TurnPhase.WAITING_FOR_CARD_ACK) {
+            return rejected("ACK_NOT_ALLOWED", "Card acknowledgement is only valid during WAITING_FOR_CARD_ACK phase");
+        }
+        return gateway.acknowledgeCard()
+                ? accepted("CardAcknowledged", command.actorPlayerId())
+                : rejected("ACK_FAILED", "Card acknowledgement failed");
+    }
+
     private boolean isTurnActionBlocked(TurnPhase phase) {
-        return phase == TurnPhase.WAITING_FOR_DECISION
+        return phase == TurnPhase.WAITING_FOR_CARD_ACK
+                || phase == TurnPhase.WAITING_FOR_DECISION
                 || phase == TurnPhase.WAITING_FOR_AUCTION
                 || phase == TurnPhase.RESOLVING_DEBT
                 || phase == TurnPhase.GAME_OVER;

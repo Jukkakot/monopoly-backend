@@ -27,7 +27,8 @@ public record SessionState(
         String lastCardKey,
         String hostPlayerId,
         List<GameEventEntry> eventLog,
-        long nextEventId
+        long nextEventId,
+        PendingCardEffect pendingCardEffect
 ) {
     public SessionState {
         seats = List.copyOf(seats);
@@ -55,7 +56,7 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                null, winnerPlayerId, null, null, null, null, null, null, 0L);
+                null, winnerPlayerId, null, null, null, null, null, null, 0L, null);
     }
 
     /** Backward-compat: with turnContinuationState, no card decks, no eventLog. */
@@ -76,6 +77,6 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, 0L);
+                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, 0L, null);
     }
 }

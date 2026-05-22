@@ -94,13 +94,14 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         // Third consecutive doubles → jail without collecting GO
         if (newConsecutive >= MAX_CONSECUTIVE_DOUBLES) {
             log.info("Player {} sent to jail for {} consecutive doubles", activePlayer.name(), newConsecutive);
-            store.update(s -> {
-                SessionState jailed = applyGoToJail(s, activePlayerId);
-                return appendEvents(
-                        jailed.toBuilder().turn(withDice(jailed.turn(), die1, die2)).build(),
-                        ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
-                        ev("WENT_TO_JAIL", activePlayerId, Map.of("from", fromIdxStr)));
-            });
+            // Snapshot 1: show the dice (player stays in place)
+            store.update(s -> appendEvents(
+                    s.toBuilder().turn(withDice(withConsecutive(s.turn(), newConsecutive), die1, die2)).build(),
+                    ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s))));
+            // Snapshot 2: send to jail
+            store.update(s -> appendEvents(
+                    applyGoToJail(s, activePlayerId),
+                    ev("WENT_TO_JAIL", activePlayerId, Map.of("from", fromIdxStr))));
             return true;
         }
 
@@ -449,6 +450,30 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         return true;
     }
 
+    @Override
+    public boolean acknowledgeCard() {
+        SessionState state = store.get();
+        PendingCardEffect pending = state.pendingCardEffect();
+        if (pending == null) return false;
+
+        CardType cardType;
+        try {
+            cardType = CardType.valueOf(pending.cardType());
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown card type in pending effect: {}", pending.cardType());
+            store.update(s -> s.toBuilder()
+                    .pendingCardEffect(null)
+                    .turn(postMovePhase(s.turn(), pending.isDoubles(), pending.consecutiveDoubles()))
+                    .build());
+            return true;
+        }
+
+        store.update(s -> s.toBuilder().pendingCardEffect(null).build());
+        applyCardEffect(pending.playerId(), cardType, pending.values(),
+                pending.isDoubles(), pending.consecutiveDoubles(), pending.diceTotal());
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers: jail
     // -------------------------------------------------------------------------
@@ -649,10 +674,16 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         log.info("Player {} drew {} card [{}] values={}", cardPlayer != null ? cardPlayer.name() : playerId, bundleName, cardKey, values);
 
         final String fullCardKey = bundleName + ":" + cardKey;
+        final PendingCardEffect pending = new PendingCardEffect(playerId, cardType.name(), values, isDoubles, consecutiveDoubles, diceTotal);
         store.update(s -> appendEvents(
-                s.toBuilder().lastCardMessage(cardText).lastCardKey(fullCardKey).build(),
+                s.toBuilder()
+                        .lastCardMessage(cardText)
+                        .lastCardKey(fullCardKey)
+                        .pendingCardEffect(pending)
+                        .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_CARD_ACK,
+                                false, false, consecutiveDoubles, s.turn().lastDice()))
+                        .build(),
                 ev("DREW_CARD", playerId, Map.of("card", fullCardKey))));
-        applyCardEffect(playerId, cardType, values, isDoubles, consecutiveDoubles, diceTotal);
     }
 
     private void ensureDecksInitialized() {
@@ -870,30 +901,69 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             return;
         }
 
-        // amountPerPlayer > 0: active player collects from others; < 0: active player pays others
-        int activeDelta = amountPerPlayer * others.size();
-
-        store.update(s -> {
-            List<PlayerSnapshot> updated = s.players().stream()
-                    .map(p -> {
-                        if (playerId.equals(p.playerId())) {
-                            return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() + activeDelta,
-                                    p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
-                                    p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
-                        }
-                        if (!p.eliminated()) {
-                            return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() - amountPerPlayer,
-                                    p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
-                                    p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
-                        }
-                        return p;
-                    })
-                    .toList();
-            return s.toBuilder()
-                    .players(updated)
-                    .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
-                    .build();
-        });
+        if (amountPerPlayer < 0) {
+            // Active player pays |amountPerPlayer| to each other player
+            int totalOwed = Math.abs(amountPerPlayer) * others.size();
+            PlayerSnapshot active = findPlayer(current, playerId);
+            if (active != null && active.cash() < totalOwed) {
+                // Can't afford: open debt (bank creditor; P3 will give the money to others properly)
+                applyRentOrDebt(current, playerId, null, totalOwed, isDoubles, consecutiveDoubles, "Card payment");
+                return;
+            }
+            // Can afford: deduct from active, distribute to others
+            final int payment = Math.abs(amountPerPlayer);
+            final int total = totalOwed;
+            store.update(s -> {
+                List<PlayerSnapshot> updated = s.players().stream()
+                        .map(p -> {
+                            if (playerId.equals(p.playerId())) {
+                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() - total,
+                                        p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                        p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                            }
+                            if (!p.eliminated()) {
+                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() + payment,
+                                        p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                        p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                            }
+                            return p;
+                        })
+                        .toList();
+                return s.toBuilder()
+                        .players(updated)
+                        .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
+                        .build();
+            });
+        } else {
+            // amountPerPlayer > 0: others pay active player
+            // Clamp each payer's deduction to their available cash (P3 will add proper per-player debt)
+            store.update(s -> {
+                int totalReceived = s.players().stream()
+                        .filter(p -> !playerId.equals(p.playerId()) && !p.eliminated())
+                        .mapToInt(p -> Math.min(p.cash(), amountPerPlayer))
+                        .sum();
+                List<PlayerSnapshot> updated = s.players().stream()
+                        .map(p -> {
+                            if (playerId.equals(p.playerId())) {
+                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() + totalReceived,
+                                        p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                        p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                            }
+                            if (!p.eliminated()) {
+                                int pay = Math.min(p.cash(), amountPerPlayer);
+                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() - pay,
+                                        p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                        p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                            }
+                            return p;
+                        })
+                        .toList();
+                return s.toBuilder()
+                        .players(updated)
+                        .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
+                        .build();
+            });
+        }
     }
 
     private static int parseIntSafe(String s) {
