@@ -372,5 +372,10 @@ class TurnActionCommandHandlerTest {
             paidJailFine = true;
             return true;
         }
+
+        @Override
+        public boolean acknowledgeCard() {
+            return true;
+        }
     }
 }
