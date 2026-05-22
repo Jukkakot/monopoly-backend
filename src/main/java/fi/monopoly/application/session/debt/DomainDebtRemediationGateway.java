@@ -3,6 +3,7 @@ package fi.monopoly.application.session.debt;
 import fi.monopoly.application.session.SessionStateStore;
 import fi.monopoly.application.session.turn.DomainTurnContinuationGateway;
 import fi.monopoly.domain.session.*;
+import static fi.monopoly.domain.session.GameEventHelper.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.types.PlaceType;
@@ -13,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Pure domain implementation of {@link DebtRemediationGateway} — no Processing runtime objects.
@@ -222,12 +224,18 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                     })
                     .toList();
 
-            return state.toBuilder()
+            SessionState next = state.toBuilder()
                     .players(updatedPlayers)
                     .activeDebt(null)
                     .turnContinuationState(null)
                     .turn(resolveTurn(state, updatedPlayers, continuation))
                     .build();
+            if (creditorId != null) {
+                return appendEvents(next,
+                        ev("PAID_RENT", List.of(debtorId, creditorId),
+                                Map.of("amount", String.valueOf(amount))));
+            }
+            return next;
         });
     }
 
@@ -294,7 +302,7 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
             if (winner != null) {
                 builder.winnerPlayerId(winner).status(SessionStatus.GAME_OVER);
             }
-            return builder.build();
+            return appendEvents(builder.build(), ev("WENT_BANKRUPT", debtorId));
         });
     }
 

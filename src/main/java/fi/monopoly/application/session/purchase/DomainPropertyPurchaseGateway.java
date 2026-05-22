@@ -3,11 +3,13 @@ package fi.monopoly.application.session.purchase;
 import fi.monopoly.application.session.SessionStateStore;
 import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
+import static fi.monopoly.domain.session.GameEventHelper.*;
 import fi.monopoly.types.SpotType;
 import lombok.RequiredArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Pure domain implementation of {@link PropertyPurchaseGateway} — no Processing runtime objects.
@@ -51,7 +53,10 @@ public final class DomainPropertyPurchaseGateway implements PropertyPurchaseGate
                             ? new PropertyStateSnapshot(prop.propertyId(), playerId, prop.mortgaged(), prop.houseCount(), prop.hotelCount())
                             : prop)
                     .toList();
-            return state.toBuilder().players(players).properties(properties).build();
+            return appendEvents(
+                    state.toBuilder().players(players).properties(properties).build(),
+                    ev("BOUGHT_PROPERTY", playerId, Map.of("property", propertyId,
+                            "price", String.valueOf(deduct))));
         });
         return true;
     }

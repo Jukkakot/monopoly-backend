@@ -25,7 +25,9 @@ public record SessionState(
         List<String> communityDeck,
         String lastCardMessage,
         String lastCardKey,
-        String hostPlayerId
+        String hostPlayerId,
+        List<GameEventEntry> eventLog,
+        long nextEventId
 ) {
     public SessionState {
         seats = List.copyOf(seats);
@@ -33,9 +35,10 @@ public record SessionState(
         properties = List.copyOf(properties);
         if (chanceDeck != null) chanceDeck = List.copyOf(chanceDeck);
         if (communityDeck != null) communityDeck = List.copyOf(communityDeck);
+        if (eventLog != null) eventLog = List.copyOf(eventLog); else eventLog = List.of();
     }
 
-    /** Backward-compat: no turnContinuationState, no card decks. */
+    /** Backward-compat: no turnContinuationState, no card decks, no eventLog. */
     public SessionState(
             String sessionId,
             long version,
@@ -52,10 +55,10 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                null, winnerPlayerId, null, null, null, null, null);
+                null, winnerPlayerId, null, null, null, null, null, null, 0L);
     }
 
-    /** Backward-compat: with turnContinuationState, no card decks. */
+    /** Backward-compat: with turnContinuationState, no card decks, no eventLog. */
     public SessionState(
             String sessionId,
             long version,
@@ -73,6 +76,6 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                turnContinuationState, winnerPlayerId, null, null, null, null, null);
+                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, 0L);
     }
 }

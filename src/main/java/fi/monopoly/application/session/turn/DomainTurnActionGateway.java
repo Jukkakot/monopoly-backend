@@ -3,6 +3,7 @@ package fi.monopoly.application.session.turn;
 import fi.monopoly.application.session.SessionStateStore;
 import fi.monopoly.application.session.purchase.PropertyPurchaseFlow;
 import fi.monopoly.domain.session.*;
+import static fi.monopoly.domain.session.GameEventHelper.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.types.CardType;
@@ -87,16 +88,21 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         log.debug("rollDice player={} die1={} die2={} total={} doubles={} consecutive={}",
                 activePlayer.name(), die1, die2, total, isDoubles, newConsecutive);
 
+        final String d1s = String.valueOf(die1), d2s = String.valueOf(die2);
+        final String fromIdxStr = String.valueOf(activePlayer.boardIndex());
+
         // Third consecutive doubles → jail without collecting GO
         if (newConsecutive >= MAX_CONSECUTIVE_DOUBLES) {
             log.info("Player {} sent to jail for {} consecutive doubles", activePlayer.name(), newConsecutive);
-            store.update(s -> applyGoToJail(s, activePlayerId));
+            store.update(s -> appendEvents(applyGoToJail(s, activePlayerId),
+                    ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
+                    ev("WENT_TO_JAIL", activePlayerId, Map.of("from", fromIdxStr))));
             return true;
         }
 
         // In-jail: special handling
         if (activePlayer.inJail()) {
-            handleInJailRoll(activePlayer, total, isDoubles);
+            handleInJailRoll(activePlayer, die1, die2, total, isDoubles);
             return true;
         }
 
@@ -105,20 +111,34 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         int newIndex = rawNew % BOARD_SIZE;
         boolean passedGo = rawNew >= BOARD_SIZE;
         SpotType landedSpot = SpotType.SPOT_TYPES.get(newIndex);
+        final String toIdxStr = String.valueOf(newIndex);
 
         if (landedSpot == SpotType.GO_TO_JAIL) {
             log.info("Player {} landed on Go To Jail", activePlayer.name());
-            // No GO reward even if passed GO on the way to GO_TO_JAIL (standard rules)
-            store.update(s -> applyGoToJail(s, activePlayerId));
+            store.update(s -> appendEvents(applyGoToJail(s, activePlayerId),
+                    ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
+                    ev("PLAYER_MOVED", activePlayerId, Map.of("from", fromIdxStr, "to", toIdxStr)),
+                    ev("WENT_TO_JAIL", activePlayerId, Map.of("from", toIdxStr))));
             return true;
         }
 
         // Move player + apply GO bonus
         final int goBonus = passedGo ? GO_REWARD : 0;
-        store.update(s -> s.toBuilder()
-                .players(updatePosition(s.players(), activePlayerId, newIndex, goBonus))
-                .turn(withConsecutive(s.turn(), newConsecutive))
-                .build());
+        final int newConsecutiveFinal = newConsecutive;
+        store.update(s -> {
+            SessionState moved = s.toBuilder()
+                    .players(updatePosition(s.players(), activePlayerId, newIndex, goBonus))
+                    .turn(withConsecutive(s.turn(), newConsecutiveFinal))
+                    .build();
+            return passedGo
+                    ? appendEvents(moved,
+                            ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
+                            ev("PLAYER_MOVED", activePlayerId, Map.of("from", fromIdxStr, "to", toIdxStr)),
+                            ev("PASSED_GO", activePlayerId))
+                    : appendEvents(moved,
+                            ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
+                            ev("PLAYER_MOVED", activePlayerId, Map.of("from", fromIdxStr, "to", toIdxStr)));
+        });
 
         applyLandingEffects(activePlayerId, landedSpot, isDoubles, newConsecutive, total);
         return true;
@@ -221,6 +241,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         }
 
         int newHouseCount = targetProp.houseCount() + 1;
+        final String activePlayerIdFinal = activePlayerId;
         store.update(s -> {
             List<PropertyStateSnapshot> updatedProps = s.properties().stream()
                     .map(p -> p.propertyId().equals(propertyId)
@@ -228,10 +249,13 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                     becomesHotel ? 0 : newHouseCount, becomesHotel ? 1 : 0)
                             : p)
                     .toList();
-            return s.toBuilder()
+            SessionState updated = s.toBuilder()
                     .properties(updatedProps)
-                    .players(updateCash(s.players(), activePlayerId, -housePrice))
+                    .players(updateCash(s.players(), activePlayerIdFinal, -housePrice))
                     .build();
+            return appendEvents(updated,
+                    ev(becomesHotel ? "BUILT_HOTEL" : "BUILT_HOUSE", activePlayerIdFinal,
+                            Map.of("property", propertyId)));
         });
         return true;
     }
@@ -273,6 +297,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         int saleProceeds = housePrice / 2;
         boolean sellingHotel = targetProp.hotelCount() > 0;
 
+        final String activePlayerIdFinal = activePlayerId;
         if (sellingHotel) {
             // Hotel → 4 houses (need bank house supply)
             int totalHouses = state.properties().stream().mapToInt(PropertyStateSnapshot::houseCount).sum();
@@ -284,10 +309,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                     ? new PropertyStateSnapshot(p.propertyId(), p.ownerPlayerId(), p.mortgaged(), 0, 0)
                                     : p)
                             .toList();
-                    return s.toBuilder()
-                            .properties(updatedProps)
-                            .players(updateCash(s.players(), activePlayerId, saleProceeds))
-                            .build();
+                    return appendEvents(
+                            s.toBuilder().properties(updatedProps)
+                                    .players(updateCash(s.players(), activePlayerIdFinal, saleProceeds)).build(),
+                            ev("SOLD_HOTEL", activePlayerIdFinal, Map.of("property", propertyId)));
                 });
             } else {
                 store.update(s -> {
@@ -296,10 +321,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                     ? new PropertyStateSnapshot(p.propertyId(), p.ownerPlayerId(), p.mortgaged(), 4, 0)
                                     : p)
                             .toList();
-                    return s.toBuilder()
-                            .properties(updatedProps)
-                            .players(updateCash(s.players(), activePlayerId, saleProceeds))
-                            .build();
+                    return appendEvents(
+                            s.toBuilder().properties(updatedProps)
+                                    .players(updateCash(s.players(), activePlayerIdFinal, saleProceeds)).build(),
+                            ev("SOLD_HOTEL", activePlayerIdFinal, Map.of("property", propertyId)));
                 });
             }
         } else {
@@ -310,10 +335,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                         p.houseCount() - 1, 0)
                                 : p)
                         .toList();
-                return s.toBuilder()
-                        .properties(updatedProps)
-                        .players(updateCash(s.players(), activePlayerId, saleProceeds))
-                        .build();
+                return appendEvents(
+                        s.toBuilder().properties(updatedProps)
+                                .players(updateCash(s.players(), activePlayerIdFinal, saleProceeds)).build(),
+                        ev("SOLD_HOUSE", activePlayerIdFinal, Map.of("property", propertyId)));
             });
         }
         return true;
@@ -340,19 +365,23 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 int unmortgageCost = mortgageValue + (int) (mortgageValue * 0.1);
                 PlayerSnapshot player = findPlayer(state, activePlayerId);
                 if (player == null || player.cash() < unmortgageCost) return state;
-                return state.toBuilder()
-                        .properties(replaceProperty(state.properties(), propertyId,
-                                new PropertyStateSnapshot(property.propertyId(), property.ownerPlayerId(),
-                                        false, property.houseCount(), property.hotelCount())))
-                        .players(updateCash(state.players(), activePlayerId, -unmortgageCost))
-                        .build();
+                return appendEvents(
+                        state.toBuilder()
+                                .properties(replaceProperty(state.properties(), propertyId,
+                                        new PropertyStateSnapshot(property.propertyId(), property.ownerPlayerId(),
+                                                false, property.houseCount(), property.hotelCount())))
+                                .players(updateCash(state.players(), activePlayerId, -unmortgageCost))
+                                .build(),
+                        ev("REDEEMED", activePlayerId, Map.of("property", propertyId)));
             } else {
-                return state.toBuilder()
-                        .properties(replaceProperty(state.properties(), propertyId,
-                                new PropertyStateSnapshot(property.propertyId(), property.ownerPlayerId(),
-                                        true, property.houseCount(), property.hotelCount())))
-                        .players(updateCash(state.players(), activePlayerId, mortgageValue))
-                        .build();
+                return appendEvents(
+                        state.toBuilder()
+                                .properties(replaceProperty(state.properties(), propertyId,
+                                        new PropertyStateSnapshot(property.propertyId(), property.ownerPlayerId(),
+                                                true, property.houseCount(), property.hotelCount())))
+                                .players(updateCash(state.players(), activePlayerId, mortgageValue))
+                                .build(),
+                        ev("MORTGAGED", activePlayerId, Map.of("property", propertyId)));
             }
         });
         return true;
@@ -375,10 +404,12 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                     p.getOutOfJailCards() - 1, p.ownedPropertyIds())
                             : p)
                     .toList();
-            return s.toBuilder()
-                    .players(updated)
-                    .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
-                    .build();
+            return appendEvents(
+                    s.toBuilder()
+                            .players(updated)
+                            .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                            .build(),
+                    ev("RELEASED_FROM_JAIL", activePlayerId));
         });
         return true;
     }
@@ -402,10 +433,12 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                     p.getOutOfJailCards(), p.ownedPropertyIds())
                             : p)
                     .toList();
-            return s.toBuilder()
-                    .players(updated)
-                    .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
-                    .build();
+            return appendEvents(
+                    s.toBuilder()
+                            .players(updated)
+                            .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                            .build(),
+                    ev("RELEASED_FROM_JAIL", activePlayerId));
         });
         return true;
     }
@@ -414,9 +447,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     // Private helpers: jail
     // -------------------------------------------------------------------------
 
-    private void handleInJailRoll(PlayerSnapshot activePlayer, int total, boolean isDoubles) {
+    private void handleInJailRoll(PlayerSnapshot activePlayer, int die1, int die2, int total, boolean isDoubles) {
         String playerId = activePlayer.playerId();
         int roundsLeft = activePlayer.jailRoundsRemaining();
+        final String d1s = String.valueOf(die1), d2s = String.valueOf(die2);
 
         if (isDoubles) {
             log.info("Player {} rolled doubles and escapes jail", activePlayer.name());
@@ -425,14 +459,28 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             boolean passedGo = rawNew >= BOARD_SIZE;
             SpotType landedSpot = SpotType.SPOT_TYPES.get(newIndex);
             final int goBonus = passedGo ? GO_REWARD : 0;
+            final String toStr = String.valueOf(newIndex);
 
-            store.update(s -> s.toBuilder()
-                    .players(updateJailRelease(s.players(), playerId, newIndex, goBonus))
-                    .turn(withConsecutive(s.turn(), 0))
-                    .build());
+            store.update(s -> {
+                SessionState moved = s.toBuilder()
+                        .players(updateJailRelease(s.players(), playerId, newIndex, goBonus))
+                        .turn(withConsecutive(s.turn(), 0))
+                        .build();
+                return passedGo
+                        ? appendEvents(moved,
+                                ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
+                                ev("RELEASED_FROM_JAIL", playerId),
+                                ev("PLAYER_MOVED", playerId, Map.of("from", String.valueOf(JAIL_INDEX), "to", toStr)),
+                                ev("PASSED_GO", playerId))
+                        : appendEvents(moved,
+                                ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
+                                ev("RELEASED_FROM_JAIL", playerId),
+                                ev("PLAYER_MOVED", playerId, Map.of("from", String.valueOf(JAIL_INDEX), "to", toStr)));
+            });
 
             if (landedSpot == SpotType.GO_TO_JAIL) {
-                store.update(s -> applyGoToJail(s, playerId));
+                store.update(s -> appendEvents(applyGoToJail(s, playerId),
+                        ev("WENT_TO_JAIL", playerId, Map.of("from", toStr))));
             } else {
                 // No re-roll bonus after jail escape even if doubles
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
@@ -444,14 +492,28 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             boolean passedGo = rawNew >= BOARD_SIZE;
             SpotType landedSpot = SpotType.SPOT_TYPES.get(newIndex);
             final int goBonus = passedGo ? GO_REWARD : 0;
+            final String toStr = String.valueOf(newIndex);
 
-            store.update(s -> s.toBuilder()
-                    .players(updateJailFineAndRelease(s.players(), playerId, newIndex, goBonus))
-                    .turn(withConsecutive(s.turn(), 0))
-                    .build());
+            store.update(s -> {
+                SessionState moved = s.toBuilder()
+                        .players(updateJailFineAndRelease(s.players(), playerId, newIndex, goBonus))
+                        .turn(withConsecutive(s.turn(), 0))
+                        .build();
+                return passedGo
+                        ? appendEvents(moved,
+                                ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
+                                ev("RELEASED_FROM_JAIL", playerId),
+                                ev("PLAYER_MOVED", playerId, Map.of("from", String.valueOf(JAIL_INDEX), "to", toStr)),
+                                ev("PASSED_GO", playerId))
+                        : appendEvents(moved,
+                                ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
+                                ev("RELEASED_FROM_JAIL", playerId),
+                                ev("PLAYER_MOVED", playerId, Map.of("from", String.valueOf(JAIL_INDEX), "to", toStr)));
+            });
 
             if (landedSpot == SpotType.GO_TO_JAIL) {
-                store.update(s -> applyGoToJail(s, playerId));
+                store.update(s -> appendEvents(applyGoToJail(s, playerId),
+                        ev("WENT_TO_JAIL", playerId, Map.of("from", toStr))));
             } else {
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
             }
@@ -465,10 +527,12 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                         roundsLeft - 1, p.getOutOfJailCards(), p.ownedPropertyIds())
                                 : p)
                         .toList();
-                return s.toBuilder()
-                        .players(updated)
-                        .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0))
-                        .build();
+                return appendEvents(
+                        s.toBuilder()
+                                .players(updated)
+                                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0))
+                                .build(),
+                        ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)));
             });
         }
     }
@@ -514,7 +578,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         // GO_TO_JAIL corner — jail the player regardless of how they arrived
         if (landedSpot == SpotType.GO_TO_JAIL) {
             log.debug("applyLandingEffects GO_TO_JAIL player={}", playerId);
-            store.update(s -> applyGoToJail(s, playerId));
+            store.update(s -> appendEvents(applyGoToJail(s, playerId),
+                    ev("WENT_TO_JAIL", playerId)));
             return;
         }
 
@@ -566,7 +631,9 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         log.info("Player {} drew {} card [{}] values={}", cardPlayer != null ? cardPlayer.name() : playerId, bundleName, cardKey, values);
 
         final String fullCardKey = bundleName + ":" + cardKey;
-        store.update(s -> s.toBuilder().lastCardMessage(cardText).lastCardKey(fullCardKey).build());
+        store.update(s -> appendEvents(
+                s.toBuilder().lastCardMessage(cardText).lastCardKey(fullCardKey).build(),
+                ev("DREW_CARD", playerId, Map.of("card", fullCardKey))));
         applyCardEffect(playerId, cardType, values, isDoubles, consecutiveDoubles, diceTotal);
     }
 
@@ -596,7 +663,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 applyCardMoveNearest(playerId, typeStr, isDoubles, consecutiveDoubles, diceTotal);
             }
             case MOVE_BACK_3 -> applyCardMoveBack(playerId, 3, isDoubles, consecutiveDoubles, diceTotal);
-            case GO_JAIL -> store.update(s -> applyGoToJail(s, playerId));
+            case GO_JAIL -> store.update(s -> appendEvents(applyGoToJail(s, playerId),
+                    ev("WENT_TO_JAIL", playerId)));
             case OUT_OF_JAIL -> {
                 store.update(s -> {
                     List<PlayerSnapshot> updated = s.players().stream()
@@ -837,10 +905,16 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                             return p;
                         })
                         .toList();
-                return s.toBuilder()
+                SessionState next = s.toBuilder()
                         .players(updated)
                         .turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles))
                         .build();
+                if (creditorId != null) {
+                    return appendEvents(next,
+                            ev("PAID_RENT", List.of(debtorId, creditorId),
+                                    Map.of("amount", String.valueOf(amount))));
+                }
+                return next;
             });
         } else {
             openDebt(state, debtorId, creditorId, amount, isDoubles, consecutiveDoubles, reason);
