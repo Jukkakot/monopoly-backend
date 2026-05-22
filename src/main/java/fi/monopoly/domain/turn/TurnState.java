@@ -5,9 +5,13 @@ public record TurnState(
         TurnPhase phase,
         boolean canRoll,
         boolean canEndTurn,
-        int consecutiveDoubles
+        int consecutiveDoubles,
+        int[] lastDice
 ) {
     public TurnState(String activePlayerId, TurnPhase phase, boolean canRoll, boolean canEndTurn) {
-        this(activePlayerId, phase, canRoll, canEndTurn, 0);
+        this(activePlayerId, phase, canRoll, canEndTurn, 0, null);
+    }
+    public TurnState(String activePlayerId, TurnPhase phase, boolean canRoll, boolean canEndTurn, int consecutiveDoubles) {
+        this(activePlayerId, phase, canRoll, canEndTurn, consecutiveDoubles, null);
     }
 }

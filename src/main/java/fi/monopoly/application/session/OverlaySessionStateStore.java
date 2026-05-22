@@ -126,13 +126,13 @@ public final class OverlaySessionStateStore implements SessionStateStore {
             TradeState ts
     ) {
         if (ad != null) {
-            return new TurnState(base.activePlayerId(), TurnPhase.RESOLVING_DEBT, false, false, base.consecutiveDoubles());
+            return new TurnState(base.activePlayerId(), TurnPhase.RESOLVING_DEBT, false, false, base.consecutiveDoubles(), base.lastDice());
         }
         if (as != null) {
-            return new TurnState(base.activePlayerId(), TurnPhase.WAITING_FOR_AUCTION, false, false, base.consecutiveDoubles());
+            return new TurnState(base.activePlayerId(), TurnPhase.WAITING_FOR_AUCTION, false, false, base.consecutiveDoubles(), base.lastDice());
         }
         if (ts != null || pd != null) {
-            return new TurnState(base.activePlayerId(), TurnPhase.WAITING_FOR_DECISION, false, false, base.consecutiveDoubles());
+            return new TurnState(base.activePlayerId(), TurnPhase.WAITING_FOR_DECISION, false, false, base.consecutiveDoubles(), base.lastDice());
         }
         return base;
     }

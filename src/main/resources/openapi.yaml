@@ -713,6 +713,15 @@ components:
           type: integer
           minimum: 0
           maximum: 3
+        lastDice:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 6
+          minItems: 2
+          maxItems: 2
+          nullable: true
 
     PendingDecision:
       type: object

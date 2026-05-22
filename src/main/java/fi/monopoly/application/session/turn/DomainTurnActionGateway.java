@@ -94,9 +94,13 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         // Third consecutive doubles → jail without collecting GO
         if (newConsecutive >= MAX_CONSECUTIVE_DOUBLES) {
             log.info("Player {} sent to jail for {} consecutive doubles", activePlayer.name(), newConsecutive);
-            store.update(s -> appendEvents(applyGoToJail(s, activePlayerId),
-                    ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
-                    ev("WENT_TO_JAIL", activePlayerId, Map.of("from", fromIdxStr))));
+            store.update(s -> {
+                SessionState jailed = applyGoToJail(s, activePlayerId);
+                return appendEvents(
+                        jailed.toBuilder().turn(withDice(jailed.turn(), die1, die2)).build(),
+                        ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
+                        ev("WENT_TO_JAIL", activePlayerId, Map.of("from", fromIdxStr)));
+            });
             return true;
         }
 
@@ -119,6 +123,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             store.update(s -> appendEvents(
                     s.toBuilder()
                             .players(updatePosition(s.players(), activePlayerId, newIndex, 0))
+                            .turn(withDice(s.turn(), die1, die2))
                             .build(),
                     ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
                     ev("PLAYER_MOVED", activePlayerId, Map.of("from", fromIdxStr, "to", toIdxStr))));
@@ -133,7 +138,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         store.update(s -> appendEvents(
                 s.toBuilder()
                         .players(updatePosition(s.players(), activePlayerId, newIndex, 0))
-                        .turn(withConsecutive(s.turn(), newConsecutiveFinal))
+                        .turn(withDice(withConsecutive(s.turn(), newConsecutiveFinal), die1, die2))
                         .build(),
                 ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s)),
                 ev("PLAYER_MOVED", activePlayerId, Map.of("from", fromIdxStr, "to", toIdxStr))));
@@ -153,7 +158,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     public void pauseAfterPropertyPurchase(TurnContinuationState continuation) {
         pendingPostPurchaseContinuation = continuation;
         store.update(s -> s.toBuilder()
-                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, s.turn().consecutiveDoubles()))
+                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, s.turn().consecutiveDoubles(), s.turn().lastDice()))
                 .build());
     }
 
@@ -164,7 +169,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         if (pending != null) {
             switch (pending.completionAction()) {
                 case APPLY_TURN_FOLLOW_UP -> store.update(s -> s.toBuilder()
-                        .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles()))
+                        .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles(), s.turn().lastDice()))
                         .lastCardMessage(null)
                         .build());
                 case END_TURN_WITH_SWITCH -> store.update(s -> {
@@ -466,7 +471,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             store.update(s -> appendEvents(
                     s.toBuilder()
                             .players(clearJailFlag(s.players(), playerId))
-                            .turn(withConsecutive(s.turn(), 0))
+                            .turn(withDice(withConsecutive(s.turn(), 0), die1, die2))
                             .build(),
                     ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
                     ev("RELEASED_FROM_JAIL", playerId)));
@@ -505,7 +510,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             store.update(s -> appendEvents(
                     s.toBuilder()
                             .players(clearJailFlagWithFine(s.players(), playerId))
-                            .turn(withConsecutive(s.turn(), 0))
+                            .turn(withDice(withConsecutive(s.turn(), 0), die1, die2))
                             .build(),
                     ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
                     ev("RELEASED_FROM_JAIL", playerId)));
@@ -543,7 +548,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 return appendEvents(
                         s.toBuilder()
                                 .players(updated)
-                                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0))
+                                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0, new int[]{die1, die2}))
                                 .build(),
                         ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)));
             });
@@ -567,7 +572,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 return;
             }
             if (ownerId.equals(playerId) || property.mortgaged()) {
-                store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+                store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
                 return;
             }
             int rent = calculateRent(current, landedSpot, property, ownerId, diceTotal);
@@ -597,7 +602,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         }
 
         // CORNER (GO / JAIL visiting / FREE_PARKING) → advance turn
-        store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+        store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
     }
 
     // -------------------------------------------------------------------------
@@ -613,7 +618,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         SessionState state = store.get();
         List<String> deck = isChance ? state.chanceDeck() : state.communityDeck();
         if (deck == null || deck.isEmpty()) {
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
 
@@ -635,7 +640,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             cardType = CardType.valueOf(parts[0]);
         } catch (IllegalArgumentException e) {
             log.warn("Unknown card type in key: {}", cardKey);
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
         List<String> values = CardDeckLoader.cardValues(bundleName, cardKey);
@@ -689,7 +694,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                             .toList();
                     return s.toBuilder()
                             .players(updated)
-                            .turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles))
+                            .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
                             .build();
                 });
             }
@@ -710,7 +715,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         if (amount >= 0) {
             store.update(s -> s.toBuilder()
                     .players(updateCash(s.players(), playerId, amount))
-                    .turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles))
+                    .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
                     .build());
         } else {
             SessionState current = store.get();
@@ -720,7 +725,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
     private void applyCardMove(String playerId, String target, boolean isDoubles, int consecutiveDoubles, int diceTotal) {
         if (target == null) {
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
         SpotType targetSpot;
@@ -728,7 +733,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             targetSpot = SpotType.valueOf(target.trim());
         } catch (IllegalArgumentException e) {
             log.warn("Unknown MOVE card target: {}", target);
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
 
@@ -783,7 +788,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         }
 
         if (nearestSpot == null) {
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
 
@@ -848,7 +853,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         int totalCost = houses * houseCost + hotels * hotelCost;
 
         if (totalCost == 0) {
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
         applyRentOrDebt(current, playerId, null, totalCost, isDoubles, consecutiveDoubles, "Card repairs");
@@ -861,7 +866,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 .toList();
 
         if (others.isEmpty() || amountPerPlayer == 0) {
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
 
@@ -886,7 +891,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                     .toList();
             return s.toBuilder()
                     .players(updated)
-                    .turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles))
+                    .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
                     .build();
         });
     }
@@ -914,7 +919,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 spot.name(), null
         );
         store.update(s -> s.toBuilder()
-                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_DECISION, false, false, consecutiveDoubles))
+                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_DECISION, false, false, consecutiveDoubles, s.turn().lastDice()))
                 .build());
         propertyPurchaseFlow.begin(playerId, spot.name(), displayName, price,
                 displayName + " €" + price, continuation);
@@ -924,7 +929,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                   boolean isDoubles, int consecutiveDoubles, String reason) {
         log.debug("applyRentOrDebt debtor={} creditor={} amount={} reason={}", debtorId, creditorId, amount, reason);
         if (amount <= 0) {
-            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles)).build());
+            store.update(s -> s.toBuilder().turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles)).build());
             return;
         }
         PlayerSnapshot debtor = findPlayer(state, debtorId);
@@ -942,12 +947,12 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 // Snapshot 2: creditor receives + turn phase advances
                 store.update(s -> s.toBuilder()
                         .players(updateCash(s.players(), creditorId, amount))
-                        .turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles))
+                        .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
                         .build());
             } else {
                 store.update(s -> s.toBuilder()
                         .players(updateCash(s.players(), debtorId, -amount))
-                        .turn(postMovePhase(s.turn().activePlayerId(), isDoubles, consecutiveDoubles))
+                        .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
                         .build());
             }
         } else {
@@ -984,7 +989,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         store.update(s -> s.toBuilder()
                 .activeDebt(debt)
                 .turnContinuationState(continuation)
-                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.RESOLVING_DEBT, false, false, consecutiveDoubles))
+                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.RESOLVING_DEBT, false, false, consecutiveDoubles, s.turn().lastDice()))
                 .build());
     }
 
@@ -1002,19 +1007,23 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 .toList();
         return state.toBuilder()
                 .players(updated)
-                .turn(new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0))
+                .turn(new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0, state.turn().lastDice()))
                 .build();
     }
 
-    private static TurnState postMovePhase(String activePlayerId, boolean isDoubles, int consecutiveDoubles) {
+    private static TurnState postMovePhase(TurnState current, boolean isDoubles, int consecutiveDoubles) {
         if (isDoubles) {
-            return new TurnState(activePlayerId, TurnPhase.WAITING_FOR_ROLL, true, false, consecutiveDoubles);
+            return new TurnState(current.activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, consecutiveDoubles, current.lastDice());
         }
-        return new TurnState(activePlayerId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0);
+        return new TurnState(current.activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0, current.lastDice());
     }
 
     private static TurnState withConsecutive(TurnState current, int consecutiveDoubles) {
-        return new TurnState(current.activePlayerId(), current.phase(), current.canRoll(), current.canEndTurn(), consecutiveDoubles);
+        return new TurnState(current.activePlayerId(), current.phase(), current.canRoll(), current.canEndTurn(), consecutiveDoubles, current.lastDice());
+    }
+
+    private static TurnState withDice(TurnState current, int d1, int d2) {
+        return new TurnState(current.activePlayerId(), current.phase(), current.canRoll(), current.canEndTurn(), current.consecutiveDoubles(), new int[]{d1, d2});
     }
 
     // -------------------------------------------------------------------------

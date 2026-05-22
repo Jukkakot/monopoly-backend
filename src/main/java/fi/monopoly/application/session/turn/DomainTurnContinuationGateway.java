@@ -37,7 +37,7 @@ public final class DomainTurnContinuationGateway implements TurnContinuationGate
         switch (continuationState.completionAction()) {
             case APPLY_TURN_FOLLOW_UP -> store.update(s -> s.toBuilder()
                     .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false,
-                            s.turn().consecutiveDoubles()))
+                            s.turn().consecutiveDoubles(), s.turn().lastDice()))
                     .turnContinuationState(null)
                     .build());
             case END_TURN_WITH_SWITCH -> store.update(s -> {

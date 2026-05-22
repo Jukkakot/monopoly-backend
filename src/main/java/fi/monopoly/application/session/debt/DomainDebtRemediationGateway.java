@@ -291,7 +291,7 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
             String nextPlayer = nextActivePlayerId(updatedPlayers, state.seats(), debtorId);
             TurnState nextTurn = nextPlayer != null
                     ? new TurnState(nextPlayer, TurnPhase.WAITING_FOR_ROLL, true, false, 0)
-                    : new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0);
+                    : new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0, state.turn().lastDice());
 
             SessionState.SessionStateBuilder builder = state.toBuilder()
                     .properties(updatedProps)
@@ -313,22 +313,23 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
     private TurnState resolveTurn(SessionState state, List<PlayerSnapshot> updatedPlayers,
                                    TurnContinuationState continuation) {
         String activeId = state.turn().activePlayerId();
+        int[] lastDice = state.turn().lastDice();
         if (continuation == null) {
-            return new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0);
+            return new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0, lastDice);
         }
         return switch (continuation.completionAction()) {
             case APPLY_TURN_FOLLOW_UP ->
-                    new TurnState(activeId, TurnPhase.WAITING_FOR_ROLL, true, false, state.turn().consecutiveDoubles());
+                    new TurnState(activeId, TurnPhase.WAITING_FOR_ROLL, true, false, state.turn().consecutiveDoubles(), lastDice);
             case END_TURN_WITH_SWITCH -> {
                 String next = nextActivePlayerId(updatedPlayers, state.seats(), activeId);
                 yield next != null
                         ? new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0)
-                        : new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0);
+                        : new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0, lastDice);
             }
             case END_TURN_WITHOUT_SWITCH ->
-                    new TurnState(activeId, TurnPhase.WAITING_FOR_ROLL, true, false, 0);
+                    new TurnState(activeId, TurnPhase.WAITING_FOR_ROLL, true, false, 0, lastDice);
             case NONE ->
-                    new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0);
+                    new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0, lastDice);
         };
     }
 

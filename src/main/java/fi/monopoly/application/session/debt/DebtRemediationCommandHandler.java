@@ -177,7 +177,7 @@ public final class DebtRemediationCommandHandler {
         SessionState state = sessionStateSupplier.get();
         if (state.activeDebt() == null && state.turn().phase() == TurnPhase.RESOLVING_DEBT) {
             state = state.toBuilder()
-                    .turn(new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true))
+                    .turn(new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, state.turn().consecutiveDoubles(), state.turn().lastDice()))
                     .activeDebt(null)
                     .turnContinuationState(null)
                     .build();
