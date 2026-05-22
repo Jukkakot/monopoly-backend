@@ -159,7 +159,9 @@ public final class SessionHttpServer {
                     ctx.status(204);
                 });
                 config.routes.post("/sessions/{id}/join", this::handleLobbyJoin);
-                config.routes.post("/sessions/{id}/start", this::handleLobbyStart);
+                config.routes.post("/sessions/{id}/lobby/bots", this::handleLobbyAddBot);
+                config.routes.delete("/sessions/{id}/lobby/bots/{seatId}", this::handleLobbyRemoveBot);
+                config.routes.post("/sessions/{id}/lobby/ready", this::handleLobbyReady);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
                 config.routes.get("/sessions/{id}/snapshot", ctx ->
@@ -253,19 +255,15 @@ public final class SessionHttpServer {
                     ? (List<String>) request.get("colors") : List.of();
             Boolean lobbyMode = request.get("lobbyMode") instanceof Boolean b ? b : Boolean.FALSE;
             if (Boolean.TRUE.equals(lobbyMode)) {
-                @SuppressWarnings("unchecked")
-                List<String> lobbyNames = request.get("names") != null ? (List<String>) request.get("names") : List.of("Pelaaja");
-                @SuppressWarnings("unchecked")
-                List<String> lobbyColors = request.get("colors") != null ? (List<String>) request.get("colors") : List.of();
-                @SuppressWarnings("unchecked")
-                List<String> kindStrings = request.get("seatKinds") != null ? (List<String>) request.get("seatKinds") : List.of();
-                List<SeatKind> lobbyKinds = new ArrayList<>();
-                for (int i = 0; i < lobbyNames.size(); i++) {
-                    String k = i < kindStrings.size() ? kindStrings.get(i) : "HUMAN";
-                    lobbyKinds.add("BOT".equals(k) ? SeatKind.BOT : SeatKind.HUMAN);
-                }
-                var result = registry.createLobby(lobbyNames, lobbyColors, lobbyKinds);
-                ctx.status(201).json(Map.of("sessionId", result.sessionId(), "hostToken", result.hostToken()));
+                String hostName = request.get("hostName") instanceof String s ? s.trim() : "Pelaaja";
+                String hostColor = request.get("hostColor") instanceof String s ? s : null;
+                if (hostName.isEmpty()) hostName = "Pelaaja";
+                var result = registry.createLobby(hostName, hostColor);
+                ctx.status(201).json(Map.of(
+                        "sessionId", result.sessionId(),
+                        "hostToken", result.hostToken(),
+                        "playerId", result.hostPlayerId(),
+                        "playerToken", result.hostPlayerToken()));
                 return;
             }
             if (names == null || names.isEmpty()) {
@@ -328,20 +326,74 @@ public final class SessionHttpServer {
         }
     }
 
-    private void handleLobbyStart(Context ctx) {
+    private void handleLobbyAddBot(Context ctx) {
         try {
             String id = ctx.pathParam("id");
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            boolean started = registry.startLobbyGame(id);
-            if (started) {
-                ctx.status(200).json(Map.of("started", true));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            String hostToken = body.get("hostToken") instanceof String s ? s : null;
+            if (!registry.validateHostToken(id, hostToken)) {
+                ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
+                return;
+            }
+            registry.addLobbyBot(id)
+                    .ifPresentOrElse(
+                            seat -> ctx.status(200).json(Map.of("seatId", seat.seatId(), "name", seat.displayName())),
+                            () -> ctx.status(409).json(Map.of("error", "Lobby is full or not in LOBBY state")));
+        } catch (NotFoundResponse e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error adding lobby bot", e);
+            ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
+    private void handleLobbyRemoveBot(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            String seatId = ctx.pathParam("seatId");
+            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            String hostToken = body.get("hostToken") instanceof String s ? s : null;
+            if (!registry.validateHostToken(id, hostToken)) {
+                ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
+                return;
+            }
+            boolean removed = registry.removeLobbyBot(id, seatId);
+            if (removed) {
+                ctx.status(200).json(Map.of("removed", true));
             } else {
-                ctx.status(409).json(Map.of("error", "Session not in LOBBY state or fewer than 2 players joined"));
+                ctx.status(409).json(Map.of("error", "Bot seat not found or not in LOBBY state"));
             }
         } catch (NotFoundResponse e) {
             throw e;
         } catch (Exception e) {
-            log.error("Error starting lobby game", e);
+            log.error("Error removing lobby bot", e);
+            ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
+    private void handleLobbyReady(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            String playerId = body.get("playerId") instanceof String s ? s : null;
+            String playerToken = body.get("playerToken") instanceof String s ? s : null;
+            boolean ready = body.get("ready") instanceof Boolean b ? b : true;
+            if (!registry.validatePlayerToken(id, playerId, playerToken)) {
+                ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
+                return;
+            }
+            boolean changed = registry.setPlayerReady(id, playerId, ready);
+            ctx.status(200).json(Map.of("changed", changed));
+        } catch (NotFoundResponse e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error setting lobby ready", e);
             ctx.status(500).json(Map.of("error", "Internal server error"));
         }
     }

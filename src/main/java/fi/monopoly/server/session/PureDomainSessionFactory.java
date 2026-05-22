@@ -179,6 +179,84 @@ public final class PureDomainSessionFactory {
         return StartingOrderDeterminer.determineStartOrder(candidates, rng);
     }
 
+    /** Color palette for dynamically assigned seats (index 0–5). */
+    static final List<String> SEAT_COLORS = List.of(
+            "#E53935", "#1E88E5", "#43A047", "#F9A825", "#8E24AA", "#FF7043");
+
+    /**
+     * Builds a LOBBY state with a single host seat already joined.
+     * The host's playerId is used as hostPlayerId in the returned state.
+     */
+    public static SessionState lobbyWithHost(String sessionId, String hostPlayerId, String hostName, String hostColor) {
+        String seatId = "seat-0";
+        SeatState hostSeat = new SeatState(seatId, 0, hostPlayerId, SeatKind.HUMAN, ControlMode.MANUAL,
+                hostName, "HUMAN", hostColor, true, null, false);
+        PlayerSnapshot hostPlayer = new PlayerSnapshot(hostPlayerId, seatId, hostName,
+                1500, 0, false, false, false, 0, 0, List.of());
+        List<PropertyStateSnapshot> properties = SpotType.SPOT_TYPES.stream()
+                .filter(s -> s.isProperty)
+                .map(s -> new PropertyStateSnapshot(s.name(), null, false, 0, 0))
+                .toList();
+        return SessionState.builder()
+                .sessionId(sessionId)
+                .version(0L)
+                .status(SessionStatus.LOBBY)
+                .seats(List.of(hostSeat))
+                .players(List.of(hostPlayer))
+                .properties(properties)
+                .turn(new TurnState(null, TurnPhase.WAITING_FOR_ROLL, false, false, 0))
+                .hostPlayerId(hostPlayerId)
+                .build();
+    }
+
+    /**
+     * Builds a playable initial game state from an existing set of lobby seats, preserving
+     * player IDs. Turn order is determined by the standard Monopoly dice-roll rule.
+     */
+    public static SessionState initialGameStateFromSeats(String sessionId, List<SeatState> lobbySeats, String hostPlayerId) {
+        return initialGameStateFromSeats(sessionId, lobbySeats, hostPlayerId, new Random());
+    }
+
+    static SessionState initialGameStateFromSeats(String sessionId, List<SeatState> lobbySeats, String hostPlayerId, Random rng) {
+        List<Integer> inputIndices = new ArrayList<>();
+        for (int i = 0; i < lobbySeats.size(); i++) inputIndices.add(i);
+        List<Integer> turnOrder = determineStartOrder(inputIndices, rng);
+
+        List<SeatState> seats = new ArrayList<>();
+        List<PlayerSnapshot> players = new ArrayList<>();
+        for (int seatIndex = 0; seatIndex < turnOrder.size(); seatIndex++) {
+            int originalIndex = turnOrder.get(seatIndex);
+            SeatState lobby = lobbySeats.get(originalIndex);
+            SeatState gameSeat = new SeatState(
+                    "seat-" + seatIndex, seatIndex,
+                    lobby.playerId(), lobby.seatKind(), lobby.controlMode(),
+                    lobby.displayName(), lobby.controllerProfileId(),
+                    lobby.tokenColorHex(), true, lobby.botDifficulty(), false);
+            seats.add(gameSeat);
+            players.add(new PlayerSnapshot(lobby.playerId(), "seat-" + seatIndex,
+                    lobby.displayName(), 1500, 0, false, false, false, 0, 0, List.of()));
+        }
+
+        String firstPlayerId = players.get(0).playerId();
+        List<String> chanceDeck = CardDeckLoader.buildDeck("chance", rng);
+        List<String> communityDeck = CardDeckLoader.buildDeck("community", rng);
+        return SessionState.builder()
+                .sessionId(sessionId)
+                .version(0L)
+                .status(SessionStatus.IN_PROGRESS)
+                .seats(seats)
+                .players(players)
+                .properties(SpotType.SPOT_TYPES.stream()
+                        .filter(s -> s.isProperty)
+                        .map(s -> new PropertyStateSnapshot(s.name(), null, false, 0, 0))
+                        .toList())
+                .turn(new TurnState(firstPlayerId, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                .chanceDeck(chanceDeck)
+                .communityDeck(communityDeck)
+                .hostPlayerId(hostPlayerId)
+                .build();
+    }
+
     /**
      * Builds a LOBBY state with {@code seatCount} unclaimed seats.
      *

@@ -6,6 +6,7 @@ import fi.monopoly.domain.session.*;
 import fi.monopoly.server.transport.GlobalMetrics;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,23 +20,16 @@ import java.util.stream.Collectors;
 
 /**
  * Thread-safe registry of active game sessions for the multi-session server mode.
- *
- * <p>Sessions are created on demand via {@link #create} and identified by a random UUID.
- * The registry owns the {@link SessionCommandPublisher} lifecycle for each session.
- * If any seat is {@link SeatKind#BOT}, a {@link PureDomainBotDriver} is also started.</p>
- *
- * <p>Sessions are automatically evicted after being idle for
- * {@code monopoly.session.ttl.minutes} minutes (default 120). Activity is tracked
- * whenever a publisher is fetched via {@link #get}.</p>
  */
 @Slf4j
 public final class SessionRegistry {
 
+    private static final int MAX_SEATS = 6;
     private static final long TTL_MINUTES =
             Long.getLong("monopoly.session.ttl.minutes", 120L);
     private static final long CLEANUP_INTERVAL_MINUTES = 5L;
 
-    public record CreateResult(String sessionId, String hostToken) {}
+    public record CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken) {}
     public record JoinResult(SeatState seat, String playerToken) {}
 
     private record Entry(
@@ -58,26 +52,18 @@ public final class SessionRegistry {
                 CLEANUP_INTERVAL_MINUTES, CLEANUP_INTERVAL_MINUTES, TimeUnit.MINUTES);
     }
 
-    /**
-     * Creates a new all-human session with the given player names and colours.
-     */
+    // -------------------------------------------------------------------------
+    // Direct-start sessions (no lobby phase)
+    // -------------------------------------------------------------------------
+
     public CreateResult create(List<String> names, List<String> colors) {
         return create(names, colors, List.of());
     }
 
-    /**
-     * Creates a new session with explicit seat kinds. Seats not covered by {@code seatKinds}
-     * default to {@link SeatKind#HUMAN}. Bot seats get a {@link PureDomainBotDriver} attached.
-     */
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds) {
         return create(names, colors, seatKinds, List.of());
     }
 
-    /**
-     * Creates a new session with explicit seat kinds and per-seat bot difficulties.
-     * {@code difficulties} is indexed by seat position; missing entries default to
-     * {@link BotDifficulty#NORMAL}.
-     */
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
                                List<BotDifficulty> difficulties) {
         String sessionId = SessionIdGenerator.generate();
@@ -92,67 +78,193 @@ public final class SessionRegistry {
         sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, new ConcurrentHashMap<>()));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
-        return new CreateResult(sessionId, hostToken);
+        return new CreateResult(sessionId, hostToken, null, null);
     }
 
+    // -------------------------------------------------------------------------
+    // Lobby sessions — new dynamic flow
+    // -------------------------------------------------------------------------
+
     /**
-     * Creates a new lobby session with {@code seatCount} unclaimed seats.
-     * Players join via {@link #joinLobby} and the host starts via {@link #startLobbyGame}.
+     * Creates a new lobby with the host immediately joined as the first seat.
+     * Returns session credentials for both host (token) and host-as-player (playerId + playerToken).
      */
-    public CreateResult createLobby(List<String> names, List<String> colors, List<SeatKind> kinds) {
+    public CreateResult createLobby(String hostName, String hostColor) {
         String sessionId = SessionIdGenerator.generate();
         String hostToken = UUID.randomUUID().toString();
-        SessionState initialState = PureDomainSessionFactory.lobbyInitialState(sessionId, names, colors, kinds);
+        String hostPlayerId = "player-" + UUID.randomUUID();
+        String effectiveColor = (hostColor != null && !hostColor.isBlank())
+                ? hostColor : PureDomainSessionFactory.SEAT_COLORS.get(0);
+
+        SessionState initialState = PureDomainSessionFactory.lobbyWithHost(sessionId, hostPlayerId, hostName, effectiveColor);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
-        sessions.put(sessionId, new Entry(publisher, baseStore, List.of(), null, hostToken, new ConcurrentHashMap<>()));
+
+        ConcurrentHashMap<String, String> playerTokens = new ConcurrentHashMap<>();
+        String hostPlayerToken = UUID.randomUUID().toString();
+        playerTokens.put(hostPlayerId, hostPlayerToken);
+
+        sessions.put(sessionId, new Entry(publisher, baseStore, new ArrayList<>(), null, hostToken, playerTokens));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
-        return new CreateResult(sessionId, hostToken);
+        return new CreateResult(sessionId, hostToken, hostPlayerId, hostPlayerToken);
     }
 
     /**
-     * Claims the first available (unjoined) seat in a LOBBY session.
-     *
-     * @return the claimed seat and a fresh player token, or empty if no seat available
+     * Dynamically adds a new human seat for the joining player (max {@value MAX_SEATS} total).
      */
     public Optional<JoinResult> joinLobby(String sessionId, String name, String color) {
         Entry entry = sessions.get(sessionId);
         if (entry == null) return Optional.empty();
         lastActivityAt.put(sessionId, System.currentTimeMillis());
 
-        final SeatState[] claimed = {null};
+        String newPlayerId = "player-" + UUID.randomUUID();
+        final SeatState[] added = {null};
+
         entry.baseStore().update(state -> {
             if (state.status() != SessionStatus.LOBBY) return state;
-            SeatState free = state.seats().stream()
-                    .filter(s -> !s.joined())
-                    .findFirst()
-                    .orElse(null);
-            if (free == null) return state;
-            String effectiveColor = (color != null && !color.isBlank()) ? color : free.tokenColorHex();
-            SeatState updated = new SeatState(free.seatId(), free.seatIndex(), free.playerId(),
-                    free.seatKind(), free.controlMode(), name, free.controllerProfileId(),
-                    effectiveColor, true, null);
-            claimed[0] = updated;
-            List<SeatState> newSeats = state.seats().stream()
-                    .map(s -> s.seatId().equals(free.seatId()) ? updated : s)
-                    .toList();
-            List<PlayerSnapshot> newPlayers = state.players().stream()
-                    .map(p -> p.seatId().equals(free.seatId())
-                            ? new PlayerSnapshot(p.playerId(), p.seatId(), name, p.cash(),
-                                    p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
-                                    p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds())
-                            : p)
-                    .toList();
+            if (state.seats().size() >= MAX_SEATS) return state;
+
+            int seatIndex = state.seats().size();
+            String seatId = "seat-" + UUID.randomUUID();
+            String effectiveColor = resolveColor(color, state, seatIndex);
+            SeatState newSeat = new SeatState(seatId, seatIndex, newPlayerId, SeatKind.HUMAN,
+                    ControlMode.MANUAL, name, "HUMAN", effectiveColor, true, null, false);
+            added[0] = newSeat;
+
+            List<SeatState> newSeats = new ArrayList<>(state.seats());
+            newSeats.add(newSeat);
+            List<PlayerSnapshot> newPlayers = new ArrayList<>(state.players());
+            newPlayers.add(new PlayerSnapshot(newPlayerId, seatId, name, 1500, 0, false, false, false, 0, 0, List.of()));
             return state.toBuilder().seats(newSeats).players(newPlayers).build();
         });
-        if (claimed[0] == null) return Optional.empty();
+
+        if (added[0] == null) return Optional.empty();
         String playerToken = UUID.randomUUID().toString();
-        entry.playerTokens().put(claimed[0].playerId(), playerToken);
+        entry.playerTokens().put(newPlayerId, playerToken);
         entry.publisher().notifyListeners();
-        return Optional.of(new JoinResult(claimed[0], playerToken));
+        return Optional.of(new JoinResult(added[0], playerToken));
     }
+
+    /**
+     * Adds a bot seat to the lobby (host-only action, max {@value MAX_SEATS} total).
+     *
+     * @return the added bot seat, or empty if at capacity or not in LOBBY state
+     */
+    public Optional<SeatState> addLobbyBot(String sessionId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return Optional.empty();
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+
+        String botPlayerId = "player-" + UUID.randomUUID();
+        final SeatState[] added = {null};
+
+        entry.baseStore().update(state -> {
+            if (state.status() != SessionStatus.LOBBY) return state;
+            if (state.seats().size() >= MAX_SEATS) return state;
+
+            int seatIndex = state.seats().size();
+            long botCount = state.seats().stream().filter(s -> s.seatKind() == SeatKind.BOT).count();
+            String botName = "Botti " + (botCount + 1);
+            String seatId = "seat-" + UUID.randomUUID();
+            String color = resolveColor(null, state, seatIndex);
+            SeatState botSeat = new SeatState(seatId, seatIndex, botPlayerId, SeatKind.BOT,
+                    ControlMode.AUTOPLAY, botName, "BOT", color, true, BotDifficulty.STRONG, true);
+            added[0] = botSeat;
+
+            List<SeatState> newSeats = new ArrayList<>(state.seats());
+            newSeats.add(botSeat);
+            List<PlayerSnapshot> newPlayers = new ArrayList<>(state.players());
+            newPlayers.add(new PlayerSnapshot(botPlayerId, seatId, botName, 1500, 0, false, false, false, 0, 0, List.of()));
+            return state.toBuilder().seats(newSeats).players(newPlayers).build();
+        });
+
+        if (added[0] == null) return Optional.empty();
+        entry.publisher().notifyListeners();
+        return Optional.of(added[0]);
+    }
+
+    /**
+     * Removes a bot seat from the lobby (host-only action).
+     *
+     * @return true if the bot was found and removed
+     */
+    public boolean removeLobbyBot(String sessionId, String seatId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return false;
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+
+        final boolean[] removed = {false};
+        entry.baseStore().update(state -> {
+            if (state.status() != SessionStatus.LOBBY) return state;
+            SeatState target = state.seats().stream()
+                    .filter(s -> s.seatId().equals(seatId) && s.seatKind() == SeatKind.BOT)
+                    .findFirst().orElse(null);
+            if (target == null) return state;
+
+            removed[0] = true;
+            List<SeatState> newSeats = state.seats().stream()
+                    .filter(s -> !s.seatId().equals(seatId))
+                    .collect(Collectors.toList());
+            List<PlayerSnapshot> newPlayers = state.players().stream()
+                    .filter(p -> !p.playerId().equals(target.playerId()))
+                    .collect(Collectors.toList());
+            return state.toBuilder().seats(newSeats).players(newPlayers).build();
+        });
+
+        if (removed[0]) entry.publisher().notifyListeners();
+        return removed[0];
+    }
+
+    /**
+     * Sets a player's ready status. When all human players are ready, the game starts automatically.
+     *
+     * @return true if the ready state was changed
+     */
+    public boolean setPlayerReady(String sessionId, String playerId, boolean ready) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return false;
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+
+        final boolean[] changed = {false};
+        entry.baseStore().update(state -> {
+            if (state.status() != SessionStatus.LOBBY) return state;
+            SeatState seat = state.seats().stream()
+                    .filter(s -> s.playerId().equals(playerId) && s.seatKind() == SeatKind.HUMAN)
+                    .findFirst().orElse(null);
+            if (seat == null || seat.ready() == ready) return state;
+
+            changed[0] = true;
+            SeatState updated = new SeatState(seat.seatId(), seat.seatIndex(), seat.playerId(),
+                    seat.seatKind(), seat.controlMode(), seat.displayName(), seat.controllerProfileId(),
+                    seat.tokenColorHex(), seat.joined(), seat.botDifficulty(), ready);
+            List<SeatState> newSeats = state.seats().stream()
+                    .map(s -> s.playerId().equals(playerId) ? updated : s)
+                    .toList();
+            return state.toBuilder().seats(newSeats).build();
+        });
+
+        if (!changed[0]) return false;
+
+        // Check if all human players are now ready → auto-start
+        SessionState current = entry.baseStore().get();
+        List<SeatState> humans = current.seats().stream()
+                .filter(s -> s.seatKind() == SeatKind.HUMAN).toList();
+        boolean allReady = !humans.isEmpty() && humans.stream().allMatch(SeatState::ready);
+        long totalPlayers = current.seats().size();
+
+        if (allReady && totalPlayers >= 2) {
+            startLobbyGame(sessionId, entry);
+        } else {
+            entry.publisher().notifyListeners();
+        }
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Token validation
+    // -------------------------------------------------------------------------
 
     public boolean validatePlayerToken(String sessionId, String playerId, String token) {
         Entry entry = sessions.get(sessionId);
@@ -166,62 +278,39 @@ public final class SessionRegistry {
         return token != null && token.equals(entry.hostToken());
     }
 
-    /**
-     * Starts a lobby game: converts unjoined seats to BOT seats, determines turn order,
-     * transitions status to {@code IN_PROGRESS}, and starts bot drivers.
-     *
-     * @return false if session not found, not in LOBBY state, or fewer than 2 seats joined
-     */
-    public boolean startLobbyGame(String sessionId) {
-        Entry entry = sessions.get(sessionId);
-        if (entry == null) return false;
-        lastActivityAt.put(sessionId, System.currentTimeMillis());
+    // -------------------------------------------------------------------------
+    // Internal game start
+    // -------------------------------------------------------------------------
 
+    private void startLobbyGame(String sessionId, Entry entry) {
         SessionState current = entry.baseStore().get();
-        if (current.status() != SessionStatus.LOBBY) return false;
-        long totalJoined = current.seats().stream()
-                .filter(s -> s.joined()).count();
-        if (totalJoined < 2) return false;
+        if (current.status() != SessionStatus.LOBBY) return;
 
-        // Unjoined human seats become bots (no one claimed them before start)
-        List<String> names = current.seats().stream()
-                .map(s -> s.displayName() != null ? s.displayName() : "Botti " + (s.seatIndex() + 1))
-                .toList();
-        List<String> colors = current.seats().stream().map(SeatState::tokenColorHex).toList();
-        List<SeatKind> kinds = current.seats().stream()
-                .map(s -> (s.seatKind() == SeatKind.HUMAN && !s.joined()) ? SeatKind.BOT : s.seatKind())
-                .toList();
+        List<SeatState> lobbySeats = current.seats();
+        String hostPlayerId = current.hostPlayerId();
 
-        SessionState gameState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, kinds);
+        SessionState gameState = PureDomainSessionFactory.initialGameStateFromSeats(sessionId, lobbySeats, hostPlayerId);
         entry.baseStore().update(ignored -> gameState);
 
-        // All bot seats get STRONG difficulty
         Map<String, BotDifficulty> diffMap = new HashMap<>();
         gameState.seats().stream()
                 .filter(s -> s.seatKind() == SeatKind.BOT)
                 .forEach(s -> diffMap.put(s.playerId(), BotDifficulty.STRONG));
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, diffMap);
+
+        List<String> humanNames = gameState.seats().stream()
+                .filter(s -> s.seatKind() == SeatKind.HUMAN)
+                .map(SeatState::displayName).toList();
         sessions.put(sessionId, new Entry(entry.publisher(), entry.baseStore(),
-                gameState.seats().stream().filter(s -> s.seatKind() == SeatKind.HUMAN)
-                        .map(SeatState::displayName).toList(),
-                botDriver, entry.hostToken(), entry.playerTokens()));
+                humanNames, botDriver, entry.hostToken(), entry.playerTokens()));
 
         entry.publisher().notifyListeners();
-        return true;
     }
 
-    private static Map<String, BotDifficulty> buildDifficultyMap(
-            SessionState state, List<BotDifficulty> difficulties) {
-        Map<String, BotDifficulty> map = new HashMap<>();
-        List<SeatState> seats = state.seats();
-        for (int i = 0; i < seats.size(); i++) {
-            if (i < difficulties.size() && difficulties.get(i) != null) {
-                map.put(seats.get(i).playerId(), difficulties.get(i));
-            }
-        }
-        return map;
-    }
+    // -------------------------------------------------------------------------
+    // Session lifecycle
+    // -------------------------------------------------------------------------
 
     public Optional<SessionCommandPublisher> get(String sessionId) {
         Entry entry = sessions.get(sessionId);
@@ -248,7 +337,6 @@ public final class SessionRegistry {
         }
     }
 
-    /** Stops all bot drivers, clears all sessions, and shuts down the cleanup scheduler. */
     public void shutdown() {
         cleaner.shutdownNow();
         sessions.values().forEach(e -> {
@@ -259,8 +347,32 @@ public final class SessionRegistry {
     }
 
     // -------------------------------------------------------------------------
-    // TTL cleanup
+    // Helpers
     // -------------------------------------------------------------------------
+
+    /** Returns the next palette color not yet used by any seat in the current state. */
+    private static String resolveColor(String requested, SessionState state, int seatIndex) {
+        if (requested != null && !requested.isBlank()) return requested;
+        List<String> palette = PureDomainSessionFactory.SEAT_COLORS;
+        java.util.Set<String> used = state.seats().stream()
+                .map(SeatState::tokenColorHex).collect(java.util.stream.Collectors.toSet());
+        for (String c : palette) {
+            if (!used.contains(c)) return c;
+        }
+        return palette.get(seatIndex % palette.size());
+    }
+
+    private static Map<String, BotDifficulty> buildDifficultyMap(
+            SessionState state, List<BotDifficulty> difficulties) {
+        Map<String, BotDifficulty> map = new HashMap<>();
+        List<SeatState> seats = state.seats();
+        for (int i = 0; i < seats.size(); i++) {
+            if (i < difficulties.size() && difficulties.get(i) != null) {
+                map.put(seats.get(i).playerId(), difficulties.get(i));
+            }
+        }
+        return map;
+    }
 
     private void evictIdleSessions() {
         long cutoff = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(TTL_MINUTES);
