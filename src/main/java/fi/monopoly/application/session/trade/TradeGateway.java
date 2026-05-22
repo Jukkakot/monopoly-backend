@@ -8,4 +8,10 @@ public interface TradeGateway {
     boolean isValidOffer(TradeOfferState offerState);
 
     boolean applyOffer(TradeOfferState offerState);
+
+    void logTradeAccepted(String initiatorId, String recipientId);
+
+    void logTradeDeclined(String initiatorId, String recipientId);
+
+    void logTradeCancelled(String initiatorId, String recipientId);
 }

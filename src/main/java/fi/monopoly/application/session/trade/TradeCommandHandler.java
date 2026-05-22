@@ -168,6 +168,7 @@ public final class TradeCommandHandler {
             tradeStateSetter.accept(state);
             return reject("TRADE_APPLY_FAILED", "Trade could not be applied");
         }
+        gateway.logTradeAccepted(state.initiatorPlayerId(), state.recipientPlayerId());
         tradeStateSetter.accept(null);
         return accepted(List.of(new DomainEvent("TradeAccepted", command.actorPlayerId(), state.tradeId())));
     }
@@ -177,6 +178,7 @@ public final class TradeCommandHandler {
         if (state == null) {
             return reject("INVALID_TRADE_RESPONSE", "Trade decline command is not valid in the current state");
         }
+        gateway.logTradeDeclined(state.initiatorPlayerId(), state.recipientPlayerId());
         tradeStateSetter.accept(null);
         return accepted(List.of(new DomainEvent("TradeDeclined", command.actorPlayerId(), state.tradeId())));
     }
@@ -214,6 +216,7 @@ public final class TradeCommandHandler {
         if (!Objects.equals(state.editingPlayerId(), command.actorPlayerId())) {
             return reject("WRONG_TRADE_EDITOR", "Only the current trade editor can cancel the trade");
         }
+        gateway.logTradeCancelled(state.initiatorPlayerId(), state.recipientPlayerId());
         tradeStateSetter.accept(null);
         return accepted(List.of(new DomainEvent("TradeCancelled", command.actorPlayerId(), state.tradeId())));
     }

@@ -6,6 +6,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.Map;
+
+import static fi.monopoly.domain.session.GameEventHelper.*;
 
 /**
  * Pure domain implementation of {@link TradeGateway} — no Processing runtime objects.
@@ -102,6 +105,24 @@ public final class DomainTradeGateway implements TradeGateway {
                     .build();
         });
         return true;
+    }
+
+    @Override
+    public void logTradeAccepted(String initiatorId, String recipientId) {
+        store.update(state -> appendEvents(state,
+                ev("TRADE_ACCEPTED", List.of(initiatorId, recipientId), Map.of())));
+    }
+
+    @Override
+    public void logTradeDeclined(String initiatorId, String recipientId) {
+        store.update(state -> appendEvents(state,
+                ev("TRADE_DECLINED", List.of(initiatorId, recipientId), Map.of())));
+    }
+
+    @Override
+    public void logTradeCancelled(String initiatorId, String recipientId) {
+        store.update(state -> appendEvents(state,
+                ev("TRADE_CANCELLED", List.of(initiatorId, recipientId), Map.of())));
     }
 
     // -------------------------------------------------------------------------
