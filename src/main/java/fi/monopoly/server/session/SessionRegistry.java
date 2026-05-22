@@ -179,16 +179,18 @@ public final class SessionRegistry {
 
         SessionState current = entry.baseStore().get();
         if (current.status() != SessionStatus.LOBBY) return false;
-        long humanJoinedCount = current.seats().stream()
-                .filter(s -> s.seatKind() == SeatKind.HUMAN && s.joined()).count();
-        if (humanJoinedCount < 1) return false;
+        long totalJoined = current.seats().stream()
+                .filter(s -> s.joined()).count();
+        if (totalJoined < 2) return false;
 
-        // Build new game state: use seat names/colors/kinds as-is (bots are pre-filled)
+        // Unjoined human seats become bots (no one claimed them before start)
         List<String> names = current.seats().stream()
                 .map(s -> s.displayName() != null ? s.displayName() : "Botti " + (s.seatIndex() + 1))
                 .toList();
         List<String> colors = current.seats().stream().map(SeatState::tokenColorHex).toList();
-        List<SeatKind> kinds = current.seats().stream().map(SeatState::seatKind).toList();
+        List<SeatKind> kinds = current.seats().stream()
+                .map(s -> (s.seatKind() == SeatKind.HUMAN && !s.joined()) ? SeatKind.BOT : s.seatKind())
+                .toList();
 
         SessionState gameState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, kinds);
         entry.baseStore().update(ignored -> gameState);
