@@ -235,7 +235,8 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 || command instanceof SellBuildingRoundCommand
                 || command instanceof ToggleMortgageCommand
                 || command instanceof UseGetOutOfJailCardCommand
-                || command instanceof PayJailFineCommand)) {
+                || command instanceof PayJailFineCommand
+                || command instanceof AcknowledgeCardCommand)) {
             return turnActionCommandHandler.handle(command);
         }
         if (command instanceof AbortGameCommand abortCmd) {
