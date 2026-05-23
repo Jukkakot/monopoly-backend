@@ -452,7 +452,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             case NORMAL -> 1.0;
             case STRONG -> 0.80;   // more decisive
         };
-        long scaled = Math.max(200L, (long) (base * diffMult * speed));
+        long floor = speed < 0.15 ? 30L : 200L;  // fast mode: no artificial floor
+        long scaled = Math.max(floor, (long) (base * diffMult * speed));
         long jitter = (long) (scaled * 0.20);
         return scaled + ThreadLocalRandom.current().nextLong(-jitter, jitter + 1);
     }

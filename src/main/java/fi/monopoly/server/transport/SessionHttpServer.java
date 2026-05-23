@@ -408,7 +408,7 @@ public final class SessionHttpServer {
 
             if (body.get("botSpeed") instanceof String speed) {
                 double multiplier = switch (speed) {
-                    case "fast" -> 0.2;
+                    case "fast" -> 0.05;
                     case "slow" -> 2.5;
                     default     -> 1.0;
                 };
