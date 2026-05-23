@@ -10,16 +10,20 @@ import fi.monopoly.domain.session.SessionStatus;
  * can reconstruct its local presentation model from a received snapshot without requiring a
  * separate query to the host. This is the enabling shape for the backend transport MVP: a remote
  * host can push this snapshot over the wire and the client applies it to its legacy runtime.</p>
+ *
+ * <p>The {@code serverTimestampMs} field is set when the snapshot is created on the backend,
+ * allowing clients to measure network latency by comparing with local receive time.</p>
  */
 public record ClientSessionSnapshot(
         String sessionId,
         long version,
         SessionStatus status,
         boolean viewAvailable,
-        SessionState state
+        SessionState state,
+        long serverTimestampMs
 ) {
     public static ClientSessionSnapshot empty() {
-        return new ClientSessionSnapshot(null, 0L, null, false, null);
+        return new ClientSessionSnapshot(null, 0L, null, false, null, System.currentTimeMillis());
     }
 
     public static ClientSessionSnapshot from(SessionState sessionState, boolean viewAvailable) {
@@ -31,7 +35,8 @@ public record ClientSessionSnapshot(
                 sessionState.version(),
                 sessionState.status(),
                 viewAvailable,
-                sessionState
+                sessionState,
+                System.currentTimeMillis()
         );
     }
 }
