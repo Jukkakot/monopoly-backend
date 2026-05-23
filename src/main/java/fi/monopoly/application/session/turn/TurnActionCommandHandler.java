@@ -8,6 +8,7 @@ import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
 import fi.monopoly.domain.session.SessionState;
 import fi.monopoly.domain.turn.TurnPhase;
+import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.types.PlaceType;
 import fi.monopoly.types.SpotType;
 import lombok.RequiredArgsConstructor;
@@ -65,8 +66,12 @@ public final class TurnActionCommandHandler {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can roll dice");
         }
-        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+        TurnState turn = currentStateSupplier.get().turn();
+        if (isTurnActionBlocked(turn.phase())) {
             return rejected("ROLL_NOT_ALLOWED", "Dice can only be rolled during the rolling phase");
+        }
+        if (!turn.canRoll()) {
+            return rejected("ROLL_NOT_ALLOWED", "Dice roll is not allowed at this point");
         }
         return gateway.rollDice()
                 ? accepted("DiceRolled", command.actorPlayerId())
@@ -77,9 +82,12 @@ public final class TurnActionCommandHandler {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can end the turn");
         }
-        TurnPhase phase = currentStateSupplier.get().turn().phase();
-        if (isTurnActionBlocked(phase) || phase == TurnPhase.WAITING_FOR_ROLL) {
+        TurnState turn = currentStateSupplier.get().turn();
+        if (isTurnActionBlocked(turn.phase()) || turn.phase() == TurnPhase.WAITING_FOR_ROLL) {
             return rejected("END_TURN_NOT_ALLOWED", "Turn can only end during the end-turn phase");
+        }
+        if (!turn.canEndTurn()) {
+            return rejected("END_TURN_NOT_ALLOWED", "Turn cannot be ended at this point");
         }
         return gateway.endTurn()
                 ? accepted("TurnEnded", command.actorPlayerId())
@@ -89,6 +97,9 @@ public final class TurnActionCommandHandler {
     private CommandResult handleBuyBuildingRound(BuyBuildingRoundCommand command) {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can buy buildings");
+        }
+        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+            return rejected("BUILD_ROUND_FAILED", "Buildings cannot be bought in the current phase");
         }
         if (!gateway.buyBuildingRound(command.propertyId())) {
             return rejected("BUILD_ROUND_FAILED", "Building round purchase failed");
@@ -100,6 +111,9 @@ public final class TurnActionCommandHandler {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can sell buildings");
         }
+        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+            return rejected("SELL_ROUND_FAILED", "Buildings cannot be sold in the current phase");
+        }
         if (!gateway.sellBuildingRound(command.propertyId())) {
             return rejected("SELL_ROUND_FAILED", "Building round sale failed");
         }
@@ -109,6 +123,9 @@ public final class TurnActionCommandHandler {
     private CommandResult handleToggleMortgage(ToggleMortgageCommand command) {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can change mortgages");
+        }
+        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+            return rejected("MORTGAGE_TOGGLE_FAILED", "Mortgage cannot be changed in the current phase");
         }
         SessionState state = currentStateSupplier.get();
         PropertyStateSnapshot property = findPropertyOwnedBy(state, command.propertyId(), command.actorPlayerId());
