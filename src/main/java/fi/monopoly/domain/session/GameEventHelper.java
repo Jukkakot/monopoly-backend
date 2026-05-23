@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Static helpers for appending {@link GameEventEntry} records to {@link SessionState}.
@@ -12,6 +14,8 @@ import java.util.Map;
  * inside domain gateway classes.</p>
  */
 public final class GameEventHelper {
+
+    private static final Logger logger = LoggerFactory.getLogger(GameEventHelper.class);
 
     static final int MAX_EVENT_LOG = 200;
 
@@ -28,7 +32,9 @@ public final class GameEventHelper {
         long id = s.nextEventId();
         long now = System.currentTimeMillis();
         for (GameEventEntry e : newEvents) {
-            log.add(new GameEventEntry(id++, now, e.type(), e.playerIds(), e.data()));
+            GameEventEntry entry = new GameEventEntry(id++, now, e.type(), e.playerIds(), e.data());
+            logger.debug("[event] id={} type={} players={} data={}", entry.id(), entry.type(), entry.playerIds(), entry.data());
+            log.add(entry);
         }
         if (log.size() > MAX_EVENT_LOG) {
             log = new ArrayList<>(log.subList(log.size() - MAX_EVENT_LOG, log.size()));

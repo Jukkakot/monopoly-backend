@@ -157,22 +157,30 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     }
 
     public void pauseAfterPropertyPurchase(TurnContinuationState continuation) {
+        log.debug("pauseAfterPropertyPurchase continuation={} action={}", continuation.continuationId(), continuation.completionAction());
         pendingPostPurchaseContinuation = continuation;
-        store.update(s -> s.toBuilder()
-                .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, s.turn().consecutiveDoubles(), s.turn().lastDice()))
-                .build());
+        store.update(s -> {
+            log.trace("pauseAfterPropertyPurchase store.update: consecutiveDoubles={} -> WAITING_FOR_END_TURN", s.turn().consecutiveDoubles());
+            return s.toBuilder()
+                    .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, s.turn().consecutiveDoubles(), s.turn().lastDice()))
+                    .build();
+        });
     }
 
     @Override
     public boolean endTurn() {
         TurnContinuationState pending = pendingPostPurchaseContinuation;
+        log.debug("endTurn pending={}", pending != null ? pending.continuationId() + " action=" + pending.completionAction() : "null");
         pendingPostPurchaseContinuation = null;
         if (pending != null) {
             switch (pending.completionAction()) {
-                case APPLY_TURN_FOLLOW_UP -> store.update(s -> s.toBuilder()
-                        .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles(), s.turn().lastDice()))
-                        .lastCardMessage(null)
-                        .build());
+                case APPLY_TURN_FOLLOW_UP -> store.update(s -> {
+                    log.debug("endTurn APPLY_TURN_FOLLOW_UP: consecutiveDoubles={} -> WAITING_FOR_ROLL canRoll=true", s.turn().consecutiveDoubles());
+                    return s.toBuilder()
+                            .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles(), s.turn().lastDice()))
+                            .lastCardMessage(null)
+                            .build();
+                });
                 case END_TURN_WITH_SWITCH -> store.update(s -> {
                     String next = DomainTurnContinuationGateway.nextActivePlayerId(s, s.turn().activePlayerId());
                     if (next == null) return s;
@@ -981,6 +989,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         TurnContinuationAction completionAction = isDoubles
                 ? TurnContinuationAction.APPLY_TURN_FOLLOW_UP
                 : TurnContinuationAction.END_TURN_WITH_SWITCH;
+        log.debug("openPropertyDecision player={} spot={} isDoubles={} consecutiveDoubles={} -> completionAction={}",
+                playerId, spot, isDoubles, consecutiveDoubles, completionAction);
         TurnContinuationState continuation = new TurnContinuationState(
                 "cont:" + playerId + ":purchase:" + spot.name(),
                 playerId,
