@@ -39,7 +39,7 @@ class SessionHttpServerTest {
         port = findFreePort();
         commandPort = new StubCommandPort();
         sessionUpdates = new StubSessionUpdates();
-        fixedSnapshot = new ClientSessionSnapshot("s1", 1L, SessionStatus.IN_PROGRESS, false, null);
+        fixedSnapshot = new ClientSessionSnapshot("s1", 1L, SessionStatus.IN_PROGRESS, false, null, System.currentTimeMillis());
         server = new SessionHttpServer(commandPort, sessionUpdates, () -> fixedSnapshot, port);
         server.start();
     }
