@@ -313,6 +313,13 @@ public final class SessionRegistry {
     // Session lifecycle
     // -------------------------------------------------------------------------
 
+    public boolean setBotSpeed(String sessionId, double multiplier) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return false;
+        entry.botDriver().setSpeedMultiplier(multiplier);
+        return true;
+    }
+
     public Optional<SessionCommandPublisher> get(String sessionId) {
         Entry entry = sessions.get(sessionId);
         if (entry != null) {

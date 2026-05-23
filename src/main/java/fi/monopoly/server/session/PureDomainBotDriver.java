@@ -48,6 +48,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final Map<String, BotDifficulty> difficulties;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
+    private volatile double speedMultiplier = 1.0;
 
     private PureDomainBotDriver(
             SessionCommandPublisher publisher,
@@ -95,6 +96,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     public void stop() {
         scheduler.shutdownNow();
+    }
+
+    public void setSpeedMultiplier(double multiplier) {
+        this.speedMultiplier = Math.max(0.0, multiplier);
+        log.debug("Bot speed multiplier set to {} for session {}", multiplier, sessionId.substring(0, 8));
     }
 
     // -------------------------------------------------------------------------
@@ -434,6 +440,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      */
     private long computeDelay(SessionState state) {
         if (BOT_FALLBACK_DELAY_MS == 0) return 0;  // instant mode (tests / system property = 0)
+        double speed = speedMultiplier;
+        if (speed == 0.0) return 0;
         long base = computeBaseDelay(state);
         String actorId = resolveActorId(state);
         BotDifficulty diff = actorId != null
@@ -444,7 +452,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             case NORMAL -> 1.0;
             case STRONG -> 0.80;   // more decisive
         };
-        long scaled = Math.max(200L, (long) (base * diffMult));
+        long scaled = Math.max(200L, (long) (base * diffMult * speed));
         long jitter = (long) (scaled * 0.20);
         return scaled + ThreadLocalRandom.current().nextLong(-jitter, jitter + 1);
     }

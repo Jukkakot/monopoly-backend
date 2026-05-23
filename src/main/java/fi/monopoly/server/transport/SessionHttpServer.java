@@ -162,6 +162,7 @@ public final class SessionHttpServer {
                 config.routes.post("/sessions/{id}/lobby/bots", this::handleLobbyAddBot);
                 config.routes.delete("/sessions/{id}/lobby/bots/{seatId}", this::handleLobbyRemoveBot);
                 config.routes.post("/sessions/{id}/lobby/ready", this::handleLobbyReady);
+                config.routes.put("/sessions/{id}/bot-speed", this::handleBotSpeed);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
                 config.routes.get("/sessions/{id}/snapshot", ctx ->
@@ -394,6 +395,28 @@ public final class SessionHttpServer {
             throw e;
         } catch (Exception e) {
             log.error("Error setting lobby ready", e);
+            ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
+    private void handleBotSpeed(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            String speed = body.get("speed") instanceof String s ? s : "normal";
+            double multiplier = switch (speed) {
+                case "fast"  -> 0.2;
+                case "slow"  -> 2.5;
+                default      -> 1.0;
+            };
+            registry.setBotSpeed(id, multiplier);
+            ctx.status(200).json(Map.of("speed", speed, "multiplier", multiplier));
+        } catch (NotFoundResponse e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error setting bot speed", e);
             ctx.status(500).json(Map.of("error", "Internal server error"));
         }
     }
