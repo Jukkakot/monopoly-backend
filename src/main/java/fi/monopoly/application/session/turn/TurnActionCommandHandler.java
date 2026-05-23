@@ -77,7 +77,8 @@ public final class TurnActionCommandHandler {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can end the turn");
         }
-        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+        TurnPhase phase = currentStateSupplier.get().turn().phase();
+        if (isTurnActionBlocked(phase) || phase == TurnPhase.WAITING_FOR_ROLL) {
             return rejected("END_TURN_NOT_ALLOWED", "Turn can only end during the end-turn phase");
         }
         return gateway.endTurn()
