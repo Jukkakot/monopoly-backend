@@ -67,7 +67,8 @@ public final class SessionRegistry {
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
                                List<BotDifficulty> difficulties) {
         String sessionId = SessionIdGenerator.generate();
-        String hostToken = UUID.randomUUID().toString();
+        boolean allBots = !seatKinds.isEmpty() && seatKinds.stream().allMatch(k -> k == SeatKind.BOT);
+        String hostToken = allBots ? null : UUID.randomUUID().toString();
         SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds, difficulties);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
