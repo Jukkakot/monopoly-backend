@@ -184,18 +184,20 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 case END_TURN_WITH_SWITCH -> store.update(s -> {
                     String next = DomainTurnContinuationGateway.nextActivePlayerId(s, s.turn().activePlayerId());
                     if (next == null) return s;
+                    log.trace("endTurn END_TURN_WITH_SWITCH: {} -> next={}", s.turn().activePlayerId(), next);
                     return s.toBuilder()
                             .turn(new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
                             .lastCardMessage(null)
                             .build();
                 });
-                default -> { /* fall through to normal end-turn */ }
+                default -> log.trace("endTurn pending.completionAction={} fell through to normal end-turn", pending.completionAction());
             }
             return true;
         }
         store.update(state -> {
             String next = DomainTurnContinuationGateway.nextActivePlayerId(state, state.turn().activePlayerId());
             if (next == null) return state;
+            log.trace("endTurn normal switch: {} -> next={}", state.turn().activePlayerId(), next);
             return state.toBuilder()
                     .turn(new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
                     .lastCardMessage(null)
