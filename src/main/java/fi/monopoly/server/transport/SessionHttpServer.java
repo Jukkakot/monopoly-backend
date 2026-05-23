@@ -93,7 +93,7 @@ public final class SessionHttpServer {
             // CORS — unconditional, matching old behavior (browsers require Origin header anyway)
             config.routes.before(ctx -> {
                 ctx.header("Access-Control-Allow-Origin", "*");
-                ctx.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+                ctx.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
                 ctx.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
             });
             config.routes.options("/*", ctx -> ctx.status(204));
