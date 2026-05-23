@@ -162,6 +162,7 @@ public final class SessionHttpServer {
                 config.routes.post("/sessions/{id}/lobby/bots", this::handleLobbyAddBot);
                 config.routes.delete("/sessions/{id}/lobby/bots/{seatId}", this::handleLobbyRemoveBot);
                 config.routes.post("/sessions/{id}/lobby/ready", this::handleLobbyReady);
+                config.routes.get("/sessions/{id}/settings", this::handleGetSettings);
                 config.routes.put("/sessions/{id}/settings", this::handleSettings);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
@@ -397,6 +398,14 @@ public final class SessionHttpServer {
             log.error("Error setting lobby ready", e);
             ctx.status(500).json(Map.of("error", "Internal server error"));
         }
+    }
+
+    private void handleGetSettings(Context ctx) {
+        String id = ctx.pathParam("id");
+        if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+        double mult = registry.getBotSpeedMultiplier(id);
+        String speed = mult < 0 ? "n/a (no bots)" : mult <= 0.1 ? "fast" : mult >= 2.0 ? "slow" : "normal";
+        ctx.json(Map.of("botSpeedMultiplier", mult < 0 ? "n/a" : String.valueOf(mult), "botSpeed", speed));
     }
 
     private void handleSettings(Context ctx) {

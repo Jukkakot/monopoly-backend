@@ -103,6 +103,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         log.debug("Bot speed multiplier set to {} for session {}", multiplier, sessionId.substring(0, 8));
     }
 
+    public double getSpeedMultiplier() {
+        return speedMultiplier;
+    }
+
     // -------------------------------------------------------------------------
     // ClientSessionListener
     // -------------------------------------------------------------------------

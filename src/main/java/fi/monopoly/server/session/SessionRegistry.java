@@ -320,6 +320,12 @@ public final class SessionRegistry {
         return true;
     }
 
+    public double getBotSpeedMultiplier(String sessionId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return -1;
+        return entry.botDriver().getSpeedMultiplier();
+    }
+
     public Optional<SessionCommandPublisher> get(String sessionId) {
         Entry entry = sessions.get(sessionId);
         if (entry != null) {
