@@ -697,6 +697,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1); // sum=3 → index 7 = CHANCE1
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         assertEquals(1650, playerById(store.get(), PLAYER_1).cash());
         assertEquals(TurnPhase.WAITING_FOR_END_TURN, store.get().turn().phase());
@@ -709,6 +710,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         assertEquals(1485, playerById(store.get(), PLAYER_1).cash());
     }
@@ -719,6 +721,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
         assertTrue(updated.inJail());
@@ -731,6 +734,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         assertEquals(1, playerById(store.get(), PLAYER_1).getOutOfJailCards());
         assertEquals(TurnPhase.WAITING_FOR_END_TURN, store.get().turn().phase());
@@ -743,6 +747,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
         assertEquals(GO_INDEX, updated.boardIndex());
@@ -757,6 +762,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
         SpotType landed = SpotType.SPOT_TYPES.get(updated.boardIndex());
@@ -773,6 +779,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         assertEquals(1450, playerById(store.get(), PLAYER_1).cash()); // 1500 - 50
     }
@@ -787,6 +794,7 @@ class DomainTurnActionGatewayTest {
         DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 1); // sum=2, doubles
 
         gateway.rollDice();
+        gateway.acknowledgeCard();
 
         assertEquals(1510, playerById(store.get(), PLAYER_1).cash()); // +10
         assertEquals(990, playerById(store.get(), PLAYER_2).cash());   // -10

@@ -39,8 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class PureDomainBotDriver implements ClientSessionListener {
 
     /** Fallback delay used when situational logic cannot determine a better value. */
-    private static final long BOT_FALLBACK_DELAY_MS =
-            Long.getLong("monopoly.bot.think.delay.ms", 900L);
+    private static final long DEFAULT_BOT_DELAY_MS = 900L;
 
     private final SessionCommandPublisher publisher;
     private final String sessionId;
@@ -443,7 +442,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * A ±20 % random jitter is applied on top.
      */
     private long computeDelay(SessionState state) {
-        if (BOT_FALLBACK_DELAY_MS == 0) return 0;  // instant mode (tests / system property = 0)
+        long botDelayMs = Long.getLong("monopoly.bot.think.delay.ms", DEFAULT_BOT_DELAY_MS);
+        if (botDelayMs == 0) return 0;  // instant mode (tests / system property = 0)
         double speed = speedMultiplier;
         if (speed == 0.0) return 0;
         long base = computeBaseDelay(state);
@@ -498,7 +498,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // Normal turn phases
-        if (state.turn() == null) return BOT_FALLBACK_DELAY_MS;
+        if (state.turn() == null) return DEFAULT_BOT_DELAY_MS;
         return switch (state.turn().phase()) {
             case WAITING_FOR_ROLL -> 1550;  // pause before throwing dice
             case WAITING_FOR_CARD_ACK -> 1800;  // reading the card
@@ -514,7 +514,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 yield 1200;
             }
             case WAITING_FOR_END_TURN -> 900;  // reviewing board briefly before ending
-            default -> BOT_FALLBACK_DELAY_MS;
+            default -> DEFAULT_BOT_DELAY_MS;
         };
     }
 

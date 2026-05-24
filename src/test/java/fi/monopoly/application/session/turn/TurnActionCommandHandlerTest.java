@@ -255,6 +255,8 @@ class TurnActionCommandHandlerTest {
     }
 
     private SessionState sessionState(TurnPhase phase) {
+        boolean canRoll = phase == TurnPhase.WAITING_FOR_ROLL || phase == TurnPhase.UNKNOWN;
+        boolean canEndTurn = phase == TurnPhase.WAITING_FOR_END_TURN || phase == TurnPhase.UNKNOWN;
         return new SessionState(
                 "local-session",
                 0L,
@@ -262,7 +264,7 @@ class TurnActionCommandHandlerTest {
                 List.of(new SeatState("seat-1", 0, "player-1", SeatKind.BOT, ControlMode.MANUAL, "Bot", "STRONG", "#FFC0CB")),
                 List.of(new PlayerSnapshot("player-1", "seat-1", "Bot", 1500, SpotType.GO_SPOT.ordinal(), false, false, false, 0, 0, List.of())),
                 List.of(),
-                new TurnState("player-1", phase, false, false),
+                new TurnState("player-1", phase, canRoll, canEndTurn),
                 null,
                 null,
                 null,

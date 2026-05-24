@@ -193,11 +193,12 @@ class HttpApiE2EGameTest {
     private String buildCommand(String sessionId, JsonNode snap, String phase, String activeId) {
         if (activeId == null || activeId.isEmpty()) return null;
         return switch (phase) {
-            case "WAITING_FOR_ROLL"     -> buildRollDice(sessionId, activeId);
-            case "WAITING_FOR_END_TURN" -> buildEndTurn(sessionId, activeId);
-            case "WAITING_FOR_DECISION" -> buildDecisionCommand(sessionId, snap, activeId);
-            case "RESOLVING_DEBT"       -> buildDebtCommand(sessionId, snap);
-            case "WAITING_FOR_AUCTION"  -> buildAuctionCommand(sessionId, snap);
+            case "WAITING_FOR_ROLL"      -> buildRollDice(sessionId, activeId);
+            case "WAITING_FOR_CARD_ACK"  -> json("AcknowledgeCard", sessionId, activeId, "");
+            case "WAITING_FOR_END_TURN"  -> buildEndTurn(sessionId, activeId);
+            case "WAITING_FOR_DECISION"  -> buildDecisionCommand(sessionId, snap, activeId);
+            case "RESOLVING_DEBT"        -> buildDebtCommand(sessionId, snap);
+            case "WAITING_FOR_AUCTION"   -> buildAuctionCommand(sessionId, snap);
             default -> null;
         };
     }

@@ -467,14 +467,18 @@ public final class SessionHttpServer {
         };
         updates.addListener(listener);
         client.onClose(() -> updates.removeListener(listener));
-        try {
-            ClientSessionSnapshot current = snapshotSupplier.get();
-            long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
-            if (clientVersion < current.version()) {
-                client.sendEvent(current.stampedNow());
-            }
-        } catch (Exception ignored) {}
         client.keepAlive();
+        // Deliver initial snapshot on a separate virtual thread so keepAlive()'s
+        // ctx.future() is processed by the event loop before we write data.
+        Thread.ofVirtual().start(() -> {
+            try {
+                ClientSessionSnapshot current = snapshotSupplier.get();
+                long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
+                if (clientVersion < current.version()) {
+                    client.sendEvent(current.stampedNow());
+                }
+            } catch (Exception ignored) {}
+        });
     }
 
     private static long parseLastEventId(String header) {

@@ -150,6 +150,7 @@ class PureDomainGameSimulationTest {
         }
         return switch (phase) {
             case WAITING_FOR_ROLL -> service.handle(new RollDiceCommand(SESSION_ID, activeId));
+            case WAITING_FOR_CARD_ACK -> service.handle(new AcknowledgeCardCommand(SESSION_ID, activeId));
             case WAITING_FOR_END_TURN -> handleEndTurn(service, state, activeId);
             case WAITING_FOR_DECISION -> handleDecision(service, state, activeId);
             case RESOLVING_DEBT -> handleDebt(service, state, activeId);
