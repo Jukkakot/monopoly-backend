@@ -15,7 +15,7 @@
         <else>
             <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
                 <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-                    <level>DEBUG</level>
+                    <level>${LOG_LEVEL}</level>
                 </filter>
                 <encoder>
                     <pattern>${CONSOLE_LOG_PATTERN}</pattern>
