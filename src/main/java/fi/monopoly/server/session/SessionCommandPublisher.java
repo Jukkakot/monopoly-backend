@@ -110,7 +110,7 @@ public final class SessionCommandPublisher implements SessionCommandPort, Client
         publishSnapshot();
     }
 
-    private void publishSnapshot() {
+    void publishSnapshot() {
         ClientSessionSnapshot snapshot = currentSnapshot();
         for (ClientSessionListener listener : listeners) {
             try {

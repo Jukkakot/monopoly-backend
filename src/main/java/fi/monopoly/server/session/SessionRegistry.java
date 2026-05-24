@@ -73,6 +73,7 @@ public final class SessionRegistry {
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
+        baseStore.setOnChange(publisher::publishSnapshot);
         Map<String, BotDifficulty> difficultyMap = buildDifficultyMap(initialState, difficulties);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, difficultyMap);
@@ -101,6 +102,7 @@ public final class SessionRegistry {
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
+        baseStore.setOnChange(publisher::publishSnapshot);
 
         ConcurrentHashMap<String, String> playerTokens = new ConcurrentHashMap<>();
         String hostPlayerToken = UUID.randomUUID().toString();
