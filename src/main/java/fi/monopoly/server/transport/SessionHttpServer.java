@@ -456,7 +456,7 @@ public final class SessionHttpServer {
         ClientSessionListener listener = snapshot -> {
             if (!client.terminated()) {
                 try {
-                    client.sendEvent(snapshot);
+                    client.sendEvent(snapshot.stampedNow());
                 } catch (Exception e) {
                     client.close();
                 }
@@ -468,7 +468,7 @@ public final class SessionHttpServer {
             ClientSessionSnapshot current = snapshotSupplier.get();
             long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
             if (clientVersion < current.version()) {
-                client.sendEvent(current);
+                client.sendEvent(current.stampedNow());
             }
         } catch (Exception ignored) {}
         client.keepAlive();
