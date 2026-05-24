@@ -67,8 +67,8 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
         Map<String, String> mdc = event.getMDCPropertyMap();
         if (mdc != null) {
             if (mdc.containsKey("session")) entry.put("session", mdc.get("session"));
-            if (mdc.containsKey("actor"))   entry.put("actor",   mdc.get("actor"));
-            if (mdc.containsKey("phase"))   entry.put("phase",   mdc.get("phase"));
+            if (mdc.containsKey("actor")) entry.put("actor", mdc.get("actor"));
+            if (mdc.containsKey("phase")) entry.put("phase", mdc.get("phase"));
         }
 
         IThrowableProxy t = event.getThrowableProxy();
@@ -94,7 +94,7 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
             String json = mapper.writeValueAsString(batch);
             addInfo("Flushing " + batch.size() + " events to Axiom (" + json.length() + " bytes)");
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.axiom.co/v1/datasets/" + dataset + "/ingest"))
+                    .uri(URI.create("https://eu-central-1.aws.edge.axiom.co/v1/ingest/" + dataset))
                     .header("Authorization", "Bearer " + token)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
@@ -103,8 +103,10 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
                     .thenAccept(res -> {
                         if (res.statusCode() >= 400) {
                             addError("Axiom ingest rejected: HTTP " + res.statusCode());
-                        } else if (res.statusCode() == 202) {
+                        } else if (res.statusCode() == 200) {
                             addInfo("Axiom ingest accepted: HTTP " + res.statusCode());
+                        } else {
+                            addInfo("Axiom ingest response: HTTP " + res.statusCode());
                         }
                     })
                     .exceptionally(ex -> { addError("Axiom ingest failed", ex); return null; });
