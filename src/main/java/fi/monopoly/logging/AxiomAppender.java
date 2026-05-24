@@ -85,7 +85,12 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
                     .build();
-            httpClient.sendAsync(req, HttpResponse.BodyHandlers.discarding());
+            httpClient.sendAsync(req, HttpResponse.BodyHandlers.discarding())
+                    .thenAccept(res -> {
+                        if (res.statusCode() >= 400)
+                            addError("Axiom ingest rejected: HTTP " + res.statusCode());
+                    })
+                    .exceptionally(ex -> { addError("Axiom ingest failed", ex); return null; });
         } catch (Exception e) {
             addError("Failed to flush logs to Axiom", e);
         }
