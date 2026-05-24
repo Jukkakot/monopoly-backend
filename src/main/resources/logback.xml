@@ -4,6 +4,8 @@
     <property name="CONSOLE_LOG_PATTERN" value="%highlight(%d{HH:mm:ss.SSS} %-5level) %boldCyan([%X{session:-?}|%X{actor:-?}|%X{phase:-?}]) %logger{25} - %msg%n"/>
     <!-- Set LOG_LEVEL env var (or -DLOG_LEVEL=) to override: TRACE, DEBUG, INFO, WARN. Default: DEBUG -->
     <property name="LOG_LEVEL" value="${LOG_LEVEL:-DEBUG}"/>
+    <!-- Set LOG_TO_FILE=true to enable rotating file logs (disabled by default) -->
+    <property name="LOG_TO_FILE" value="${LOG_TO_FILE:-false}"/>
 
     <!-- On Render (RENDER=true env var), output JSON for Axiom log drain; locally use colored text -->
     <if condition='"true".equals(System.getenv("RENDER"))'>
@@ -29,52 +31,62 @@
         <dataset>${AXIOM_DATASET:-}</dataset>
     </appender>
 
-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_DIR}/monopoly.%d{yyyy-MM-dd}.jsonl</fileNamePattern>
-            <maxHistory>10</maxHistory>
-            <totalSizeCap>200MB</totalSizeCap>
-            <cleanHistoryOnStart>true</cleanHistoryOnStart>
-        </rollingPolicy>
-    </appender>
+    <if condition='"true".equals(p("LOG_TO_FILE"))'>
+        <then>
+            <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <fileNamePattern>${LOG_DIR}/monopoly.%d{yyyy-MM-dd}.jsonl</fileNamePattern>
+                    <maxHistory>10</maxHistory>
+                    <totalSizeCap>200MB</totalSizeCap>
+                    <cleanHistoryOnStart>true</cleanHistoryOnStart>
+                </rollingPolicy>
+            </appender>
 
-    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
-        <queueSize>8192</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-        <neverBlock>true</neverBlock>
-        <appender-ref ref="FILE"/>
-    </appender>
+            <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+                <queueSize>8192</queueSize>
+                <discardingThreshold>0</discardingThreshold>
+                <neverBlock>true</neverBlock>
+                <appender-ref ref="FILE"/>
+            </appender>
 
-    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>ERROR</level>
-        </filter>
-        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_DIR}/ERROR-monopoly.%d{yyyy-MM-dd}.jsonl</fileNamePattern>
-            <maxHistory>10</maxHistory>
-            <totalSizeCap>100MB</totalSizeCap>
-            <cleanHistoryOnStart>true</cleanHistoryOnStart>
-        </rollingPolicy>
-    </appender>
+            <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                    <level>ERROR</level>
+                </filter>
+                <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <fileNamePattern>${LOG_DIR}/ERROR-monopoly.%d{yyyy-MM-dd}.jsonl</fileNamePattern>
+                    <maxHistory>10</maxHistory>
+                    <totalSizeCap>100MB</totalSizeCap>
+                    <cleanHistoryOnStart>true</cleanHistoryOnStart>
+                </rollingPolicy>
+            </appender>
 
-    <appender name="ASYNC_ERROR_FILE" class="ch.qos.logback.classic.AsyncAppender">
-        <queueSize>2048</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-        <neverBlock>true</neverBlock>
-        <appender-ref ref="ERROR_FILE"/>
-    </appender>
+            <appender name="ASYNC_ERROR_FILE" class="ch.qos.logback.classic.AsyncAppender">
+                <queueSize>2048</queueSize>
+                <discardingThreshold>0</discardingThreshold>
+                <neverBlock>true</neverBlock>
+                <appender-ref ref="ERROR_FILE"/>
+            </appender>
+        </then>
+    </if>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="ASYNC_ERROR_FILE"/>
+        <if condition='"true".equals(p("LOG_TO_FILE"))'>
+            <then><appender-ref ref="ASYNC_ERROR_FILE"/></then>
+        </if>
     </root>
 
     <logger name="fi.monopoly" level="${LOG_LEVEL}" additivity="false">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="ASYNC_FILE"/>
-        <appender-ref ref="ASYNC_ERROR_FILE"/>
         <appender-ref ref="AXIOM"/>
+        <if condition='"true".equals(p("LOG_TO_FILE"))'>
+            <then>
+                <appender-ref ref="ASYNC_FILE"/>
+                <appender-ref ref="ASYNC_ERROR_FILE"/>
+            </then>
+        </if>
     </logger>
 </configuration>
