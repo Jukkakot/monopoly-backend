@@ -6,6 +6,8 @@
     <property name="LOG_LEVEL" value="${LOG_LEVEL:-DEBUG}"/>
     <!-- Set LOG_TO_FILE=true to enable rotating file logs (disabled by default) -->
     <property name="LOG_TO_FILE" value="${LOG_TO_FILE:-false}"/>
+    <!-- Set APP_ENV env var to tag logs by environment. Default: local -->
+    <property name="APP_ENV" value="${APP_ENV:-local}"/>
 
     <!-- On Render (RENDER=true env var), output JSON for Axiom log drain; locally use colored text -->
     <if condition='"true".equals(System.getenv("RENDER"))'>
@@ -29,6 +31,7 @@
     <appender name="AXIOM" class="fi.monopoly.logging.AxiomAppender">
         <token>${AXIOM_TOKEN:-}</token>
         <dataset>${AXIOM_DATASET:-}</dataset>
+        <env>${APP_ENV}</env>
     </appender>
 
     <if condition='"true".equals(p("LOG_TO_FILE"))'>

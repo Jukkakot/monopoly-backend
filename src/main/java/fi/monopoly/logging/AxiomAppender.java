@@ -22,6 +22,7 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
 
     private String token;
     private String dataset;
+    private String env = "local";
 
     private final List<Map<String, Object>> buffer = new ArrayList<>();
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -32,8 +33,9 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
         return t;
     });
 
-    public void setToken(String token)   { this.token = token; }
+    public void setToken(String token)     { this.token = token; }
     public void setDataset(String dataset) { this.dataset = dataset; }
+    public void setEnv(String env)         { this.env = env; }
 
     @Override
     public void start() {
@@ -53,6 +55,7 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
         entry.put("level", event.getLevel().toString());
         entry.put("logger", event.getLoggerName());
         entry.put("message", event.getFormattedMessage());
+        entry.put("env", env);
 
         Map<String, String> mdc = event.getMDCPropertyMap();
         if (mdc != null) {
