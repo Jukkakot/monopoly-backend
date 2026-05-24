@@ -39,17 +39,24 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
 
     @Override
     public void start() {
+        super.start();
         if (token == null || token.isBlank() || dataset == null || dataset.isBlank()) {
             addWarn("AxiomAppender: AXIOM_TOKEN or AXIOM_DATASET not set — appender disabled");
+            addWarn("  AXIOM_TOKEN=" + (token == null ? "null" : (token.isBlank() ? "EMPTY" : "***SET")));
+            addWarn("  AXIOM_DATASET=" + (dataset == null ? "null" : (dataset.isBlank() ? "EMPTY" : "***SET")));
+            addWarn("  APP_ENV=" + env);
             return;
         }
-        super.start();
+        addInfo("AxiomAppender started: dataset=" + dataset + ", env=" + env);
         scheduler.scheduleAtFixedRate(this::flush, 5, 5, TimeUnit.SECONDS);
     }
 
     @Override
     protected synchronized void append(ILoggingEvent event) {
-        if (!isStarted()) return;
+        if (!isStarted()) {
+            addWarn("Appender not started, discarding: " + event.getMessage());
+            return;
+        }
         Map<String, Object> entry = new HashMap<>();
         entry.put("_time", Instant.ofEpochMilli(event.getTimeStamp()).toString());
         entry.put("level", event.getLevel().toString());
@@ -70,15 +77,22 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
         }
 
         buffer.add(entry);
-        if (buffer.size() >= 100) flush();
+        if (buffer.size() >= 100) {
+            addInfo("Buffer reached 100, flushing immediately");
+            flush();
+        }
     }
 
     private synchronized void flush() {
         if (buffer.isEmpty()) return;
+        if (token == null || token.isBlank() || dataset == null || dataset.isBlank()) {
+            return; // Silently skip if not configured
+        }
         List<Map<String, Object>> batch = new ArrayList<>(buffer);
         buffer.clear();
         try {
             String json = mapper.writeValueAsString(batch);
+            addInfo("Flushing " + batch.size() + " events to Axiom (" + json.length() + " bytes)");
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.axiom.co/v1/datasets/" + dataset + "/ingest"))
                     .header("Authorization", "Bearer " + token)
@@ -87,8 +101,11 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
                     .build();
             httpClient.sendAsync(req, HttpResponse.BodyHandlers.discarding())
                     .thenAccept(res -> {
-                        if (res.statusCode() >= 400)
+                        if (res.statusCode() >= 400) {
                             addError("Axiom ingest rejected: HTTP " + res.statusCode());
+                        } else if (res.statusCode() == 202) {
+                            addInfo("Axiom ingest accepted: HTTP " + res.statusCode());
+                        }
                     })
                     .exceptionally(ex -> { addError("Axiom ingest failed", ex); return null; });
         } catch (Exception e) {

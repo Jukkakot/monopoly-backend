@@ -25,6 +25,16 @@ public final class BackendMain {
 
         server.start();
         log.info("Monopoly backend started on port {}", port);
+        
+        // Debug Axiom configuration
+        String axiomToken = System.getenv("AXIOM_TOKEN");
+        String axiomDataset = System.getenv("AXIOM_DATASET");
+        String appEnv = System.getenv("APP_ENV");
+        String logLevel = System.getenv("LOG_LEVEL");
+        log.info("Logging configuration: LOG_LEVEL={}, APP_ENV={}", logLevel, appEnv);
+        log.info("Axiom status: token={}, dataset={}", 
+            axiomToken == null ? "NOT_SET" : (axiomToken.isBlank() ? "EMPTY" : "***SET"),
+            axiomDataset == null ? "NOT_SET" : (axiomDataset.isBlank() ? "EMPTY" : axiomDataset));
 
         CountDownLatch shutdownLatch = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
