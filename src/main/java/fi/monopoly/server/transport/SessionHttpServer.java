@@ -291,7 +291,10 @@ public final class SessionHttpServer {
                     }).toList();
 
             var result = registry.create(names, colors, seatKinds, difficulties);
-            ctx.status(201).json(Map.of("sessionId", result.sessionId(), "hostToken", result.hostToken()));
+            Map<String, Object> resp = new java.util.LinkedHashMap<>();
+            resp.put("sessionId", result.sessionId());
+            if (result.hostToken() != null) resp.put("hostToken", result.hostToken());
+            ctx.status(201).json(resp);
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
