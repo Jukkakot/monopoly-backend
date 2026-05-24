@@ -22,6 +22,11 @@
         </else>
     </if>
 
+    <appender name="AXIOM" class="fi.monopoly.logging.AxiomAppender">
+        <token>${AXIOM_TOKEN:-}</token>
+        <dataset>${AXIOM_DATASET:-}</dataset>
+    </appender>
+
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
@@ -68,5 +73,6 @@
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="ASYNC_FILE"/>
         <appender-ref ref="ASYNC_ERROR_FILE"/>
+        <appender-ref ref="AXIOM"/>
     </logger>
 </configuration>
