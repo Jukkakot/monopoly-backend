@@ -3,14 +3,24 @@
     <property name="LOG_DIR" value="${user.dir}/logs/app"/>
     <property name="CONSOLE_LOG_PATTERN" value="%highlight(%d{HH:mm:ss.SSS} %-5level) %boldCyan([%X{session:-?}|%X{actor:-?}|%X{phase:-?}]) %logger{25} - %msg%n"/>
 
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>TRACE</level>
-        </filter>
-        <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
-        </encoder>
-    </appender>
+    <!-- On Render (RENDER=true env var), output JSON for Axiom log drain; locally use colored text -->
+    <if condition='"true".equals(System.getenv("RENDER"))'>
+        <then>
+            <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+            </appender>
+        </then>
+        <else>
+            <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                    <level>TRACE</level>
+                </filter>
+                <encoder>
+                    <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+                </encoder>
+            </appender>
+        </else>
+    </if>
 
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
