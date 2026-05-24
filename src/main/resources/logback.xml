@@ -73,6 +73,7 @@
 
             <root level="INFO">
                 <appender-ref ref="CONSOLE"/>
+                <appender-ref ref="AXIOM"/>
                 <appender-ref ref="ASYNC_ERROR_FILE"/>
             </root>
             <logger name="fi.monopoly" level="${LOG_LEVEL}" additivity="false">
@@ -85,6 +86,7 @@
         <else>
             <root level="INFO">
                 <appender-ref ref="CONSOLE"/>
+                <appender-ref ref="AXIOM"/>
             </root>
             <logger name="fi.monopoly" level="${LOG_LEVEL}" additivity="false">
                 <appender-ref ref="CONSOLE"/>
