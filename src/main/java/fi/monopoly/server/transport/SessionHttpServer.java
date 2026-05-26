@@ -287,7 +287,7 @@ public final class SessionHttpServer {
             List<fi.monopoly.domain.session.BotDifficulty> difficulties = difficultyStrings.stream()
                     .map(s -> {
                         try { return fi.monopoly.domain.session.BotDifficulty.valueOf(s.toUpperCase()); }
-                        catch (IllegalArgumentException e) { return fi.monopoly.domain.session.BotDifficulty.NORMAL; }
+                        catch (IllegalArgumentException e) { return fi.monopoly.domain.session.BotDifficulty.STRONG; }
                     }).toList();
 
             var result = registry.create(names, colors, seatKinds, difficulties);

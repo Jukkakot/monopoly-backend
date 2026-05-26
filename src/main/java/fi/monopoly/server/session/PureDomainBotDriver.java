@@ -82,7 +82,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         log.info("Bot driver registered for session {} — bots: {} difficulties: {}",
                 initialState.sessionId().substring(0, 8), botIds,
                 botIds.stream().collect(java.util.stream.Collectors.toMap(
-                        id -> id, id -> difficulties.getOrDefault(id, BotDifficulty.NORMAL))));
+                        id -> id, id -> difficulties.getOrDefault(id, BotDifficulty.STRONG))));
         // Trigger initial check so a bot-first turn starts without waiting for a human command.
         driver.onSnapshotChanged(ClientSessionSnapshot.from(initialState, true));
         return driver;
@@ -449,7 +449,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         long base = computeBaseDelay(state);
         String actorId = resolveActorId(state);
         BotDifficulty diff = actorId != null
-                ? difficulties.getOrDefault(actorId, BotDifficulty.NORMAL)
+                ? difficulties.getOrDefault(actorId, BotDifficulty.STRONG)
                 : BotDifficulty.NORMAL;
         double diffMult = switch (diff) {
             case EASY   -> 1.25;   // hesitant, slower
@@ -631,11 +631,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     private boolean isEasy(String playerId) {
-        return difficulties.getOrDefault(playerId, BotDifficulty.NORMAL) == BotDifficulty.EASY;
+        return difficulties.getOrDefault(playerId, BotDifficulty.STRONG) == BotDifficulty.EASY;
     }
 
     private boolean isStrong(String playerId) {
-        return difficulties.getOrDefault(playerId, BotDifficulty.NORMAL) == BotDifficulty.STRONG;
+        return difficulties.getOrDefault(playerId, BotDifficulty.STRONG) == BotDifficulty.STRONG;
     }
 
     private static Set<String> collectBotPlayerIds(SessionState state) {
