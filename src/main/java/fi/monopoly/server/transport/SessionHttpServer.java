@@ -105,6 +105,8 @@ public final class SessionHttpServer {
             });
             config.routes.options("/*", ctx -> ctx.status(204));
 
+            config.routes.get("/ping", ctx -> ctx.status(204));
+
             config.routes.get("/health", ctx -> {
                 int activeSessions = registry != null ? registry.list().size() : -1;
                 long uptimeSeconds = (System.currentTimeMillis() - startTimeMs) / 1000;
