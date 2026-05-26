@@ -17,7 +17,7 @@ public final class GameEventHelper {
 
     private static final Logger logger = LoggerFactory.getLogger(GameEventHelper.class);
 
-    static final int MAX_EVENT_LOG = 200;
+    static final int MAX_EVENT_LOG = 30;
 
     private GameEventHelper() {}
 
