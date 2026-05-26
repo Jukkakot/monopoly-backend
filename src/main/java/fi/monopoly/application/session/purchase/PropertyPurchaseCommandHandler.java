@@ -80,6 +80,18 @@ public final class PropertyPurchaseCommandHandler {
         if (context == null) {
             return reject("INVALID_PROPERTY_PURCHASE", "Property purchase command is not valid in the current state");
         }
+        SessionState currentState = currentStateSupplier.get();
+        if (currentState.pendingDecision() != null
+                && currentState.pendingDecision().payload() instanceof PropertyPurchaseDecisionPayload payload) {
+            int playerCash = currentState.players().stream()
+                    .filter(p -> context.playerId().equals(p.playerId()))
+                    .mapToInt(p -> p.cash())
+                    .findFirst()
+                    .orElse(0);
+            if (playerCash < payload.price()) {
+                return reject("INSUFFICIENT_FUNDS", "Not enough cash to buy this property");
+            }
+        }
         if (!gateway.buyProperty(context.playerId(), context.propertyId())) {
             pendingDecisionSetter.accept(null);
             activeContext = null;

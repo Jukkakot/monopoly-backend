@@ -31,6 +31,14 @@ public final class DomainPropertyPurchaseGateway implements PropertyPurchaseGate
             return false;
         }
         final int deduct = price;
+        int playerCash = store.get().players().stream()
+                .filter(p -> playerId.equals(p.playerId()))
+                .mapToInt(PlayerSnapshot::cash)
+                .findFirst()
+                .orElse(0);
+        if (playerCash < deduct) {
+            return false;
+        }
         store.update(state -> {
             List<PlayerSnapshot> players = state.players().stream()
                     .map(p -> {
