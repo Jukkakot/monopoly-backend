@@ -1,5 +1,6 @@
 package fi.monopoly.domain.session;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import fi.monopoly.domain.decision.PendingDecision;
 import fi.monopoly.domain.turn.TurnState;
 import lombok.Builder;
@@ -21,8 +22,8 @@ public record SessionState(
         TradeState tradeState,
         TurnContinuationState turnContinuationState,
         String winnerPlayerId,
-        List<String> chanceDeck,
-        List<String> communityDeck,
+        @JsonIgnore List<String> chanceDeck,
+        @JsonIgnore List<String> communityDeck,
         String lastCardMessage,
         String lastCardKey,
         String hostPlayerId,
