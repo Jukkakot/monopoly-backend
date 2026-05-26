@@ -178,6 +178,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                     log.debug("endTurn APPLY_TURN_FOLLOW_UP: consecutiveDoubles={} -> WAITING_FOR_ROLL canRoll=true", s.turn().consecutiveDoubles());
                     return s.toBuilder()
                             .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles(), s.turn().lastDice()))
+                            .lastCardKey(null)
                             .lastCardMessage(null)
                             .build();
                 });
@@ -187,6 +188,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                     log.trace("endTurn END_TURN_WITH_SWITCH: {} -> next={}", s.turn().activePlayerId(), next);
                     return s.toBuilder()
                             .turn(new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                            .lastCardKey(null)
                             .lastCardMessage(null)
                             .build();
                 });
@@ -200,6 +202,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             log.trace("endTurn normal switch: {} -> next={}", state.turn().activePlayerId(), next);
             return state.toBuilder()
                     .turn(new TurnState(next, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                    .lastCardKey(null)
                     .lastCardMessage(null)
                     .build();
         });
