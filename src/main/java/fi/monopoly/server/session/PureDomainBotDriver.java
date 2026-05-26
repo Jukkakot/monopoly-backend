@@ -596,7 +596,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (state.turn() == null) return DEFAULT_BOT_DELAY_MS;
         return switch (state.turn().phase()) {
             case WAITING_FOR_ROLL -> 1550;  // pause before throwing dice
-            case WAITING_FOR_CARD_ACK -> 1800;  // reading the card
+            case WAITING_FOR_CARD_ACK -> 3500;  // reading the card
             case WAITING_FOR_DECISION -> {
                 // Buying a property: longer think when affordable, quick decline when broke
                 PendingDecision decision = state.pendingDecision();
