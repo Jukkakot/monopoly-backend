@@ -17,9 +17,10 @@ import fi.monopoly.application.command.PlaceAuctionBidCommand;
 import fi.monopoly.types.PlaceType;
 import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashSet;
 import java.util.List;
@@ -57,10 +58,10 @@ class PureDomainGameSimulationTest {
                         + result.turnSwitches() + " switches, gameOver=" + result.gameOver());
     }
 
-    @RepeatedTest(5)
+    @ParameterizedTest
+    @ValueSource(longs = {1L, 7L, 13L, 42L, 99L, 256L, 1337L, 9999L, 80085L, 314159L})
     @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void twoPlayerGameAlwaysProgressesAcrossSeeds() {
-        long seed = System.nanoTime();
+    void twoPlayerGameAlwaysProgressesAcrossSeeds(long seed) {
         SessionState initial = PureDomainSessionFactory.initialGameState(
                 SESSION_ID, List.of("A", "B"), List.of("#F00", "#0F0"), new Random(seed));
         SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initial);

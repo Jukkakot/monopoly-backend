@@ -39,6 +39,8 @@ public final class AuctionCommandHandler {
         if (eligibleBidderIds.isEmpty()) {
             activeContext = null;
             auctionStateSetter.accept(null);
+            turnContinuationSetter.accept(null);
+            turnContinuationResolver.accept(continuationState);
             return null;
         }
         AuctionState state = new AuctionState(
