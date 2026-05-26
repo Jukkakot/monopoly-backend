@@ -1,7 +1,10 @@
 package fi.monopoly.server.transport;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import fi.monopoly.application.command.SessionCommand;
 import fi.monopoly.application.result.CommandResult;
@@ -14,6 +17,7 @@ import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.server.session.SessionRegistry;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
+import io.javalin.http.BadRequestResponse;
 import io.javalin.http.NotFoundResponse;
 import io.javalin.http.sse.SseClient;
 import io.javalin.json.JavalinJackson;
@@ -55,6 +59,7 @@ public final class SessionHttpServer {
     private final ObjectMapper objectMapper;
     private final SessionCommandMapper commandMapper;
     private final SessionRegistry registry;
+    private final ObjectReader strictReader;
 
     private final long startTimeMs = System.currentTimeMillis();
 
@@ -83,6 +88,8 @@ public final class SessionHttpServer {
         this.registry = registry;
         this.objectMapper = new ObjectMapper().disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
         this.commandMapper = new SessionCommandMapper(objectMapper);
+        this.strictReader = objectMapper.reader()
+                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
     public void start() {
@@ -411,30 +418,36 @@ public final class SessionHttpServer {
         ctx.json(Map.of("botSpeedMultiplier", mult < 0 ? "n/a" : String.valueOf(mult), "botSpeed", speed));
     }
 
-    private void handleSettings(Context ctx) {
-        try {
-            String id = ctx.pathParam("id");
-            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-
-            if (body.get("botSpeed") instanceof String speed) {
-                double multiplier = switch (speed) {
-                    case "fast" -> 0.0;
-                    case "slow" -> 2.5;
-                    default     -> 1.0;
-                };
-                registry.setBotSpeed(id, multiplier);
-                log.debug("Session {} botSpeed={} ({}x)", id.substring(0, 8), speed, multiplier);
-            }
-
-            ctx.status(200).json(Map.of("ok", true));
-        } catch (NotFoundResponse e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Error applying session settings", e);
-            ctx.status(500).json(Map.of("error", "Internal server error"));
+    private enum BotSpeed {
+        fast, normal, slow;
+        double toMultiplier() {
+            return switch (this) {
+                case fast   -> 0.0;
+                case slow   -> 2.5;
+                case normal -> 1.0;
+            };
         }
+    }
+
+    private record SettingsRequest(BotSpeed botSpeed) {}
+
+    private void handleSettings(Context ctx) {
+        String id = ctx.pathParam("id");
+        if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+        SettingsRequest req;
+        try {
+            req = strictReader.readValue(ctx.bodyAsBytes(), SettingsRequest.class);
+        } catch (JsonProcessingException e) {
+            throw new BadRequestResponse("Invalid settings body: " + e.getOriginalMessage());
+        } catch (Exception e) {
+            throw new BadRequestResponse("Could not parse request body");
+        }
+        if (req.botSpeed() != null) {
+            double mult = req.botSpeed().toMultiplier();
+            registry.setBotSpeed(id, mult);
+            log.debug("Session {} botSpeed={} ({}x)", id.substring(0, 8), req.botSpeed(), mult);
+        }
+        ctx.status(200).json(Map.of("ok", true));
     }
 
     // -------------------------------------------------------------------------
