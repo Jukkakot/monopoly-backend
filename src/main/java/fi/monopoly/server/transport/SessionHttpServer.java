@@ -483,8 +483,12 @@ public final class SessionHttpServer {
         client.keepAlive();
         // Deliver initial snapshot on a separate virtual thread so keepAlive()'s
         // ctx.future() is processed by the event loop before we write data.
+        // The small sleep gives the event loop time to complete keepAlive() setup before
+        // we call sendEvent — without it there is a race where sendEvent fires before
+        // the async response is ready and the write is silently dropped.
         Thread.ofVirtual().start(() -> {
             try {
+                Thread.sleep(30);
                 ClientSessionSnapshot current = snapshotSupplier.get();
                 long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
                 if (clientVersion < current.version()) {

@@ -41,6 +41,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     /** Fallback delay used when situational logic cannot determine a better value. */
     private static final long DEFAULT_BOT_DELAY_MS = 900L;
 
+    private static final int MAX_DECLINES_PER_PARTNER = 2;
+
     private final SessionCommandPublisher publisher;
     private final String sessionId;
     private final Set<String> botPlayerIds;
@@ -48,6 +50,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
     private volatile double speedMultiplier = 1.0;
+    private volatile TradeState lastObservedTrade = null;
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
+            = new java.util.concurrent.ConcurrentHashMap<>();
 
     private PureDomainBotDriver(
             SessionCommandPublisher publisher,
@@ -115,7 +120,23 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         SessionState state = snapshot.state();
         if (state == null || state.status() == SessionStatus.GAME_OVER
                 || state.status() == SessionStatus.LOBBY) {
+            lastObservedTrade = null;
             return;
+        }
+        // Track when bot-initiated trades are declined to avoid re-proposing to the same partner
+        TradeState prevTrade = lastObservedTrade;
+        lastObservedTrade = state.tradeState();
+        if (prevTrade != null && state.tradeState() == null
+                && botPlayerIds.contains(prevTrade.openedByPlayerId())) {
+            TradeHistoryEntry last = prevTrade.history().isEmpty() ? null
+                    : prevTrade.history().get(prevTrade.history().size() - 1);
+            if (last != null && "DECLINED".equals(last.actionType())) {
+                String partner = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId())
+                        ? prevTrade.recipientPlayerId() : prevTrade.initiatorPlayerId();
+                tradeDeclinesByPartnerId.merge(partner, 1, Integer::sum);
+                log.debug("Bot trade declined by {} (cumulative: {})", partner,
+                        tradeDeclinesByPartnerId.get(partner));
+            }
         }
         if (!needsBotAction(state)) {
             return;
@@ -167,7 +188,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 return state.tradeState().decisionRequiredFromPlayerId();
             }
             // A bot is in editing mode filling in or countering an offer
-            if (state.tradeState().status() == TradeStatus.EDITING
+            TradeStatus ts = state.tradeState().status();
+            if ((ts == TradeStatus.EDITING || ts == TradeStatus.COUNTERED)
                     && state.tradeState().editingPlayerId() != null) {
                 return state.tradeState().editingPlayerId();
             }
@@ -189,6 +211,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             }
             if (trade.status() == TradeStatus.EDITING && editor != null && botPlayerIds.contains(editor)) {
                 handleTradeEditing(state, editor);
+                return;
+            }
+            if (trade.status() == TradeStatus.COUNTERED && editor != null && botPlayerIds.contains(editor)) {
+                handleCounterEditing(state, editor);
                 return;
             }
         }
@@ -281,16 +307,67 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // NORMAL: accept if raw monetary value received >= value given
         TradeOfferState offer = trade.currentOffer();
         int valueReceived = evaluateSelectionValue(offer.offeredToRecipient());
         int valueGiven = evaluateSelectionValue(offer.requestedFromRecipient());
 
         if (valueReceived >= valueGiven) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
-        } else {
-            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            return;
         }
+
+        // STRONG bot: counter-offer if the deal is somewhat reasonable and back-and-forth hasn't gone too long
+        if (isStrong(botId) && valueGiven > 0) {
+            long counterCount = trade.history().stream()
+                    .filter(e -> "COUNTERED".equals(e.actionType())).count();
+            boolean offerIsReasonable = valueReceived >= valueGiven * 0.50;
+            if (offerIsReasonable && counterCount < 2) {
+                publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
+                return;
+            }
+        }
+
+        publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+    }
+
+    /**
+     * Called when the bot is in COUNTERED editing mode — it rejected the incoming offer terms
+     * and is now proposing adjusted terms. Modifies the money on the received side to cover
+     * the value gap, then submits.
+     */
+    private void handleCounterEditing(SessionState state, String botId) {
+        TradeState trade = state.tradeState();
+        if (trade == null) return;
+        TradeOfferState offer = trade.currentOffer();
+        String tradeId = trade.tradeId();
+
+        // Bot is the offer recipient countering: what it gives vs what it receives
+        int valueGiven = evaluateSelectionValue(offer.requestedFromRecipient());
+        int currentMoneyReceived = offer.offeredToRecipient().moneyAmount();
+        int nonMoneyReceived = evaluateSelectionValue(offer.offeredToRecipient()) - currentMoneyReceived;
+
+        // Target: bot wants ~5% profit over what it gives
+        int targetMoneyReceived = Math.max(0, (int) (valueGiven * 1.05) - nonMoneyReceived);
+
+        if (currentMoneyReceived >= targetMoneyReceived) {
+            // Already fair — submit as-is
+            publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
+            return;
+        }
+
+        // Check that the proposer can actually afford the counter amount
+        PlayerSnapshot proposer = findPlayer(state, offer.proposerPlayerId());
+        int proposerCash = proposer != null ? proposer.cash() : 0;
+        int actualMoney = Math.min(targetMoneyReceived, proposerCash);
+        if (actualMoney < 10) {
+            // Proposer can't cover a fair counter — cancel
+            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
+
+        // Edit the offered side to set the adjusted money amount
+        publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                new TradeEditPatch(null, true, actualMoney, List.of(), List.of(), null)));
     }
 
     /**
@@ -355,6 +432,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            // Skip partners who have repeatedly declined bot-initiated offers
+            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             // Verify handleTradeEditing would actually find a target and afford an offer
             String targetProp = findStrategicTargetProperty(state, botId, other.playerId());
             if (targetProp == null) continue;
@@ -405,6 +484,22 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         value += selection.jailCardCount() * 50;
         for (String propId : selection.propertyIds()) {
             value += SpotType.valueOf(propId).getIntegerProperty("price");
+        }
+        // Group completion bonus: a complete color monopoly is worth 50% more than the sum of prices
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long inSelection = selection.propertyIds().stream()
+                    .filter(id -> SpotType.valueOf(id).streetType == group)
+                    .count();
+            if (inSelection == groupSize) {
+                int groupValue = selection.propertyIds().stream()
+                        .filter(id -> SpotType.valueOf(id).streetType == group)
+                        .mapToInt(id -> SpotType.valueOf(id).getIntegerProperty("price"))
+                        .sum();
+                value += groupValue / 2;
+            }
         }
         return value;
     }

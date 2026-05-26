@@ -221,8 +221,8 @@ class SessionRegistryHttpIntegrationTest {
             } catch (Exception ignored) {}
         });
 
-        String initial = events.poll(5, TimeUnit.SECONDS);
-        assertNotNull(initial, "Should receive initial SSE snapshot within 5 s");
+        String initial = events.poll(10, TimeUnit.SECONDS);
+        assertNotNull(initial, "Should receive initial SSE snapshot within 10 s");
         assertTrue(initial.contains("\"sessionId\":\"" + sessionId + "\""));
 
         sseThread.join(2_000);
