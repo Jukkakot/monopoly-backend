@@ -108,9 +108,16 @@ public final class DomainTradeGateway implements TradeGateway {
     }
 
     @Override
-    public void logTradeAccepted(String initiatorId, String recipientId) {
+    public void logTradeAccepted(String initiatorId, String recipientId, TradeOfferState offer) {
+        var offered   = offer.offeredToRecipient();
+        var requested = offer.requestedFromRecipient();
+        var data = new java.util.HashMap<String, String>();
+        if (offered.moneyAmount()   > 0) data.put("offeredMoney",    String.valueOf(offered.moneyAmount()));
+        if (requested.moneyAmount() > 0) data.put("requestedMoney",  String.valueOf(requested.moneyAmount()));
+        if (!offered.propertyIds().isEmpty())   data.put("offeredProps",   String.join(",", offered.propertyIds()));
+        if (!requested.propertyIds().isEmpty()) data.put("requestedProps", String.join(",", requested.propertyIds()));
         store.update(state -> appendEvents(state,
-                ev("TRADE_ACCEPTED", List.of(initiatorId, recipientId), Map.of())));
+                ev("TRADE_ACCEPTED", List.of(initiatorId, recipientId), Map.copyOf(data))));
     }
 
     @Override

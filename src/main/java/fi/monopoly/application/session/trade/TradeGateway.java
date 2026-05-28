@@ -9,7 +9,7 @@ public interface TradeGateway {
 
     boolean applyOffer(TradeOfferState offerState);
 
-    void logTradeAccepted(String initiatorId, String recipientId);
+    void logTradeAccepted(String initiatorId, String recipientId, TradeOfferState offer);
 
     void logTradeDeclined(String initiatorId, String recipientId);
 

@@ -168,7 +168,7 @@ public final class TradeCommandHandler {
             tradeStateSetter.accept(state);
             return reject("TRADE_APPLY_FAILED", "Trade could not be applied");
         }
-        gateway.logTradeAccepted(state.initiatorPlayerId(), state.recipientPlayerId());
+        gateway.logTradeAccepted(state.initiatorPlayerId(), state.recipientPlayerId(), state.currentOffer());
         tradeStateSetter.accept(null);
         return accepted(List.of(new DomainEvent("TradeAccepted", command.actorPlayerId(), state.tradeId())));
     }
