@@ -9,6 +9,7 @@ import fi.monopoly.application.session.debt.DebtRemediationCommandHandler;
 import fi.monopoly.application.session.debt.DebtRemediationGateway;
 import fi.monopoly.application.session.purchase.PropertyPurchaseCommandHandler;
 import fi.monopoly.application.session.purchase.PropertyPurchaseGateway;
+import fi.monopoly.application.session.leave.LeaveGameGateway;
 import fi.monopoly.application.session.trade.TradeCommandHandler;
 import fi.monopoly.application.session.trade.TradeGateway;
 import fi.monopoly.application.session.turn.TurnActionCommandHandler;
@@ -40,6 +41,7 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
     private TradeCommandHandler tradeCommandHandler;
     private TurnActionCommandHandler turnActionCommandHandler;
     private TurnContinuationGateway turnContinuationGateway;
+    private LeaveGameGateway leaveGameGateway;
 
     public SessionApplicationService(String sessionId, Supplier<SessionState> stateSupplier) {
         this(sessionId, new OverlaySessionStateStore(stateSupplier));
@@ -89,6 +91,10 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 this::setTurnContinuationOverride,
                 debtRemediationGateway
         );
+    }
+
+    public void configureLeaveGame(LeaveGameGateway gateway) {
+        this.leaveGameGateway = gateway;
     }
 
     public void configureTradeFlow(TradeGateway gateway) {
@@ -244,6 +250,30 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 return rejected("WRONG_SESSION", "Command session does not match active session");
             }
             overlay.setStatusOverride(SessionStatus.GAME_OVER);
+            return accepted();
+        }
+        if (command instanceof LeaveGameCommand leaveCmd) {
+            if (!sessionId.equals(leaveCmd.sessionId())) {
+                return rejected("WRONG_SESSION", "Command session does not match active session");
+            }
+            SessionState state = currentState();
+            if (state.status() == SessionStatus.GAME_OVER) {
+                return rejected("GAME_OVER", "Game is already over");
+            }
+            var player = state.players().stream()
+                    .filter(p -> p.playerId().equals(leaveCmd.actorPlayerId()))
+                    .findFirst().orElse(null);
+            if (player == null || player.eliminated()) {
+                return rejected("PLAYER_NOT_FOUND", "Player not found or already eliminated");
+            }
+            if (leaveGameGateway != null) {
+                leaveGameGateway.leaveGame(leaveCmd.actorPlayerId());
+            }
+            // Clear any overlay state that may reference the leaving player
+            overlay.setTradeState(null);
+            overlay.setActiveDebt(null);
+            overlay.setPendingDecision(null);
+            overlay.setTurnContinuation(null);
             return accepted();
         }
         if (command instanceof RefreshSessionViewCommand refreshSessionViewCommand) {

@@ -138,6 +138,9 @@ public final class SessionCommandMapper {
             case "AcknowledgeCard" -> new AcknowledgeCardCommand(
                     sessionId,
                     node.path("actorPlayerId").asText());
+            case "LeaveGame" -> new LeaveGameCommand(
+                    sessionId,
+                    node.path("actorPlayerId").asText());
             default -> throw new IllegalArgumentException("Unknown command type: " + type);
         };
     }

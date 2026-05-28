@@ -6,6 +6,7 @@ import fi.monopoly.application.session.SessionApplicationService;
 import fi.monopoly.application.session.StartingOrderDeterminer;
 import fi.monopoly.application.session.auction.DomainAuctionGateway;
 import fi.monopoly.application.session.debt.DomainDebtRemediationGateway;
+import fi.monopoly.application.session.leave.DomainLeaveGameGateway;
 import fi.monopoly.application.session.purchase.DomainPropertyPurchaseGateway;
 import fi.monopoly.application.session.trade.DomainTradeGateway;
 import fi.monopoly.application.session.turn.DomainTurnActionGateway;
@@ -68,6 +69,7 @@ public final class PureDomainSessionFactory {
 
         service.configureDebtRemediationFlow(new DomainDebtRemediationGateway(store));
         service.configureTradeFlow(new DomainTradeGateway(store));
+        service.configureLeaveGame(new DomainLeaveGameGateway(store));
 
         return service;
     }
