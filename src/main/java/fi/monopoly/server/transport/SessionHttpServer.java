@@ -485,18 +485,24 @@ public final class SessionHttpServer {
         client.keepAlive();
         // Deliver initial snapshot on a separate virtual thread so keepAlive()'s
         // ctx.future() is processed by the event loop before we write data.
-        // The small sleep gives the event loop time to complete keepAlive() setup before
-        // we call sendEvent — without it there is a race where sendEvent fires before
-        // the async response is ready and the write is silently dropped.
+        // Retry up to 3 times with increasing delays: the first attempt at 80ms is usually
+        // sufficient; if the async response isn't ready yet the send is silently dropped,
+        // so subsequent attempts at 300ms and 800ms give the event loop time to catch up.
         Thread.ofVirtual().start(() -> {
-            try {
-                Thread.sleep(30);
-                ClientSessionSnapshot current = snapshotSupplier.get();
-                long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
-                if (clientVersion < current.version()) {
-                    client.sendEvent(current.stampedNow());
-                }
-            } catch (Exception ignored) {}
+            long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
+            long[] delaysMs = {80, 300, 800};
+            for (long delayMs : delaysMs) {
+                try {
+                    Thread.sleep(delayMs);
+                    if (client.terminated()) return;
+                    ClientSessionSnapshot current = snapshotSupplier.get();
+                    if (clientVersion < current.version()) {
+                        client.sendEvent(current.stampedNow());
+                    }
+                    return;
+                } catch (Exception ignored) {}
+            }
+            log.warn("Failed to send initial SSE snapshot after {} attempts", delaysMs.length);
         });
     }
 
