@@ -123,20 +123,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             lastObservedTrade = null;
             return;
         }
-        // Track when bot-initiated trades are declined to avoid re-proposing to the same partner
+        // Track when bot-initiated trades are declined to avoid re-proposing to the same partner.
+        // A trade that disappears while someone was required to respond = declined (not cancelled).
+        // handleDecline() never writes a "DECLINED" history entry, so we detect via decisionRequiredFromPlayerId.
         TradeState prevTrade = lastObservedTrade;
         lastObservedTrade = state.tradeState();
         if (prevTrade != null && state.tradeState() == null
-                && botPlayerIds.contains(prevTrade.openedByPlayerId())) {
-            TradeHistoryEntry last = prevTrade.history().isEmpty() ? null
-                    : prevTrade.history().get(prevTrade.history().size() - 1);
-            if (last != null && "DECLINED".equals(last.actionType())) {
-                String partner = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId())
-                        ? prevTrade.recipientPlayerId() : prevTrade.initiatorPlayerId();
-                tradeDeclinesByPartnerId.merge(partner, 1, Integer::sum);
-                log.debug("Bot trade declined by {} (cumulative: {})", partner,
-                        tradeDeclinesByPartnerId.get(partner));
-            }
+                && botPlayerIds.contains(prevTrade.openedByPlayerId())
+                && prevTrade.decisionRequiredFromPlayerId() != null) {
+            String partner = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId())
+                    ? prevTrade.recipientPlayerId() : prevTrade.initiatorPlayerId();
+            tradeDeclinesByPartnerId.merge(partner, 1, Integer::sum);
+            log.debug("Bot trade declined by {} (cumulative: {})", partner,
+                    tradeDeclinesByPartnerId.get(partner));
         }
         if (!needsBotAction(state)) {
             return;
