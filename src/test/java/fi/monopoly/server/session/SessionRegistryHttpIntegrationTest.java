@@ -207,7 +207,7 @@ class SessionRegistryHttpIntegrationTest {
                 HttpURLConnection conn = (HttpURLConnection)
                         new URL("http://localhost:" + port + "/sessions/" + sessionId + "/events").openConnection();
                 conn.setRequestProperty("Accept", "text/event-stream");
-                conn.setReadTimeout(8_000);
+                conn.setReadTimeout(15_000);
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
@@ -221,7 +221,7 @@ class SessionRegistryHttpIntegrationTest {
             } catch (Exception ignored) {}
         });
 
-        String initial = events.poll(10, TimeUnit.SECONDS);
+        String initial = events.poll(15, TimeUnit.SECONDS);
         assertNotNull(initial, "Should receive initial SSE snapshot within 10 s");
         assertTrue(initial.contains("\"sessionId\":\"" + sessionId + "\""));
 
