@@ -490,19 +490,16 @@ public final class SessionHttpServer {
         // so subsequent attempts at 300ms and 800ms give the event loop time to catch up.
         Thread.ofVirtual().start(() -> {
             long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
-            long[] delaysMs = {80, 300, 800};
-            for (long delayMs : delaysMs) {
-                try {
-                    Thread.sleep(delayMs);
-                    if (client.terminated()) return;
-                    ClientSessionSnapshot current = snapshotSupplier.get();
-                    if (clientVersion < current.version()) {
-                        client.sendEvent(current.stampedNow());
-                    }
-                    return;
-                } catch (Exception ignored) {}
+            // Send on every attempt — sendEvent() never throws on a silently-dropped write,
+            // so the old "return on first success" pattern only ever fired once.
+            // Sending the same snapshot multiple times is idempotent for the client.
+            for (long delayMs : new long[]{80, 400, 1000}) {
+                try { Thread.sleep(delayMs); } catch (InterruptedException e) { return; }
+                if (client.terminated()) return;
+                ClientSessionSnapshot current = snapshotSupplier.get();
+                if (clientVersion >= current.version()) return; // client already up-to-date
+                try { client.sendEvent(current.stampedNow()); } catch (Exception ignored) {}
             }
-            log.warn("Failed to send initial SSE snapshot after {} attempts", delaysMs.length);
         });
     }
 
