@@ -482,25 +482,15 @@ public final class SessionHttpServer {
         };
         updates.addListener(listener);
         client.onClose(() -> updates.removeListener(listener));
+        // Send initial snapshot synchronously while the response is still in synchronous
+        // mode — before keepAlive() switches it to async. This is the canonical Javalin SSE
+        // pattern and avoids any race between the async ctx.future() and the first write.
+        long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
+        ClientSessionSnapshot initial = snapshotSupplier.get();
+        if (clientVersion < initial.version()) {
+            try { client.sendEvent(initial.stampedNow()); } catch (Exception ignored) {}
+        }
         client.keepAlive();
-        // Deliver initial snapshot on a separate virtual thread so keepAlive()'s
-        // ctx.future() is processed by the event loop before we write data.
-        // Retry up to 3 times with increasing delays: the first attempt at 80ms is usually
-        // sufficient; if the async response isn't ready yet the send is silently dropped,
-        // so subsequent attempts at 300ms and 800ms give the event loop time to catch up.
-        Thread.ofVirtual().start(() -> {
-            long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
-            // Send on every attempt — sendEvent() never throws on a silently-dropped write,
-            // so the old "return on first success" pattern only ever fired once.
-            // Sending the same snapshot multiple times is idempotent for the client.
-            for (long delayMs : new long[]{80, 400, 1000}) {
-                try { Thread.sleep(delayMs); } catch (InterruptedException e) { return; }
-                if (client.terminated()) return;
-                ClientSessionSnapshot current = snapshotSupplier.get();
-                if (clientVersion >= current.version()) return; // client already up-to-date
-                try { client.sendEvent(current.stampedNow()); } catch (Exception ignored) {}
-            }
-        });
     }
 
     private static long parseLastEventId(String header) {
