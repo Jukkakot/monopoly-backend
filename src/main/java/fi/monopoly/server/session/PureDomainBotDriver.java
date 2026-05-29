@@ -88,8 +88,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 initialState.sessionId().substring(0, 8), botIds,
                 botIds.stream().collect(java.util.stream.Collectors.toMap(
                         id -> id, id -> difficulties.getOrDefault(id, BotDifficulty.STRONG))));
-        // Trigger initial check so a bot-first turn starts without waiting for a human command.
-        driver.onSnapshotChanged(ClientSessionSnapshot.from(initialState, true));
+        // Trigger initial check with a grace period so the frontend can connect and render
+        // the game before the bot starts. Any direct onSnapshotChanged call (e.g. from tests)
+        // will win the compareAndSet race and fire before the delayed initial check.
+        long initialDelayMs = Long.getLong("monopoly.bot.initial.delay.ms", 4000L);
+        ClientSessionSnapshot initialSnap = ClientSessionSnapshot.from(initialState, true);
+        if (initialDelayMs > 0) {
+            driver.scheduler.schedule(
+                    () -> driver.onSnapshotChanged(initialSnap),
+                    initialDelayMs, TimeUnit.MILLISECONDS);
+        } else {
+            driver.onSnapshotChanged(initialSnap);
+        }
         return driver;
     }
 
