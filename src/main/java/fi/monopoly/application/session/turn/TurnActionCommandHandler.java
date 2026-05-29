@@ -124,8 +124,17 @@ public final class TurnActionCommandHandler {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can change mortgages");
         }
-        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+        TurnPhase phase = currentStateSupplier.get().turn().phase();
+        if (isTurnActionBlocked(phase)) {
             return rejected("MORTGAGE_TOGGLE_FAILED", "Mortgage cannot be changed in the current phase");
+        }
+        // During a purchase decision the player may only MORTGAGE (not unmortgage) to raise cash.
+        if (phase == TurnPhase.WAITING_FOR_DECISION) {
+            SessionState earlyState = currentStateSupplier.get();
+            PropertyStateSnapshot earlyProp = findPropertyOwnedBy(earlyState, command.propertyId(), command.actorPlayerId());
+            if (earlyProp != null && earlyProp.mortgaged()) {
+                return rejected("MORTGAGE_TOGGLE_FAILED", "Cannot unmortgage during a purchase decision");
+            }
         }
         SessionState state = currentStateSupplier.get();
         PropertyStateSnapshot property = findPropertyOwnedBy(state, command.propertyId(), command.actorPlayerId());
@@ -245,7 +254,6 @@ public final class TurnActionCommandHandler {
 
     private boolean isTurnActionBlocked(TurnPhase phase) {
         return phase == TurnPhase.WAITING_FOR_CARD_ACK
-                || phase == TurnPhase.WAITING_FOR_DECISION
                 || phase == TurnPhase.WAITING_FOR_AUCTION
                 || phase == TurnPhase.RESOLVING_DEBT
                 || phase == TurnPhase.GAME_OVER;

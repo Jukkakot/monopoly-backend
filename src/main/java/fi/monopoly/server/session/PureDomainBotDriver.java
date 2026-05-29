@@ -264,12 +264,59 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 publisher.handle(new DeclinePropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
             } else if (canAfford) {
                 publisher.handle(new BuyPropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
+            } else if (!isEasy(activeId)) {
+                // Can we raise enough cash by mortgaging non-strategic properties?
+                PropertyStateSnapshot toMortgage = findMortgageCandidateForPurchase(state, activeId, purchase.price() - cash);
+                if (toMortgage != null) {
+                    publisher.handle(new ToggleMortgageCommand(sessionId, activeId, toMortgage.propertyId()));
+                    // Re-evaluate on next snapshot — do NOT issue decline yet
+                } else {
+                    publisher.handle(new DeclinePropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
+                }
             } else {
                 publisher.handle(new DeclinePropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
             }
         } else {
             publisher.handle(new EndTurnCommand(sessionId, activeId));
         }
+    }
+
+    /**
+     * Finds the best property to mortgage to raise at least {@code needed} extra cash for a purchase.
+     * Avoids mortgaging complete monopolies (strategic value) and prefers utilities/railroads first.
+     * Returns null if no suitable property exists or the bot wouldn't want to do this.
+     */
+    private PropertyStateSnapshot findMortgageCandidateForPurchase(SessionState state, String playerId, int needed) {
+        // Collect mortgageable properties: not already mortgaged, no buildings in the group
+        List<PropertyStateSnapshot> candidates = state.properties().stream()
+                .filter(p -> playerId.equals(p.ownerPlayerId()) && !p.mortgaged())
+                .filter(p -> {
+                    SpotType st = spotType(p.propertyId());
+                    if (st.streetType.placeType == PlaceType.STREET) {
+                        return state.properties().stream()
+                                .filter(q -> spotType(q.propertyId()).streetType == st.streetType)
+                                .noneMatch(q -> q.houseCount() > 0 || q.hotelCount() > 0);
+                    }
+                    return true;
+                })
+                // Do not sacrifice complete monopolies — they are most valuable
+                .filter(p -> !botOwnsFullGroup(state, playerId, spotType(p.propertyId()).streetType))
+                .toList();
+
+        if (candidates.isEmpty()) return null;
+
+        int totalRaisable = candidates.stream()
+                .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price") / 2)
+                .sum();
+        if (totalRaisable < needed) return null; // can't raise enough even by mortgaging everything
+
+        // Prefer: non-street (railroad/utility) first, then cheapest street property
+        return candidates.stream()
+                .min(java.util.Comparator
+                        .comparingInt((PropertyStateSnapshot p) ->
+                                spotType(p.propertyId()).streetType.placeType == PlaceType.STREET ? 1 : 0)
+                        .thenComparingInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price")))
+                .orElse(null);
     }
 
     private void handleDebt(SessionState state) {
