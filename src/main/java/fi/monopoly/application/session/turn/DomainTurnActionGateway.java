@@ -158,6 +158,18 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
     public void pauseAfterPropertyPurchase(TurnContinuationState continuation) {
         log.debug("pauseAfterPropertyPurchase continuation={} action={}", continuation.continuationId(), continuation.completionAction());
+        if (continuation.completionAction() == TurnContinuationAction.APPLY_TURN_FOLLOW_UP) {
+            // Doubles: skip WAITING_FOR_END_TURN and go directly to WAITING_FOR_ROLL.
+            // The client never needs to send EndTurn — this eliminates the entire
+            // frontend/backend sync problem with doubles auto-advance.
+            log.debug("pauseAfterPropertyPurchase doubles shortcut: consecutiveDoubles={} -> WAITING_FOR_ROLL directly", store.get().turn().consecutiveDoubles());
+            store.update(s -> s.toBuilder()
+                    .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_ROLL, true, false, s.turn().consecutiveDoubles(), s.turn().lastDice()))
+                    .lastCardKey(null)
+                    .lastCardMessage(null)
+                    .build());
+            return;
+        }
         pendingPostPurchaseContinuation = continuation;
         store.update(s -> {
             log.trace("pauseAfterPropertyPurchase store.update: consecutiveDoubles={} -> WAITING_FOR_END_TURN", s.turn().consecutiveDoubles());
