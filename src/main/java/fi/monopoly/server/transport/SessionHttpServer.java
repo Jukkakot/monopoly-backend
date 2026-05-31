@@ -341,6 +341,10 @@ public final class SessionHttpServer {
                 ctx.status(409).json(Map.of("error", "name_taken", "message", "This name is already in use"));
                 return;
             }
+            if (registry.isColorTakenByHuman(id, color)) {
+                ctx.status(409).json(Map.of("error", "color_taken", "message", "This color is already in use"));
+                return;
+            }
             registry.joinLobby(id, name, color)
                     .ifPresentOrElse(
                             r -> ctx.status(200).json(Map.of(

@@ -116,6 +116,7 @@ public final class SessionRegistry {
 
     /**
      * Dynamically adds a new human seat for the joining player (max {@value MAX_SEATS} total).
+     * If a bot holds the same color or name as the joining human, the bot is reassigned first.
      */
     public Optional<JoinResult> joinLobby(String sessionId, String name, String color) {
         Entry entry = sessions.get(sessionId);
@@ -129,18 +130,77 @@ public final class SessionRegistry {
             if (state.status() != SessionStatus.LOBBY) return state;
             if (state.seats().size() >= MAX_SEATS) return state;
 
-            int seatIndex = state.seats().size();
+            List<SeatState> workingSeats = new ArrayList<>(state.seats());
+
+            // Reassign any bot that holds the same color as the joining human
+            if (color != null && !color.isBlank()) {
+                final String colorUp = color.toUpperCase();
+                SeatState colorBot = workingSeats.stream()
+                        .filter(s -> s.seatKind() == SeatKind.BOT
+                                && s.tokenColorHex() != null
+                                && s.tokenColorHex().toUpperCase().equals(colorUp))
+                        .findFirst().orElse(null);
+                if (colorBot != null) {
+                    // Pick a new palette color excluding the one the human is about to claim
+                    java.util.Set<String> usedExcludingBot = workingSeats.stream()
+                            .filter(s -> !s.seatId().equals(colorBot.seatId()))
+                            .map(SeatState::tokenColorHex).filter(java.util.Objects::nonNull)
+                            .map(String::toUpperCase).collect(java.util.stream.Collectors.toSet());
+                    String newBotColor = PureDomainSessionFactory.SEAT_COLORS.stream()
+                            .filter(c -> !usedExcludingBot.contains(c.toUpperCase()))
+                            .findFirst().orElse(PureDomainSessionFactory.SEAT_COLORS.get(0));
+                    SeatState updated = new SeatState(colorBot.seatId(), colorBot.seatIndex(),
+                            colorBot.playerId(), colorBot.seatKind(), colorBot.controlMode(),
+                            colorBot.displayName(), colorBot.controllerProfileId(),
+                            newBotColor, colorBot.joined(), colorBot.botDifficulty(), colorBot.ready());
+                    workingSeats = workingSeats.stream()
+                            .map(s -> s.seatId().equals(colorBot.seatId()) ? updated : s)
+                            .collect(Collectors.toList());
+                }
+            }
+
+            // Reassign any bot that holds the same name as the joining human
+            SeatState nameBot = workingSeats.stream()
+                    .filter(s -> s.seatKind() == SeatKind.BOT
+                            && s.displayName() != null
+                            && s.displayName().equalsIgnoreCase(name))
+                    .findFirst().orElse(null);
+            if (nameBot != null) {
+                SessionState tempState = state.toBuilder().seats(workingSeats).build();
+                String newBotName = uniqueBotName(tempState);
+                SeatState updated = new SeatState(nameBot.seatId(), nameBot.seatIndex(),
+                        nameBot.playerId(), nameBot.seatKind(), nameBot.controlMode(),
+                        newBotName, nameBot.controllerProfileId(),
+                        nameBot.tokenColorHex(), nameBot.joined(), nameBot.botDifficulty(), nameBot.ready());
+                workingSeats = workingSeats.stream()
+                        .map(s -> s.seatId().equals(nameBot.seatId()) ? updated : s)
+                        .collect(Collectors.toList());
+            }
+
+            int seatIndex = workingSeats.size();
             String seatId = "seat-" + UUID.randomUUID();
-            String effectiveColor = resolveColor(color, state, seatIndex);
+            SessionState tempForColor = state.toBuilder().seats(workingSeats).build();
+            String effectiveColor = resolveColor(color, tempForColor, seatIndex);
             SeatState newSeat = new SeatState(seatId, seatIndex, newPlayerId, SeatKind.HUMAN,
                     ControlMode.MANUAL, name, "HUMAN", effectiveColor, true, null, false);
             added[0] = newSeat;
 
-            List<SeatState> newSeats = new ArrayList<>(state.seats());
-            newSeats.add(newSeat);
-            List<PlayerSnapshot> newPlayers = new ArrayList<>(state.players());
-            newPlayers.add(new PlayerSnapshot(newPlayerId, seatId, name, 1500, 0, false, false, false, 0, 0, List.of()));
-            return state.toBuilder().seats(newSeats).players(newPlayers).build();
+            workingSeats.add(newSeat);
+            // Sync player names for any reassigned bots, then add the new human player
+            final List<SeatState> finalSeats = workingSeats;
+            List<PlayerSnapshot> updatedPlayers = state.players().stream()
+                    .map(p -> {
+                        SeatState seat = finalSeats.stream()
+                                .filter(s -> s.playerId().equals(p.playerId())).findFirst().orElse(null);
+                        if (seat != null && !seat.displayName().equals(p.name())) {
+                            return new PlayerSnapshot(p.playerId(), p.seatId(), seat.displayName(),
+                                    p.cash(), p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                    p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                        }
+                        return p;
+                    }).collect(Collectors.toList());
+            updatedPlayers.add(new PlayerSnapshot(newPlayerId, seatId, name, 1500, 0, false, false, false, 0, 0, List.of()));
+            return state.toBuilder().seats(workingSeats).players(updatedPlayers).build();
         });
 
         if (added[0] == null) return Optional.empty();
@@ -283,12 +343,24 @@ public final class SessionRegistry {
     // Lobby validation helpers
     // -------------------------------------------------------------------------
 
-    /** Returns true if the given name (case-insensitive) is already taken in the lobby. */
+    /** Returns true if the given name (case-insensitive) is already taken by a HUMAN seat in the lobby. */
     public boolean isNameTakenInLobby(String sessionId, String name) {
         Entry entry = sessions.get(sessionId);
         if (entry == null) return false;
         return entry.baseStore().get().seats().stream()
+                .filter(s -> s.seatKind() == SeatKind.HUMAN)
                 .anyMatch(s -> s.displayName().equalsIgnoreCase(name));
+    }
+
+    /** Returns true if the given color is already taken by a HUMAN seat in the lobby. */
+    public boolean isColorTakenByHuman(String sessionId, String color) {
+        if (color == null || color.isBlank()) return false;
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return false;
+        final String colorUp = color.toUpperCase();
+        return entry.baseStore().get().seats().stream()
+                .filter(s -> s.seatKind() == SeatKind.HUMAN)
+                .anyMatch(s -> s.tokenColorHex() != null && s.tokenColorHex().toUpperCase().equals(colorUp));
     }
 
     // -------------------------------------------------------------------------
