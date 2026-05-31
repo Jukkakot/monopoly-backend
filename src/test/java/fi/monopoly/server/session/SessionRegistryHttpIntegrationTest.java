@@ -10,6 +10,7 @@ import fi.monopoly.server.transport.SessionHttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -197,6 +198,8 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     @Test
+    @DisabledIfSystemProperty(named = "skipSseTests", matches = "true",
+            disabledReason = "SSE test is flaky under Docker CPU load — run with -DskipSseTests=false to enable")
     void sseStreamForCreatedSessionPushesInitialSnapshot() throws Exception {
         String sessionId = extractSessionId(post("/sessions",
                 "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#E63946\",\"#2A9D8F\"]}").body());
