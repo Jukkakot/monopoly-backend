@@ -103,6 +103,18 @@ public final class SessionHttpServer {
                 ctx.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
                 ctx.header("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
             });
+
+            // Audit logging — skip health/ping/SSE/snapshot polls to keep logs readable
+            config.routes.after(ctx -> {
+                String method = ctx.method().name();
+                String path = ctx.path();
+                if (path.equals("/health") || path.equals("/ping") || path.endsWith("/events")
+                        || (method.equals("GET") && path.endsWith("/snapshot"))
+                        || method.equals("OPTIONS")) return;
+                int status = ctx.status().getCode();
+                String remote = ctx.ip();
+                log.info("HTTP {} {} {} {}", method, path, status, remote);
+            });
             config.routes.options("/*", ctx -> ctx.status(204));
 
             config.routes.get("/ping", ctx -> ctx.status(204));
@@ -173,6 +185,7 @@ public final class SessionHttpServer {
                 config.routes.post("/sessions/{id}/lobby/ready", this::handleLobbyReady);
                 config.routes.get("/sessions/{id}/settings", this::handleGetSettings);
                 config.routes.put("/sessions/{id}/settings", this::handleSettings);
+                config.routes.post("/sessions/{id}/bot/retrigger", this::handleBotRetrigger);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
                 config.routes.get("/sessions/{id}/snapshot", ctx ->
