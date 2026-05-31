@@ -186,6 +186,7 @@ public final class SessionHttpServer {
                 config.routes.get("/sessions/{id}/settings", this::handleGetSettings);
                 config.routes.put("/sessions/{id}/settings", this::handleSettings);
                 config.routes.post("/sessions/{id}/bot/retrigger", this::handleBotRetrigger);
+                config.routes.put("/sessions/{id}/debug/state", this::handleDebugStateImport);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
                 config.routes.get("/sessions/{id}/snapshot", ctx ->
@@ -492,6 +493,19 @@ public final class SessionHttpServer {
             log.debug("Session {} botSpeed={} ({}x)", id.substring(0, 8), req.botSpeed(), mult);
         }
         ctx.status(200).json(Map.of("ok", true));
+    }
+
+    private void handleDebugStateImport(Context ctx) {
+        String id = ctx.pathParam("id");
+        if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+        DebugStateImport patch;
+        try {
+            patch = objectMapper.readValue(ctx.bodyAsBytes(), DebugStateImport.class);
+        } catch (Exception e) {
+            throw new BadRequestResponse("Invalid debug state import: " + e.getMessage());
+        }
+        boolean applied = registry.importDebugState(id, patch);
+        ctx.status(applied ? 200 : 404).json(Map.of("applied", applied));
     }
 
     // -------------------------------------------------------------------------

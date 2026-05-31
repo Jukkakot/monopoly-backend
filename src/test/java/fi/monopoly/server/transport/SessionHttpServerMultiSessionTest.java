@@ -115,6 +115,65 @@ class SessionHttpServerMultiSessionTest {
     }
 
     // -------------------------------------------------------------------------
+    // PUT /sessions/{id}/debug/state
+    // -------------------------------------------------------------------------
+
+    @Test
+    void debugStateImport_patchesPlayerCash() throws Exception {
+        String sessionId = registry.create(List.of("Alice", "Bob"), List.of()).sessionId();
+        String snapshotBefore = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snapshotBefore.contains("\"cash\":1500"), "initial cash should be 1500");
+
+        String aliceId = extractFirstPlayerId(snapshotBefore);
+        assertNotNull(aliceId, "should find a player id");
+
+        String body = """
+            {"players":[{"playerId":"%s","cash":999}]}
+            """.formatted(aliceId);
+        HttpResponse<String> resp = putJson("/sessions/" + sessionId + "/debug/state", body);
+        assertEquals(200, resp.statusCode());
+        assertTrue(resp.body().contains("\"applied\":true"));
+
+        String snapshotAfter = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snapshotAfter.contains("\"cash\":999"), "cash should be patched to 999");
+    }
+
+    @Test
+    void debugStateImport_unknownSession_returns404() throws Exception {
+        HttpResponse<String> resp = putJson("/sessions/no-such-session/debug/state", "{}");
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void debugStateImport_clearDebt_removesActiveDebt() throws Exception {
+        String sessionId = registry.create(List.of("Alice", "Bob"), List.of()).sessionId();
+        String body = """
+            {"clearDebt":true,"clearAuction":true,"clearDecision":true}
+            """;
+        HttpResponse<String> resp = putJson("/sessions/" + sessionId + "/debug/state", body);
+        assertEquals(200, resp.statusCode());
+        assertTrue(resp.body().contains("\"applied\":true"));
+    }
+
+    @Test
+    void debugStateImport_patchTurnPhase() throws Exception {
+        String sessionId = registry.create(List.of("Alice", "Bob"), List.of()).sessionId();
+        String body = """
+            {"turn":{"phase":"WAITING_FOR_END_TURN"}}
+            """;
+        HttpResponse<String> resp = putJson("/sessions/" + sessionId + "/debug/state", body);
+        assertEquals(200, resp.statusCode());
+
+        String snapshot = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snapshot.contains("WAITING_FOR_END_TURN"), "phase should be patched");
+    }
+
+    private static String extractFirstPlayerId(String snapshot) {
+        var m = java.util.regex.Pattern.compile("\"playerId\":\"([^\"]+)\"").matcher(snapshot);
+        return m.find() ? m.group(1) : null;
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -122,6 +181,17 @@ class SessionHttpServerMultiSessionTest {
         HttpClient client = HttpClient.newHttpClient();
         return client.send(
                 HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + path)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> putJson(String path, String body) throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        return client.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + path))
+                        .PUT(HttpRequest.BodyPublishers.ofString(body))
+                        .header("Content-Type", "application/json")
+                        .build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 

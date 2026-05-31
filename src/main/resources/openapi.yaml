@@ -460,6 +460,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /sessions/{sessionId}/debug/state:
+    put:
+      tags: [session]
+      summary: Import a partial debug state (dev only)
+      operationId: importDebugState
+      description: |
+        Applies a partial game-state override to a live session and broadcasts
+        the updated snapshot via SSE to all connected clients.
+
+        **Intended for the developer debug panel only.**  No authentication is
+        required — treat this endpoint as a developer tool, not a production API.
+
+        Every field is optional. `null` (or absent) means "keep the current value".
+        Use the `clearDebt`, `clearDecision`, and `clearAuction` flags to
+        explicitly null out those sub-states.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebugStateImport'
+            example:
+              players:
+                - playerId: player-abc
+                  cash: 100
+                  boardIndex: 5
+                  inJail: true
+              properties:
+                - propertyId: prop-helsinki-1
+                  ownerPlayerId: player-abc
+                  houseCount: 2
+              turn:
+                phase: WAITING_FOR_END_TURN
+              clearDebt: true
+      responses:
+        '200':
+          description: Patch applied — snapshot broadcast to all SSE clients
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied:
+                    type: boolean
+                    example: true
+        '400':
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sessions/{sessionId}/command:
     post:
       tags: [session]
@@ -591,6 +651,92 @@ components:
       description: Session ID returned by `POST /sessions`
 
   schemas:
+
+    # ── Debug ────────────────────────────────────────────────────────────────
+
+    DebugStateImport:
+      type: object
+      description: |
+        Partial game-state override for the developer debug panel.
+        Every field is optional — omit to keep the current value.
+      properties:
+        players:
+          type: array
+          description: Patches to apply per player (matched by `playerId`)
+          items:
+            type: object
+            required: [playerId]
+            properties:
+              playerId:
+                type: string
+              cash:
+                type: integer
+              boardIndex:
+                type: integer
+                minimum: 0
+                maximum: 39
+              inJail:
+                type: boolean
+              bankrupt:
+                type: boolean
+              getOutOfJailCards:
+                type: integer
+                minimum: 0
+              ownedPropertyIds:
+                type: array
+                items:
+                  type: string
+        properties:
+          type: array
+          description: Patches to apply per property (matched by `propertyId`)
+          items:
+            type: object
+            required: [propertyId]
+            properties:
+              propertyId:
+                type: string
+              ownerPlayerId:
+                type: string
+                description: Use empty string `""` to clear the owner
+              mortgaged:
+                type: boolean
+              houseCount:
+                type: integer
+                minimum: 0
+                maximum: 4
+              hotelCount:
+                type: integer
+                minimum: 0
+                maximum: 1
+        turn:
+          type: object
+          description: Fields to patch on the current TurnState
+          properties:
+            activePlayerId:
+              type: string
+            phase:
+              type: string
+              enum: [WAITING_FOR_ROLL, WAITING_FOR_CARD_ACK, WAITING_FOR_DECISION,
+                     WAITING_FOR_AUCTION, RESOLVING_DEBT, WAITING_FOR_END_TURN, GAME_OVER]
+            consecutiveDoubles:
+              type: integer
+              minimum: 0
+              maximum: 2
+            lastDice:
+              type: array
+              items:
+                type: integer
+              minItems: 2
+              maxItems: 2
+        clearDebt:
+          type: boolean
+          description: Set to `true` to clear `activeDebt`
+        clearDecision:
+          type: boolean
+          description: Set to `true` to clear `pendingDecision`
+        clearAuction:
+          type: boolean
+          description: Set to `true` to clear `auctionState`
 
     # ── Settings ─────────────────────────────────────────────────────────────
 

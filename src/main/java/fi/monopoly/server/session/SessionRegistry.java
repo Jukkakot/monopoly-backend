@@ -3,6 +3,9 @@ package fi.monopoly.server.session;
 import fi.monopoly.application.session.InMemorySessionState;
 import fi.monopoly.application.session.SessionApplicationService;
 import fi.monopoly.domain.session.*;
+import fi.monopoly.domain.turn.TurnPhase;
+import fi.monopoly.domain.turn.TurnState;
+import fi.monopoly.server.transport.DebugStateImport;
 import fi.monopoly.server.transport.GlobalMetrics;
 import lombok.extern.slf4j.Slf4j;
 
@@ -337,6 +340,98 @@ public final class SessionRegistry {
         if (entry == null || entry.botDriver() == null) return false;
         entry.botDriver().retrigger();
         return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Debug state import
+    // -------------------------------------------------------------------------
+
+    /**
+     * Applies a partial state patch to a live session and broadcasts the new snapshot.
+     * Intended for the developer debug panel only — not exposed in production flows.
+     *
+     * @return true if the patch was applied, false if the session was not found
+     */
+    public boolean importDebugState(String sessionId, DebugStateImport patch) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return false;
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+        entry.baseStore().update(state -> applyDebugPatch(state, patch));
+        entry.publisher().notifyListeners();
+        log.info("Debug state import applied to session {}", sessionId.substring(0, Math.min(8, sessionId.length())));
+        return true;
+    }
+
+    private static SessionState applyDebugPatch(SessionState state, DebugStateImport patch) {
+        SessionState.SessionStateBuilder builder = state.toBuilder();
+
+        if (patch.players() != null) {
+            java.util.List<PlayerSnapshot> players = new java.util.ArrayList<>(state.players());
+            for (DebugStateImport.PlayerPatch pp : patch.players()) {
+                for (int i = 0; i < players.size(); i++) {
+                    PlayerSnapshot p = players.get(i);
+                    if (p.playerId().equals(pp.playerId())) {
+                        players.set(i, new PlayerSnapshot(
+                                p.playerId(), p.seatId(), p.name(),
+                                pp.cash() != null ? pp.cash() : p.cash(),
+                                pp.boardIndex() != null ? pp.boardIndex() : p.boardIndex(),
+                                pp.bankrupt() != null ? pp.bankrupt() : p.bankrupt(),
+                                p.eliminated(),
+                                pp.inJail() != null ? pp.inJail() : p.inJail(),
+                                p.jailRoundsRemaining(),
+                                pp.getOutOfJailCards() != null ? pp.getOutOfJailCards() : p.getOutOfJailCards(),
+                                pp.ownedPropertyIds() != null ? pp.ownedPropertyIds() : p.ownedPropertyIds()
+                        ));
+                        break;
+                    }
+                }
+            }
+            builder.players(players);
+        }
+
+        if (patch.properties() != null) {
+            java.util.List<PropertyStateSnapshot> props = new java.util.ArrayList<>(state.properties());
+            for (DebugStateImport.PropertyPatch pp : patch.properties()) {
+                for (int i = 0; i < props.size(); i++) {
+                    PropertyStateSnapshot prop = props.get(i);
+                    if (prop.propertyId().equals(pp.propertyId())) {
+                        String owner = pp.ownerPlayerId() != null
+                                ? (pp.ownerPlayerId().isEmpty() ? null : pp.ownerPlayerId())
+                                : prop.ownerPlayerId();
+                        props.set(i, new PropertyStateSnapshot(
+                                prop.propertyId(), owner,
+                                pp.mortgaged() != null ? pp.mortgaged() : prop.mortgaged(),
+                                pp.houseCount() != null ? pp.houseCount() : prop.houseCount(),
+                                pp.hotelCount() != null ? pp.hotelCount() : prop.hotelCount()
+                        ));
+                        break;
+                    }
+                }
+            }
+            builder.properties(props);
+        }
+
+        if (patch.turn() != null && state.turn() != null) {
+            DebugStateImport.TurnPatch tp = patch.turn();
+            TurnState cur = state.turn();
+            TurnPhase newPhase = tp.phase() != null
+                    ? TurnPhase.valueOf(tp.phase())
+                    : cur.phase();
+            boolean canRoll = newPhase == TurnPhase.WAITING_FOR_ROLL;
+            boolean canEndTurn = newPhase == TurnPhase.WAITING_FOR_END_TURN;
+            builder.turn(new TurnState(
+                    tp.activePlayerId() != null ? tp.activePlayerId() : cur.activePlayerId(),
+                    newPhase, canRoll, canEndTurn,
+                    tp.consecutiveDoubles() != null ? tp.consecutiveDoubles() : cur.consecutiveDoubles(),
+                    tp.lastDice() != null ? tp.lastDice() : cur.lastDice()
+            ));
+        }
+
+        if (Boolean.TRUE.equals(patch.clearDebt())) builder.activeDebt(null);
+        if (Boolean.TRUE.equals(patch.clearDecision())) builder.pendingDecision(null);
+        if (Boolean.TRUE.equals(patch.clearAuction())) builder.auctionState(null);
+
+        return builder.build();
     }
 
     // -------------------------------------------------------------------------
