@@ -112,6 +112,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         scheduler.shutdownNow();
     }
 
+    /**
+     * Forces the bot to re-evaluate and act immediately. Used when the host detects the bot
+     * has been idle for too long (failsafe / stuck-turn recovery).
+     */
+    public void retrigger() {
+        pendingAction.set(false);
+        SessionState state = publisher.currentState();
+        if (state != null && needsBotAction(state)) {
+            onSnapshotChanged(ClientSessionSnapshot.from(state, false));
+        }
+    }
+
     public void setSpeedMultiplier(double multiplier) {
         this.speedMultiplier = Math.max(0.0, multiplier);
         log.debug("Bot speed multiplier set to {} for session {}", multiplier, sessionId.substring(0, 8));

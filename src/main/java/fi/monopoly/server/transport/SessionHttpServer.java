@@ -429,6 +429,27 @@ public final class SessionHttpServer {
         }
     }
 
+    private void handleBotRetrigger(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            String hostToken = body.get("hostToken") instanceof String s ? s : null;
+            if (!registry.validateHostToken(id, hostToken)) {
+                ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
+                return;
+            }
+            boolean triggered = registry.retriggerBot(id);
+            ctx.status(200).json(Map.of("triggered", triggered));
+        } catch (NotFoundResponse e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error retriggering bot", e);
+            ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
     private void handleGetSettings(Context ctx) {
         String id = ctx.pathParam("id");
         if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);

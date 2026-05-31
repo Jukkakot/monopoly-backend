@@ -265,6 +265,21 @@ public final class SessionRegistry {
     }
 
     // -------------------------------------------------------------------------
+    // Bot failsafe
+    // -------------------------------------------------------------------------
+
+    /**
+     * Retrigers the bot driver for the session, forcing it to re-evaluate its turn.
+     * Used by the host when a bot appears stuck. Returns true if a bot driver exists.
+     */
+    public boolean retriggerBot(String sessionId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return false;
+        entry.botDriver().retrigger();
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
     // Lobby validation helpers
     // -------------------------------------------------------------------------
 
