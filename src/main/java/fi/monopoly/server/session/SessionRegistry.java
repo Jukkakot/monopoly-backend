@@ -168,8 +168,7 @@ public final class SessionRegistry {
             if (state.seats().size() >= MAX_SEATS) return state;
 
             int seatIndex = state.seats().size();
-            long botCount = state.seats().stream().filter(s -> s.seatKind() == SeatKind.BOT).count();
-            String botName = "Botti " + (botCount + 1);
+            String botName = uniqueBotName(state);
             String seatId = "seat-" + UUID.randomUUID();
             String color = resolveColor(null, state, seatIndex);
             SeatState botSeat = new SeatState(seatId, seatIndex, botPlayerId, SeatKind.BOT,
@@ -263,6 +262,18 @@ public final class SessionRegistry {
             entry.publisher().notifyListeners();
         }
         return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Lobby validation helpers
+    // -------------------------------------------------------------------------
+
+    /** Returns true if the given name (case-insensitive) is already taken in the lobby. */
+    public boolean isNameTakenInLobby(String sessionId, String name) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null) return false;
+        return entry.baseStore().get().seats().stream()
+                .anyMatch(s -> s.displayName().equalsIgnoreCase(name));
     }
 
     // -------------------------------------------------------------------------
@@ -366,14 +377,42 @@ public final class SessionRegistry {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Returns the next palette color not yet used by any seat in the current state. */
+    private static final List<String> BOT_NAME_POOL = List.of(
+        "Teräs-Ville", "Pii-Risto", "Kisko-Kai", "Servo-Sanna", "Nano-Nea",
+        "Diodi-Dixi", "Mega-Manu", "Pikku-Pirkka", "Turbo-Teuvo", "Klonkku-Klaus",
+        "Rele-Reijo", "Piiri-Pirjo", "Robotti-Rauli", "Silppu-Silja", "Moottori-Matti"
+    );
+
+    /** Picks a random bot name not already used in the current lobby. */
+    private static String uniqueBotName(SessionState state) {
+        java.util.Set<String> used = state.seats().stream()
+                .map(SeatState::displayName).collect(java.util.stream.Collectors.toSet());
+        List<String> pool = new java.util.ArrayList<>(BOT_NAME_POOL);
+        java.util.Collections.shuffle(pool, java.util.concurrent.ThreadLocalRandom.current());
+        for (String n : pool) {
+            if (!used.contains(n)) return n;
+        }
+        // All pool names taken — fall back with a numeric suffix
+        for (int i = 1; i <= 10; i++) {
+            String fallback = "Botti-" + i;
+            if (!used.contains(fallback)) return fallback;
+        }
+        return "Botti";
+    }
+
+    /** Returns the next palette color not yet used by any seat in the current state.
+     *  If a specific color is requested, uses it only when not already taken; otherwise auto-picks. */
     private static String resolveColor(String requested, SessionState state, int seatIndex) {
-        if (requested != null && !requested.isBlank()) return requested;
         List<String> palette = PureDomainSessionFactory.SEAT_COLORS;
         java.util.Set<String> used = state.seats().stream()
-                .map(SeatState::tokenColorHex).collect(java.util.stream.Collectors.toSet());
+                .map(SeatState::tokenColorHex)
+                .map(String::toUpperCase)
+                .collect(java.util.stream.Collectors.toSet());
+        if (requested != null && !requested.isBlank() && !used.contains(requested.toUpperCase())) {
+            return requested;
+        }
         for (String c : palette) {
-            if (!used.contains(c)) return c;
+            if (!used.contains(c.toUpperCase())) return c;
         }
         return palette.get(seatIndex % palette.size());
     }

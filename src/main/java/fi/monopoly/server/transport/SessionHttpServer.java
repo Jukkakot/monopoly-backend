@@ -324,6 +324,10 @@ public final class SessionHttpServer {
                 ctx.status(400).json(Map.of("error", "name is required"));
                 return;
             }
+            if (registry.isNameTakenInLobby(id, name)) {
+                ctx.status(409).json(Map.of("error", "name_taken", "message", "This name is already in use"));
+                return;
+            }
             registry.joinLobby(id, name, color)
                     .ifPresentOrElse(
                             r -> ctx.status(200).json(Map.of(
@@ -331,7 +335,7 @@ public final class SessionHttpServer {
                                     "seatId", r.seat().seatId(),
                                     "tokenColorHex", r.seat().tokenColorHex(),
                                     "playerToken", r.playerToken())),
-                            () -> ctx.status(409).json(Map.of("error", "No available seats or session not in LOBBY state")));
+                            () -> ctx.status(409).json(Map.of("error", "lobby_full", "message", "No available seats or session not in LOBBY state")));
         } catch (NotFoundResponse e) {
             throw e;
         } catch (Exception e) {
