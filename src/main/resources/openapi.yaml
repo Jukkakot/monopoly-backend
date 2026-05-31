@@ -588,7 +588,6 @@ components:
       required: true
       schema:
         type: string
-        format: uuid
       description: Session ID returned by `POST /sessions`
 
   schemas:
@@ -682,8 +681,6 @@ components:
       properties:
         sessionId:
           type: string
-          format: uuid
-          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
         hostToken:
           type: string
           format: uuid
@@ -695,7 +692,6 @@ components:
       properties:
         sessionId:
           type: string
-          format: uuid
         playerNames:
           type: array
           items:
@@ -743,7 +739,6 @@ components:
       properties:
         sessionId:
           type: string
-          format: uuid
         version:
           type: integer
           format: int64
@@ -762,7 +757,6 @@ components:
       properties:
         sessionId:
           type: string
-          format: uuid
         version:
           type: integer
           format: int64
@@ -1196,7 +1190,6 @@ components:
           description: Command type discriminator
         sessionId:
           type: string
-          format: uuid
           description: |
             Session identifier. Optional when submitting via
             `POST /sessions/{id}/command` — the server uses the path parameter.
