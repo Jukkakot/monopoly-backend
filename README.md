@@ -102,7 +102,8 @@ docker run -p 8080:8080 monopoly-backend
 |---|---|---|
 | `PORT` (env var) | `8080` | HTTP server port |
 | `-Dmonopoly.session.ttl.minutes` | `120` | Minutes of inactivity before a session is automatically evicted |
-| `-Dmonopoly.bot.think.delay.ms` | `600` | Artificial delay (ms) before a bot executes its turn action |
+| `-Dmonopoly.bot.think.delay.ms` | `900` | Base think-time (ms) added to the situational delay before a bot acts |
+| `-Dmonopoly.bot.initial.delay.ms` | `4000` | Grace period (ms) after session start before bots take their first action |
 | `-Dmonopoly.localSavePath` | `saves/local-session.json` | Path used for local session persistence (single-session mode) |
 
 Sessions are checked for idle eviction every 5 minutes. Activity is counted whenever a client fetches the snapshot or submits a command.
@@ -111,26 +112,40 @@ Sessions are checked for idle eviction every 5 minutes. Activity is counted when
 
 ## Session lifecycle
 
+### Direct start (bot/test sessions)
+
 ```
-POST /sessions
+POST /sessions  { names, colors, seatKinds, difficulties }
       │
       ▼
-  sessionId (UUID)
+  sessionId (UUID)   ← game starts immediately
       │
-      ├── GET /sessions/{id}/events    ← open SSE stream (long-lived)
-      │         server pushes full snapshot after every accepted command
+      ├── GET  /sessions/{id}/events    ← SSE stream — server pushes full snapshot on every accepted command
+      ├── POST /sessions/{id}/command   ← submit game actions
+      ├── GET  /sessions/{id}/snapshot  ← poll current state
+      └── DELETE /sessions/{id}         ← remove session
+```
+
+### Lobby flow (human players)
+
+```
+POST /sessions  { lobbyMode: true, seatCount: N }
       │
-      ├── POST /sessions/{id}/command  ← submit game actions
-      │         returns {accepted: true} or {accepted: false, rejections: [...]}
+      ▼
+  { sessionId, hostToken, playerId, playerToken }
       │
-      └── GET /sessions/{id}/snapshot  ← poll current state at any time
+      ├── POST /sessions/{id}/join               ← additional human players join
+      ├── POST /sessions/{id}/lobby/bots         ← host adds a bot seat
+      ├── DELETE /sessions/{id}/lobby/bots/{sid} ← host removes a bot seat
+      └── POST /sessions/{id}/lobby/ready        ← player marks themselves ready
+                                                    game starts when all humans are ready
 ```
 
 1. **Create** — `POST /sessions` returns a UUID `sessionId`.
 2. **Subscribe** — open `GET /sessions/{id}/events`. The server immediately pushes the current snapshot, then pushes again after every accepted command.
 3. **Act** — submit commands via `POST /sessions/{id}/command`. The `actorPlayerId` must match the active player's turn.
 4. **Poll** (optional) — `GET /sessions/{id}/snapshot` returns the current state without keeping a connection open.
-5. **End** — the session is removed automatically after `monopoly.session.ttl.minutes` of inactivity, or immediately if all players are eliminated.
+5. **End** — the session is removed automatically after `monopoly.session.ttl.minutes` of inactivity, or explicitly via `DELETE /sessions/{id}`.
 
 ---
 
@@ -147,12 +162,13 @@ All responses include CORS headers (`Access-Control-Allow-Origin: *`).
 | `GET` | `/sessions` | List all active sessions |
 | `GET` | `/openapi.yaml` | OpenAPI 3.1.0 specification |
 | `GET` | `/docs` | Swagger UI |
+| `GET` | `/metrics` | Session and command metrics |
 
 ### Session management
 
 #### `POST /sessions` — Create a session
 
-Request body:
+**Direct start** (all seats known up front):
 
 ```json
 {
@@ -163,18 +179,28 @@ Request body:
 }
 ```
 
+**Lobby mode** (human players join one by one):
+
+```json
+{
+  "lobbyMode": true,
+  "seatCount": 4,
+  "hostName": "Jukka",
+  "hostColor": "#E63946"
+}
+```
+
 | Field | Required | Description |
 |---|---|---|
-| `names` | yes | 2–4 player display names |
+| `names` | yes (direct) | 2–4 player display names |
 | `colors` | no | CSS hex colours per seat; missing entries fall back to grey |
 | `seatKinds` | no | `HUMAN` or `BOT` per seat; missing entries default to `HUMAN` |
 | `difficulties` | no | `EASY`, `NORMAL`, or `STRONG` per seat; only meaningful for `BOT` seats; missing entries default to `NORMAL` |
+| `lobbyMode` | no | `true` to enter lobby flow; game starts when all human seats mark ready |
+| `seatCount` | no | Total seat count for lobby mode (2–4) |
 
-Response `201`:
-
-```json
-{ "sessionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6" }
-```
+Response `201` (direct start): `{ "sessionId": "..." }`  
+Response `201` (lobby mode): `{ "sessionId": "...", "hostToken": "...", "playerId": "...", "playerToken": "..." }`
 
 #### `GET /sessions` — List sessions
 
@@ -187,6 +213,26 @@ Response `201`:
   }
 ]
 ```
+
+#### `DELETE /sessions/{id}` — Remove a session
+
+Immediately removes the session regardless of game state. Returns HTTP 404 if not found.
+
+#### Lobby endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/sessions/{id}/join` | Human player joins a lobby session |
+| `POST` | `/sessions/{id}/lobby/bots` | Host adds a bot seat (requires `hostToken`) |
+| `DELETE` | `/sessions/{id}/lobby/bots/{seatId}` | Host removes a bot seat |
+| `POST` | `/sessions/{id}/lobby/ready` | Player marks themselves ready; game auto-starts when all humans are ready |
+
+#### Settings
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/sessions/{id}/settings` | Get current session settings |
+| `PUT` | `/sessions/{id}/settings` | Update settings — e.g. `{ "botSpeed": "fast" }` (`fast`, `normal`, `slow`) |
 
 ### Game commands
 
@@ -289,6 +335,7 @@ Commands marked with *actor* also require `actorPlayerId`.
 |---|---|---|---|
 | `RollDice` | yes | — | `WAITING_FOR_ROLL` |
 | `EndTurn` | yes | — | `WAITING_FOR_END_TURN` |
+| `AcknowledgeCard` | yes | — | `WAITING_FOR_CARD_ACK` |
 | `UseGetOutOfJailCard` | yes | — | `WAITING_FOR_ROLL` (in jail, has card) |
 | `PayJailFine` | yes | — | `WAITING_FOR_ROLL` (in jail, cash ≥ €50) |
 
@@ -327,10 +374,15 @@ Commands marked with *actor* also require `actorPlayerId`.
 
 | Type | Actor | Extra fields | Notes |
 |---|---|---|---|
-| `BuyBuildingRound` | yes | `propertyId` | Buys one building on every property in the colour group |
+| `BuyBuildingRound` | yes | `propertyId` | Buys one building on the target property (even-build rule enforced) |
+| `SellBuildingRound` | yes | `propertyId` | Sells one building from the target property (even-sell rule enforced) |
 | `ToggleMortgage` | yes | `propertyId` | Mortgages or lifts mortgage on one property |
 
-Building purchases follow the even-build rule — all properties in the group must be at the same level before adding another.
+Rules:
+- **Even-build:** all properties in a colour group must stay within one building level of each other.
+- **Bank supply:** the bank holds 32 houses and 12 hotels. Purchases are rejected when the bank runs out.
+- **Mortgage:** only allowed in `WAITING_FOR_END_TURN` or `WAITING_FOR_DECISION` (mortgage only, not unmortgage, during decisions). Cannot mortgage if the colour group has buildings.
+- **Unmortgage cost:** `mortgageValue × 1.1` (integer truncation), where `mortgageValue = listPrice / 2`.
 
 ### Trade
 
@@ -350,6 +402,16 @@ Building purchases follow the even-build rule — all properties in the group mu
 |---|---|---|---|
 | `RefreshSessionView` | no | — | Triggers a snapshot push without changing state; useful after reconnecting |
 
+### Trade — `EditTradeOffer` patch fields
+
+| Field | Type | Description |
+|---|---|---|
+| `offeredSide` | boolean | `true` = edit proposer's side, `false` = edit request side |
+| `propertyIdsToAdd` | string[] | Property IDs to add to the selected side |
+| `propertyIdsToRemove` | string[] | Property IDs to remove from the selected side |
+| `replaceMoneyAmount` | integer | Replace the money amount on the selected side |
+| `toggleJailCard` | boolean | Toggle the Get-Out-of-Jail-Free card on the selected side |
+
 ---
 
 ## Bot players
@@ -361,9 +423,21 @@ The bot responds automatically after `monopoly.bot.think.delay.ms` milliseconds.
 
 | Difficulty | Behaviour |
 |---|---|
-| `EASY` | Skips ~40 % of affordable property purchases; declines ~50 % of auction bids; never initiates trades |
-| `NORMAL` | Always buys affordable properties; always bids when it can; accepts trades with equal or positive net value |
-| `STRONG` | All `NORMAL` behaviour plus proactively initiates trades to complete colour groups |
+| `EASY` | Skips ~40 % of affordable property purchases; declines ~50 % of auction bids; auto-declines all trade offers; never unmortgages or builds proactively |
+| `NORMAL` | Always buys affordable properties; bids in auctions when it can afford to; accepts trades with equal or positive net value; unmortgages and builds when strategically sound |
+| `STRONG` | All `NORMAL` behaviour plus proactively initiates trades to complete colour groups; counters unfair offers instead of just declining |
+
+### Bot speed
+
+Bot action delays are multiplied by `SpeedMode.delayMultiplier`:
+
+| Speed | Multiplier | Typical end-turn delay |
+|---|---|---|
+| `slow` (NORMAL) | 3.0× | ~450 ms |
+| `fast` | 1.0× | ~150 ms |
+| `instant` | 0.0× | 0 ms |
+
+Change speed at runtime: `PUT /sessions/{id}/settings { "botSpeed": "fast" }`.
 
 ---
 
@@ -454,8 +528,9 @@ mvn test -Dtest=TurnActionCommandHandlerTest#rejectRollWhenNotYourTurn
 
 Test types:
 
-- **Command handler unit tests** (`TurnActionCommandHandlerTest`, `PropertyPurchaseCommandHandlerTest`, etc.) — validate game-rule enforcement in isolation using a fake gateway.
+- **Command handler unit tests** (`TurnActionCommandHandlerTest`, `AuctionCommandHandlerTest`, etc.) — validate game-rule enforcement in isolation using a fake gateway.
 - **Integration / smoke tests** (`SessionRegistryTest`, SSE transport tests) — verify end-to-end HTTP and SSE behaviour with a real in-process server.
+- **Frontend rule tests** — the React client (`monopoly-client`) has a Vitest-based integration suite under `e2e/rules/` that exercises game rules end-to-end against a running backend instance.
 
 ---
 
