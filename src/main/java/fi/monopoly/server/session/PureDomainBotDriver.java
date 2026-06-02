@@ -113,14 +113,23 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     /**
-     * Forces the bot to re-evaluate and act immediately. Used when the host detects the bot
-     * has been idle for too long (failsafe / stuck-turn recovery).
+     * Forces the bot to re-evaluate and act immediately (0 ms delay).
+     *
+     * <p>Used in two cases:
+     * <ul>
+     *   <li>Host detects the bot is stuck (failsafe recovery) — want immediate action.</li>
+     *   <li>Debug panel sets a dice/card override — want the bot to consume it right away
+     *       before the already-scheduled takeStep fires with the old dice.</li>
+     * </ul>
+     * By scheduling with 0 delay we bypass the human-like think time so the override takes
+     * effect in the current turn rather than potentially being ignored.</p>
      */
     public void retrigger() {
         pendingAction.set(false);
         SessionState state = publisher.currentState();
-        if (state != null && needsBotAction(state)) {
-            onSnapshotChanged(ClientSessionSnapshot.from(state, false));
+        if (state == null || !needsBotAction(state)) return;
+        if (pendingAction.compareAndSet(false, true)) {
+            scheduler.schedule(this::takeStep, 0L, TimeUnit.MILLISECONDS);
         }
     }
 
