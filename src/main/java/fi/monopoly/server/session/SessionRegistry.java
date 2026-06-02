@@ -432,6 +432,27 @@ public final class SessionRegistry {
         if (Boolean.TRUE.equals(patch.clearAuction())) builder.auctionState(null);
         if (Boolean.TRUE.equals(patch.clearTrade())) builder.tradeState(null);
 
+        // Force next dice roll
+        if (patch.nextDice() != null && patch.nextDice().length >= 2) {
+            builder.nextDiceOverride(patch.nextDice());
+        }
+        // Force specific card to front of chance deck
+        if (patch.nextChanceCard() != null && !patch.nextChanceCard().isBlank()
+                && state.chanceDeck() != null) {
+            List<String> deck = new java.util.ArrayList<>(state.chanceDeck());
+            deck.remove(patch.nextChanceCard());
+            deck.add(0, patch.nextChanceCard());
+            builder.chanceDeck(deck);
+        }
+        // Force specific card to front of community deck
+        if (patch.nextCommunityCard() != null && !patch.nextCommunityCard().isBlank()
+                && state.communityDeck() != null) {
+            List<String> deck = new java.util.ArrayList<>(state.communityDeck());
+            deck.remove(patch.nextCommunityCard());
+            deck.add(0, patch.nextCommunityCard());
+            builder.communityDeck(deck);
+        }
+
         return builder.build();
     }
 

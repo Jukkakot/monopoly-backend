@@ -24,6 +24,7 @@ public record SessionState(
         String winnerPlayerId,
         @JsonIgnore List<String> chanceDeck,
         @JsonIgnore List<String> communityDeck,
+        @JsonIgnore int[] nextDiceOverride,
         String lastCardMessage,
         String lastCardKey,
         String hostPlayerId,
@@ -57,7 +58,7 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                null, winnerPlayerId, null, null, null, null, null, null, 0L, null);
+                null, winnerPlayerId, null, null, null, null, null, null, null, 0L, null);
     }
 
     /** Backward-compat: with turnContinuationState, no card decks, no eventLog. */
@@ -78,6 +79,6 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, 0L, null);
+                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, null, 0L, null);
     }
 }

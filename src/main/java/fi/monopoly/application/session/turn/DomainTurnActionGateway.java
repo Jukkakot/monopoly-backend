@@ -79,8 +79,11 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         PlayerSnapshot activePlayer = findPlayer(state, activePlayerId);
         if (activePlayer == null) return false;
 
-        int die1 = singleDieSupplier.getAsInt();
-        int die2 = singleDieSupplier.getAsInt();
+        int[] diceOverride = state.nextDiceOverride();
+        int die1 = (diceOverride != null && diceOverride.length >= 2)
+                ? Math.max(1, Math.min(6, diceOverride[0])) : singleDieSupplier.getAsInt();
+        int die2 = (diceOverride != null && diceOverride.length >= 2)
+                ? Math.max(1, Math.min(6, diceOverride[1])) : singleDieSupplier.getAsInt();
         int total = die1 + die2;
         boolean isDoubles = die1 == die2;
         int newConsecutive = isDoubles ? state.turn().consecutiveDoubles() + 1 : 0;
@@ -96,7 +99,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             log.info("Player {} sent to jail for {} consecutive doubles", activePlayer.name(), newConsecutive);
             // Snapshot 1: show the dice (player stays in place)
             store.update(s -> appendEvents(
-                    s.toBuilder().turn(withDice(withConsecutive(s.turn(), newConsecutive), die1, die2)).build(),
+                    s.toBuilder().nextDiceOverride(null).turn(withDice(withConsecutive(s.turn(), newConsecutive), die1, die2)).build(),
                     ev("DICE_ROLLED", activePlayerId, Map.of("d1", d1s, "d2", d2s))));
             // Snapshot 2: send to jail
             store.update(s -> appendEvents(
@@ -123,6 +126,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             // Snapshot 1: player arrives at spot 30
             store.update(s -> appendEvents(
                     s.toBuilder()
+                            .nextDiceOverride(null)
                             .players(updatePosition(s.players(), activePlayerId, newIndex, 0))
                             .turn(withDice(s.turn(), die1, die2))
                             .build(),
@@ -138,6 +142,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         final int newConsecutiveFinal = newConsecutive;
         store.update(s -> appendEvents(
                 s.toBuilder()
+                        .nextDiceOverride(null)
                         .players(updatePosition(s.players(), activePlayerId, newIndex, 0))
                         .turn(withDice(withConsecutive(s.turn(), newConsecutiveFinal), die1, die2))
                         .build(),
