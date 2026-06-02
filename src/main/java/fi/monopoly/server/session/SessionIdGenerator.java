@@ -6,17 +6,17 @@ final class SessionIdGenerator {
 
     private static final String[] ADJECTIVES = {
         "rohkea", "nopea", "vahva", "viisas", "reipas", "hurja", "hauska", "kiero",
-        "komea", "laiha", "lyhyt", "pitkä", "pieni", "suuri", "leveä", "kapea",
-        "vanha", "nuori", "villi", "kiltti", "ilkeä", "tarkka", "terävä", "pehmeä",
-        "kova", "lämmin", "kylmä", "kuuma", "märkä", "kuiva", "kirkas", "tumma",
-        "kevyt", "raskas", "nälkäinen", "uninen", "väsynyt", "iloinen", "surullinen",
-        "utelias", "peloton", "uskallias", "ketterä", "töykeä", "siisti", "sotkuinen"
+        "komea", "laiha", "lyhyt", "pitka", "pieni", "suuri", "levea", "kapea",
+        "vanha", "nuori", "villi", "kiltti", "ilkea", "tarkka", "terava", "pehmea",
+        "kova", "lammin", "kylma", "kuuma", "marka", "kuiva", "kirkas", "tumma",
+        "kevyt", "raskas", "nalkainen", "uninen", "vasynyt", "iloinen", "surullinen",
+        "utelias", "peloton", "uskallias", "kettera", "toykea", "siisti", "sotkuinen"
     };
 
     private static final String[] NOUNS = {
-        "karhu", "kettu", "susi", "hirvi", "jänis", "orava", "majava", "peura",
+        "karhu", "kettu", "susi", "hirvi", "janis", "orava", "majava", "peura",
         "poro", "ahma", "ilves", "leopardi", "tiikeri", "leijona", "gorilla", "apina",
-        "kotka", "haukka", "pöllö", "varis", "harakka", "tavi", "joutsen", "kurki",
+        "kotka", "haukka", "pollo", "varis", "harakka", "tavi", "joutsen", "kurki",
         "hauki", "ahven", "lohi", "siika", "muikku", "sarvi", "torni", "laiva",
         "linna", "paavi", "ritari", "kuningas", "kuningatar", "joukko", "sankari",
         "soturi", "taikuri", "seikkailija", "kapteeni", "amiraali", "kenraali"
