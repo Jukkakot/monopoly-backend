@@ -430,6 +430,7 @@ public final class SessionRegistry {
         if (Boolean.TRUE.equals(patch.clearDebt())) builder.activeDebt(null);
         if (Boolean.TRUE.equals(patch.clearDecision())) builder.pendingDecision(null);
         if (Boolean.TRUE.equals(patch.clearAuction())) builder.auctionState(null);
+        if (Boolean.TRUE.equals(patch.clearTrade())) builder.tradeState(null);
 
         return builder.build();
     }

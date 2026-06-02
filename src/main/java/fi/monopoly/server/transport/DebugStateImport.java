@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Partial game-state override payload for {@code PUT /sessions/{id}/debug/state}.
  * Every field is optional — null means "keep current value".
- * Use {@code clearDebt/clearDecision/clearAuction} to explicitly null those sub-states.
+ * Use {@code clearDebt/clearDecision/clearAuction/clearTrade} to explicitly null those sub-states.
  */
 public record DebugStateImport(
         List<PlayerPatch> players,
@@ -13,7 +13,8 @@ public record DebugStateImport(
         TurnPatch turn,
         Boolean clearDebt,
         Boolean clearDecision,
-        Boolean clearAuction
+        Boolean clearAuction,
+        Boolean clearTrade
 ) {
     public record PlayerPatch(
             String playerId,
