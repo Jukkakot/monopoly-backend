@@ -378,7 +378,7 @@ public final class SessionRegistry {
                                 pp.bankrupt() != null ? pp.bankrupt() : p.bankrupt(),
                                 p.eliminated(),
                                 pp.inJail() != null ? pp.inJail() : p.inJail(),
-                                p.jailRoundsRemaining(),
+                                pp.jailRoundsRemaining() != null ? pp.jailRoundsRemaining() : p.jailRoundsRemaining(),
                                 pp.getOutOfJailCards() != null ? pp.getOutOfJailCards() : p.getOutOfJailCards(),
                                 pp.ownedPropertyIds() != null ? pp.ownedPropertyIds() : p.ownedPropertyIds()
                         ));

@@ -26,6 +26,7 @@ public record DebugStateImport(
             Integer cash,
             Integer boardIndex,
             Boolean inJail,
+            Integer jailRoundsRemaining,
             Boolean bankrupt,
             Integer getOutOfJailCards,
             List<String> ownedPropertyIds

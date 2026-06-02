@@ -677,6 +677,11 @@ components:
                 maximum: 39
               inJail:
                 type: boolean
+              jailRoundsRemaining:
+                type: integer
+                minimum: 1
+                maximum: 3
+                description: Rounds remaining in jail (1 = last turn, 3 = just arrived). Only used when inJail is true.
               bankrupt:
                 type: boolean
               getOutOfJailCards:
