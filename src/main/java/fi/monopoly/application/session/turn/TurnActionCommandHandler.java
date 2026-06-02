@@ -125,7 +125,7 @@ public final class TurnActionCommandHandler {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can change mortgages");
         }
         TurnPhase phase = currentStateSupplier.get().turn().phase();
-        if (isTurnActionBlocked(phase)) {
+        if (isTurnActionBlocked(phase) || phase == TurnPhase.WAITING_FOR_ROLL) {
             return rejected("MORTGAGE_TOGGLE_FAILED", "Mortgage cannot be changed in the current phase");
         }
         // During a purchase decision the player may only MORTGAGE (not unmortgage) to raise cash.
