@@ -375,9 +375,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
+        // Determine perspective: the currentOffer always expresses things from the proposer's view.
+        // If botId == offer.recipientPlayerId → bot receives offeredToRecipient, gives requestedFromRecipient.
+        // Otherwise (bot is the proposer, e.g. deciding on a counter) → sides are reversed.
         TradeOfferState offer = trade.currentOffer();
-        int valueReceived = evaluateSelectionValue(offer.offeredToRecipient());
-        int valueGiven = evaluateSelectionValue(offer.requestedFromRecipient());
+        boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
+        TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
+        TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+
+        int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
+        int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false);
 
         if (valueReceived >= valueGiven) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
@@ -409,10 +416,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeOfferState offer = trade.currentOffer();
         String tradeId = trade.tradeId();
 
-        // Bot is the offer recipient countering: what it gives vs what it receives
-        int valueGiven = evaluateSelectionValue(offer.requestedFromRecipient());
-        int currentMoneyReceived = offer.offeredToRecipient().moneyAmount();
-        int nonMoneyReceived = evaluateSelectionValue(offer.offeredToRecipient()) - currentMoneyReceived;
+        // Determine which side is bot's give vs receive, same as in handleTradeDecision
+        boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
+        TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+        TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
+
+        int valueGiven = evaluateSelectionContextual(state, botId, myGiving, false);
+        int currentMoneyReceived = myReceiving.moneyAmount();
+        int nonMoneyReceived = evaluateSelectionValue(myReceiving) - currentMoneyReceived;
 
         // Target: bot wants ~5% profit over what it gives
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * 1.05) - nonMoneyReceived);
@@ -423,9 +434,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // Check that the proposer can actually afford the counter amount
-        PlayerSnapshot proposer = findPlayer(state, offer.proposerPlayerId());
-        int proposerCash = proposer != null ? proposer.cash() : 0;
+        // Check that the other party can actually afford the counter amount
+        String otherPartyId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
+        PlayerSnapshot otherParty = findPlayer(state, otherPartyId);
+        int proposerCash = otherParty != null ? otherParty.cash() : 0;
         int actualMoney = Math.min(targetMoneyReceived, proposerCash);
         if (actualMoney < 10) {
             // Proposer can't cover a fair counter — cancel
@@ -433,9 +445,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // Edit the offered side to set the adjusted money amount
+        // Edit the money on the side the bot RECEIVES (offeredToRecipient if bot is recipient, else requestedFromRecipient)
+        boolean editOfferedSide = botIsRecipient;
         publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                new TradeEditPatch(null, true, actualMoney, List.of(), List.of(), null)));
+                new TradeEditPatch(null, editOfferedSide, actualMoney, List.of(), List.of(), null)));
     }
 
     /**
@@ -514,37 +527,75 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return false;
     }
 
-    /** Returns true if bot already owns at least one property in {@code group}. */
-    private boolean botWouldBenefitFrom(SessionState state, String botId, StreetType group) {
-        return state.properties().stream()
-                .anyMatch(p -> botId.equals(p.ownerPlayerId())
-                        && spotType(p.propertyId()).streetType == group);
-    }
-
     /**
-     * Finds the highest-priority property in partner's portfolio that would advance the color group
-     * where the bot has the most existing properties.
+     * Finds the highest-priority property in the partner's portfolio that the bot would benefit from.
+     *
+     * <p>Priority order:
+     * <ol>
+     *   <li>Street property that would complete the bot's monopoly (missing last piece)</li>
+     *   <li>Railroad, if bot already has at least one and partner has one to spare</li>
+     *   <li>Street property in any group where the bot has the most properties</li>
+     * </ol>
+     * All candidates must be unbuilt (no houses/hotels) and unmortgaged on the partner's side.
      */
     private String findStrategicTargetProperty(SessionState state, String botId, String partnerId) {
-        StreetType bestGroup = null;
-        long bestCount = -1;
+        // Priority 1: property that would immediately complete bot's street monopoly
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
-            long count = state.properties().stream()
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long botOwns = state.properties().stream()
                     .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                     .count();
-            if (count > bestCount) { bestCount = count; bestGroup = group; }
+            if (botOwns != groupSize - 1) continue; // bot needs exactly 1 more
+            String found = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && spotType(p.propertyId()).streetType == group)
+                    .map(PropertyStateSnapshot::propertyId)
+                    .findFirst().orElse(null);
+            if (found != null) return found;
         }
-        if (bestGroup == null || bestCount == 0) return null;
 
-        StreetType target = bestGroup;
-        return state.properties().stream()
-                .filter(p -> partnerId.equals(p.ownerPlayerId()))
-                .filter(p -> !p.mortgaged() && p.houseCount() == 0 && p.hotelCount() == 0)
-                .filter(p -> spotType(p.propertyId()).streetType == target)
-                .map(PropertyStateSnapshot::propertyId)
-                .findFirst()
-                .orElse(null);
+        // Priority 2: railroad if bot already has ≥1 railroad and partner has one
+        long botRailroads = state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId())
+                        && spotType(p.propertyId()).streetType.placeType == PlaceType.RAILROAD)
+                .count();
+        if (botRailroads >= 1) {
+            String railroadTarget = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && spotType(p.propertyId()).streetType.placeType == PlaceType.RAILROAD)
+                    .map(PropertyStateSnapshot::propertyId)
+                    .findFirst().orElse(null);
+            if (railroadTarget != null) return railroadTarget;
+        }
+
+        // Priority 3: any street group where bot has the most properties (descending), try partner
+        java.util.List<StreetType> groupsByBotOwnership = java.util.Arrays.stream(StreetType.values())
+                .filter(g -> g.placeType == PlaceType.STREET)
+                .sorted(java.util.Comparator.comparingLong((StreetType g) ->
+                        state.properties().stream()
+                                .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == g)
+                                .count()).reversed())
+                .toList();
+
+        for (StreetType group : groupsByBotOwnership) {
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (botOwns == 0) continue; // only trade for groups where bot already has a foothold
+            String found = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && spotType(p.propertyId()).streetType == group)
+                    .map(PropertyStateSnapshot::propertyId)
+                    .findFirst().orElse(null);
+            if (found != null) return found;
+        }
+
+        return null;
     }
 
     private static int evaluateSelectionValue(TradeSelectionState selection) {
@@ -569,6 +620,61 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 value += groupValue / 2;
             }
         }
+        return value;
+    }
+
+    /**
+     * Context-aware trade evaluation that considers what the bot already owns.
+     *
+     * <p>When {@code receiving=true}: adds a large bonus if the selection completes or nearly
+     * completes a color monopoly the bot is building.
+     * When {@code receiving=false}: adds a large penalty if the selection breaks apart a complete
+     * or near-complete monopoly the bot currently holds.</p>
+     */
+    private int evaluateSelectionContextual(SessionState state, String botId,
+                                             TradeSelectionState selection, boolean receiving) {
+        int value = evaluateSelectionValue(selection);
+
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+
+            long inSelection = selection.propertyIds().stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            if (inSelection == 0) continue;
+
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+
+            int groupPriceSum = (int) state.properties().stream()
+                    .filter(p -> spotType(p.propertyId()).streetType == group)
+                    .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
+                    .sum();
+
+            if (receiving) {
+                // Does receiving these properties complete bot's monopoly?
+                long afterReceive = botOwns + inSelection;
+                if (afterReceive >= groupSize) {
+                    // Completing a monopoly — worth the entire group price as extra bonus
+                    value += groupPriceSum;
+                } else if (afterReceive == groupSize - 1) {
+                    // One away from monopoly — meaningful bonus
+                    value += groupPriceSum / 3;
+                }
+            } else {
+                // Does giving away these properties break bot's monopoly?
+                if (botOwns >= groupSize) {
+                    // Bot currently has the full monopoly — giving any part away destroys it: huge cost
+                    value += groupPriceSum * 2;
+                } else if (botOwns == groupSize - 1 && inSelection >= 1) {
+                    // Bot was one step from monopoly — losing this hurts: significant cost
+                    value += groupPriceSum / 2;
+                }
+            }
+        }
+
         return value;
     }
 
