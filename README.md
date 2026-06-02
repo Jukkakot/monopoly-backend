@@ -316,11 +316,41 @@ The `version` field is a monotonically increasing integer — clients can use it
 | Phase | Meaning |
 |---|---|
 | `WAITING_FOR_ROLL` | Active player must roll (or use jail escape) |
+| `WAITING_FOR_CARD_ACK` | Active player must acknowledge the drawn card |
 | `WAITING_FOR_DECISION` | Active player must buy or decline the landed property |
 | `WAITING_FOR_AUCTION` | Auction in progress — current bidder must bid or pass |
 | `RESOLVING_DEBT` | Player owes money — must pay, mortgage, sell, or declare bankruptcy |
 | `WAITING_FOR_END_TURN` | Player has acted; must call EndTurn to advance |
 | `GAME_OVER` | Game has ended |
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    [*] --> WAITING_FOR_ROLL : session starts / EndTurn
+
+    WAITING_FOR_ROLL --> WAITING_FOR_DECISION : landed on unowned property
+    WAITING_FOR_ROLL --> WAITING_FOR_CARD_ACK : drew Chance / Community card
+    WAITING_FOR_ROLL --> WAITING_FOR_END_TURN  : owned / non-purchasable / jail
+    WAITING_FOR_ROLL --> RESOLVING_DEBT        : can't pay rent on landing
+
+    WAITING_FOR_CARD_ACK --> WAITING_FOR_END_TURN : AcknowledgeCard
+    WAITING_FOR_CARD_ACK --> RESOLVING_DEBT       : card causes debt
+
+    WAITING_FOR_DECISION --> WAITING_FOR_END_TURN  : BuyProperty
+    WAITING_FOR_DECISION --> WAITING_FOR_AUCTION   : DeclineProperty
+    WAITING_FOR_DECISION --> RESOLVING_DEBT        : can't afford rent
+
+    WAITING_FOR_AUCTION --> WAITING_FOR_END_TURN : FinishAuctionResolution
+
+    RESOLVING_DEBT --> WAITING_FOR_END_TURN : debt resolved
+    RESOLVING_DEBT --> GAME_OVER            : DeclareBankruptcy (last player)
+
+    WAITING_FOR_END_TURN --> WAITING_FOR_ROLL : EndTurn → next player
+    WAITING_FOR_END_TURN --> GAME_OVER        : last player standing
+
+    GAME_OVER --> [*]
+```
 
 ---
 
@@ -443,37 +473,32 @@ Change speed at runtime: `PUT /sessions/{id}/settings { "botSpeed": "fast" }`.
 
 ## Architecture overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      HTTP layer                         │
-│  SessionHttpServer (Javalin)                            │
-│  POST /sessions  GET /sessions  POST /command  GET /sse │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│                   SessionRegistry                       │
-│  Creates / looks up sessions; evicts idle ones (TTL)    │
-│  Starts PureDomainBotDriver for BOT seats               │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│              SessionCommandPublisher                    │
-│  Thread-safe command dispatch + SSE listener fanout     │
-└──────────┬──────────────────────────┬───────────────────┘
-           │                          │
-┌──────────▼──────────┐  ┌────────────▼───────────────────┐
-│ SessionApplication  │  │   ClientSessionListener (SSE)  │
-│ Service             │  │   pushes snapshot to clients   │
-│ routes commands to  │  └────────────────────────────────┘
-│ typed handlers      │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────────────────────────────────────────┐
-│                 Domain layer                            │
-│  SessionState (immutable record)                        │
-│  Command handlers mutate via toBuilder() → new state    │
-│  TurnActionGateway bridges handlers ↔ domain            │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLIENT(["HTTP clients\n& SSE subscribers"])
+    HTTP["SessionHttpServer\nJavalin — REST + SSE"]
+    REG["SessionRegistry\ncreate · lookup · TTL eviction"]
+    PUB["SessionCommandPublisher\nthread-safe command bus\n+ SSE fanout"]
+    APP["SessionApplicationService\ncommand routing"]
+    TURN["TurnActionHandler"]
+    PURCH["PurchaseHandler"]
+    AUC["AuctionHandler"]
+    TRADE["TradeHandler"]
+    DEBT["DebtHandler"]
+    STATE[("SessionState\nimmutable record")]
+    BOT["PureDomainBotDriver\nserver-side bot agent"]
+    SSE["SSE listeners\n(one per connected client)"]
+
+    CLIENT -- "POST /command\nGET /snapshot" --> HTTP
+    CLIENT -- "GET /events (SSE)" --> HTTP
+    HTTP --> REG
+    REG --> PUB
+    PUB --> APP
+    APP --> TURN & PURCH & AUC & TRADE & DEBT
+    TURN & PURCH & AUC & TRADE & DEBT -- "toBuilder() → new state" --> STATE
+    PUB --> SSE --> CLIENT
+    PUB -- "snapshot events" --> BOT
+    BOT -- "commands" --> PUB
 ```
 
 **Key design points:**
