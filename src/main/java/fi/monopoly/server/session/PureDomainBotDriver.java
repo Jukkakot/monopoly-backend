@@ -42,6 +42,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     /** Fallback delay used when situational logic cannot determine a better value. */
     private static final long DEFAULT_BOT_DELAY_MS = 900L;
 
+    /** Minimum delay even in "fast" mode — prevents server overload from rapid-fire bot games. */
+    private static final long MIN_FAST_DELAY_MS = 50L;
+
     private static final int MAX_DECLINES_PER_PARTNER = 2;
 
     private final SessionCommandPublisher publisher;
@@ -772,7 +775,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         long botDelayMs = Long.getLong("monopoly.bot.think.delay.ms", DEFAULT_BOT_DELAY_MS);
         if (botDelayMs == 0) return 0;  // instant mode (tests / system property = 0)
         double speed = speedMultiplier;
-        if (speed == 0.0) return 0;
+        if (speed == 0.0) return MIN_FAST_DELAY_MS;
         long base = computeBaseDelay(state);
         String actorId = resolveActorId(state);
         BotDifficulty diff = actorId != null
