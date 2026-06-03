@@ -27,6 +27,8 @@ public final class AuctionCommandHandler {
     private final Consumer<TurnContinuationState> turnContinuationSetter;
     private final Consumer<TurnContinuationState> turnContinuationResolver;
     private final AuctionGateway gateway;
+    private final Supplier<List<String>> bankruptcyQueueGetter;
+    private final Consumer<List<String>> bankruptcyQueueSetter;
     private ActiveAuctionContext activeContext;
 
     public AuctionState startAuction(
@@ -37,10 +39,8 @@ public final class AuctionCommandHandler {
     ) {
         List<String> eligibleBidderIds = gateway.eligibleBidderIds(triggeringPlayerId, propertyId);
         if (eligibleBidderIds.isEmpty()) {
-            activeContext = null;
-            auctionStateSetter.accept(null);
-            turnContinuationSetter.accept(null);
-            turnContinuationResolver.accept(continuationState);
+            ActiveAuctionContext skippedContext = new ActiveAuctionContext("", propertyDisplayName, continuationState);
+            resolveAuction(skippedContext);
             return null;
         }
         AuctionState state = new AuctionState(
@@ -181,10 +181,7 @@ public final class AuctionCommandHandler {
         List<String> remainingActive = remainingActiveBidderIds(state.eligiblePlayerIds(), passedPlayerIds);
         if (remainingActive.isEmpty() && state.leadingPlayerId() == null) {
             ActiveAuctionContext resolvedContext = activeContext;
-            activeContext = null;
-            auctionStateSetter.accept(null);
-            turnContinuationSetter.accept(null);
-            turnContinuationResolver.accept(resolvedContext.continuationState());
+            resolveAuction(resolvedContext);
             return new CommandResult(
                     true,
                     currentStateSupplier.get(),
@@ -250,10 +247,7 @@ public final class AuctionCommandHandler {
             return reject("AUCTION_TRANSFER_FAILED", "Winning property transfer failed");
         }
         ActiveAuctionContext resolvedContext = activeContext;
-        activeContext = null;
-        auctionStateSetter.accept(null);
-        turnContinuationSetter.accept(null);
-        turnContinuationResolver.accept(resolvedContext.continuationState());
+        resolveAuction(resolvedContext);
         return new CommandResult(
                 true,
                 currentStateSupplier.get(),
@@ -261,6 +255,22 @@ public final class AuctionCommandHandler {
                 List.of(),
                 List.of()
         );
+    }
+
+    private void resolveAuction(ActiveAuctionContext ctx) {
+        activeContext = null;
+        auctionStateSetter.accept(null);
+        turnContinuationSetter.accept(null);
+        List<String> queue = bankruptcyQueueGetter.get();
+        if (queue != null && !queue.isEmpty()) {
+            String nextPropertyId = queue.get(0);
+            List<String> remaining = queue.size() > 1 ? queue.subList(1, queue.size()) : List.of();
+            bankruptcyQueueSetter.accept(remaining);
+            String triggeringPlayerId = currentStateSupplier.get().turn().activePlayerId();
+            startAuction(triggeringPlayerId, nextPropertyId, resolveDisplayName(nextPropertyId), null);
+        } else {
+            turnContinuationResolver.accept(ctx.continuationState());
+        }
     }
 
     private AuctionState validateActiveAuction(String commandSessionId, String auctionId) {

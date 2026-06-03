@@ -6,6 +6,7 @@ import fi.monopoly.domain.session.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
@@ -26,6 +27,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
     private volatile TradeState tradeState;
     private volatile TurnContinuationState turnContinuation;
     private volatile SessionStatus statusOverride;
+    private volatile List<String> bankruptcyAuctionQueue = List.of();
 
     public OverlaySessionStateStore(Supplier<SessionState> baseSupplier) {
         this.baseSupplier = baseSupplier;
@@ -45,6 +47,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
         }
         TurnState turn = computeTurnPhase(base.turn(), pd, as, ad, ts);
         SessionStatus status = statusOverride != null ? statusOverride : base.status();
+        List<String> baq = !bankruptcyAuctionQueue.isEmpty() ? bankruptcyAuctionQueue : base.bankruptcyAuctionQueue();
         return base.toBuilder()
                 .status(status)
                 .turn(turn)
@@ -53,6 +56,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
                 .activeDebt(ad)
                 .tradeState(ts)
                 .turnContinuationState(tcs)
+                .bankruptcyAuctionQueue(baq)
                 .build();
     }
 
@@ -64,6 +68,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
         activeDebt = updated.activeDebt();
         tradeState = updated.tradeState();
         turnContinuation = updated.turnContinuationState();
+        bankruptcyAuctionQueue = updated.bankruptcyAuctionQueue();
     }
 
     public void setPendingDecision(PendingDecision pd) {
@@ -109,6 +114,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
             activeDebt = null;
             tradeState = null;
             turnContinuation = null;
+            bankruptcyAuctionQueue = List.of();
             return;
         }
         pendingDecision = state.pendingDecision();
@@ -116,6 +122,15 @@ public final class OverlaySessionStateStore implements SessionStateStore {
         activeDebt = state.activeDebt();
         tradeState = state.tradeState();
         turnContinuation = state.turnContinuationState();
+        bankruptcyAuctionQueue = state.bankruptcyAuctionQueue();
+    }
+
+    public void setBankruptcyAuctionQueue(List<String> queue) {
+        this.bankruptcyAuctionQueue = queue != null ? List.copyOf(queue) : List.of();
+    }
+
+    public List<String> getBankruptcyAuctionQueue() {
+        return bankruptcyAuctionQueue;
     }
 
     private static TurnState computeTurnPhase(

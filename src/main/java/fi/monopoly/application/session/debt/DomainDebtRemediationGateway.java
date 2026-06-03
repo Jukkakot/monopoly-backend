@@ -248,14 +248,24 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
             if (debtorId == null) return state;
             log.info("declareBankruptcy debtor={} creditor={}", debtorId, creditorId);
 
-            // Transfer all debtor's properties to creditor (or to bank if creditorId == null)
+            // Transfer all debtor's properties to creditor (or to bank if creditorId == null).
+            // For bank bankruptcy: clear mortgage on all transferred properties so they go to
+            // auction unencumbered (buildings are always forfeit regardless of creditor).
             List<PropertyStateSnapshot> updatedProps = state.properties().stream()
                     .map(p -> {
                         if (!debtorId.equals(p.ownerPlayerId())) return p;
-                        // Buildings are forfeit; reset to unbuilt
-                        return new PropertyStateSnapshot(p.propertyId(), creditorId, false, 0, 0);
+                        boolean keepMortgage = creditorId != null && p.mortgaged();
+                        return new PropertyStateSnapshot(p.propertyId(), creditorId, keepMortgage, 0, 0);
                     })
                     .toList();
+
+            // Collect bank-bound property IDs for immediate auction (official rule).
+            List<String> bankruptcyAuctionQueue = creditorId == null
+                    ? state.properties().stream()
+                        .filter(p -> debtorId.equals(p.ownerPlayerId()))
+                        .map(PropertyStateSnapshot::propertyId)
+                        .toList()
+                    : List.of();
 
             int debtorCash = state.players().stream()
                     .filter(p -> debtorId.equals(p.playerId()))
@@ -298,7 +308,8 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                     .players(updatedPlayers)
                     .activeDebt(null)
                     .turnContinuationState(null)
-                    .turn(nextTurn);
+                    .turn(nextTurn)
+                    .bankruptcyAuctionQueue(bankruptcyAuctionQueue);
             if (winner != null) {
                 builder.winnerPlayerId(winner).status(SessionStatus.GAME_OVER);
             }

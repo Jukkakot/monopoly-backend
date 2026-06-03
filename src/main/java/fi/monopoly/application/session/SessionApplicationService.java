@@ -63,7 +63,9 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 this::setAuctionStateOverride,
                 this::setTurnContinuationOverride,
                 this::resumeContinuation,
-                gateway
+                gateway,
+                overlay::getBankruptcyAuctionQueue,
+                overlay::setBankruptcyAuctionQueue
         );
     }
 
@@ -91,6 +93,8 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
                 this::setTurnContinuationOverride,
                 debtRemediationGateway
         );
+        debtRemediationCommandHandler.setAuctionCommandHandler(auctionCommandHandler);
+        debtRemediationCommandHandler.setBankruptcyQueueSetter(overlay::setBankruptcyAuctionQueue);
     }
 
     public void configureLeaveGame(LeaveGameGateway gateway) {

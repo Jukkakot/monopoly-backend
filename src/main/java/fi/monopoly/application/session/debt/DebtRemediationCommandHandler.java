@@ -4,11 +4,13 @@ import fi.monopoly.application.command.*;
 import fi.monopoly.application.result.CommandRejection;
 import fi.monopoly.application.result.CommandResult;
 import fi.monopoly.application.result.DomainEvent;
+import fi.monopoly.application.session.auction.AuctionCommandHandler;
 import fi.monopoly.domain.session.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.types.SpotType;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +24,8 @@ public final class DebtRemediationCommandHandler {
     private final Consumer<DebtStateModel> activeDebtUpdater;
     private final Consumer<TurnContinuationState> turnContinuationUpdater;
     private final DebtRemediationGateway gateway;
+    @Setter private AuctionCommandHandler auctionCommandHandler;
+    @Setter private Consumer<List<String>> bankruptcyQueueSetter;
 
     public CommandResult handle(SessionCommand command) {
         SessionState state = sessionStateSupplier.get();
@@ -92,10 +96,38 @@ public final class DebtRemediationCommandHandler {
                 activeDebtUpdater.accept(null);
                 turnContinuationUpdater.accept(null);
                 gateway.declareBankruptcy();
+                startBankruptcyAuctionsIfNeeded();
                 yield accepted("BankruptcyDeclared");
             }
             default -> unsupported();
         };
+    }
+
+    private void startBankruptcyAuctionsIfNeeded() {
+        if (auctionCommandHandler == null) return;
+        SessionState state = sessionStateSupplier.get();
+        List<String> queue = state.bankruptcyAuctionQueue();
+        if (queue == null || queue.isEmpty()) return;
+        String firstPropId = queue.get(0);
+        // Pop first so resolveAuction sees the remainder when this auction finishes.
+        List<String> remaining = queue.size() > 1 ? queue.subList(1, queue.size()) : List.of();
+        if (bankruptcyQueueSetter != null) bankruptcyQueueSetter.accept(remaining);
+        auctionCommandHandler.startAuction(
+                state.turn().activePlayerId(),
+                firstPropId,
+                resolveDisplayName(firstPropId),
+                null
+        );
+    }
+
+    private static String resolveDisplayName(String propertyId) {
+        try {
+            SpotType spotType = SpotType.valueOf(propertyId);
+            String name = spotType.getStringProperty("name");
+            return (name != null && !name.isBlank()) ? name : propertyId;
+        } catch (IllegalArgumentException ignored) {
+            return propertyId;
+        }
     }
 
     private boolean validBase(String commandSessionId, String actorPlayerId, String debtId, DebtStateModel debt) {
