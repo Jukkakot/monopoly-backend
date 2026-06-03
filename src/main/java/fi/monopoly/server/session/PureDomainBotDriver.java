@@ -133,8 +133,21 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         SessionState state = publisher.currentState();
         if (state == null || !needsBotAction(state)) return;
         if (pendingAction.compareAndSet(false, true)) {
-            scheduler.schedule(this::takeStep, 0L, TimeUnit.MILLISECONDS);
+            // Bypass viewer gating: explicit retrigger calls are intentional (e.g. tests,
+            // debug tooling) and should always produce one bot step.
+            scheduler.schedule(this::takeStepForced, 0L, TimeUnit.MILLISECONDS);
         }
+    }
+
+    private void takeStepForced() {
+        pendingAction.set(false);
+        SessionState state = publisher.currentState();
+        if (state == null || state.status() == SessionStatus.GAME_OVER
+                || state.status() == SessionStatus.LOBBY) {
+            return;
+        }
+        if (!needsBotAction(state)) return;
+        dispatchGreedy(state);
     }
 
     /**
