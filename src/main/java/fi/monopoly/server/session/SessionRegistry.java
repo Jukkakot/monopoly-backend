@@ -9,6 +9,7 @@ import fi.monopoly.server.transport.DebugStateImport;
 import fi.monopoly.server.transport.GlobalMetrics;
 import lombok.extern.slf4j.Slf4j;
 
+import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +33,14 @@ public final class SessionRegistry {
             Long.getLong("monopoly.session.ttl.minutes", 120L);
     private static final long CLEANUP_INTERVAL_MINUTES = 5L;
 
+    /** Hard cap on concurrent sessions. Configurable via -Dmonopoly.session.max=N. */
+    private static final int MAX_SESSIONS =
+            Integer.getInteger("monopoly.session.max", 50);
+    /** Reject new sessions when JVM process CPU load exceeds this fraction (0.0–1.0). */
+    private static final double CPU_LOAD_THRESHOLD =
+            Double.parseDouble(System.getProperty("monopoly.session.cpu.threshold", "0.75"));
+    private static final long LOAD_LOG_INTERVAL_SECONDS = 30L;
+
     public record CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken) {}
     public record JoinResult(SeatState seat, String playerToken) {}
 
@@ -53,6 +62,8 @@ public final class SessionRegistry {
                 Thread.ofVirtual().name("session-cleaner").factory());
         cleaner.scheduleAtFixedRate(this::evictIdleSessions,
                 CLEANUP_INTERVAL_MINUTES, CLEANUP_INTERVAL_MINUTES, TimeUnit.MINUTES);
+        cleaner.scheduleAtFixedRate(this::logSystemLoad,
+                LOAD_LOG_INTERVAL_SECONDS, LOAD_LOG_INTERVAL_SECONDS, TimeUnit.SECONDS);
     }
 
     // -------------------------------------------------------------------------
@@ -69,6 +80,7 @@ public final class SessionRegistry {
 
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
                                List<BotDifficulty> difficulties) {
+        checkCapacity();
         String sessionId = SessionIdGenerator.generate();
         boolean allBots = !seatKinds.isEmpty() && seatKinds.stream().allMatch(k -> k == SeatKind.BOT);
         String hostToken = allBots ? null : UUID.randomUUID().toString();
@@ -96,6 +108,7 @@ public final class SessionRegistry {
      * Returns session credentials for both host (token) and host-as-player (playerId + playerToken).
      */
     public CreateResult createLobby(String hostName, String hostColor) {
+        checkCapacity();
         String sessionId = SessionIdGenerator.generate();
         String hostToken = UUID.randomUUID().toString();
         String hostPlayerId = "player-" + UUID.randomUUID();
@@ -633,6 +646,60 @@ public final class SessionRegistry {
             if (!used.contains(c.toUpperCase())) return c;
         }
         return palette.get(seatIndex % palette.size());
+    }
+
+    // -------------------------------------------------------------------------
+    // Capacity guard & load monitoring
+    // -------------------------------------------------------------------------
+
+    /**
+     * Throws {@link SessionLimitExceededException} if the server cannot accept a new session.
+     * Two checks are performed:
+     * <ol>
+     *   <li>Hard limit: {@value #MAX_SESSIONS} concurrent sessions (configurable via
+     *       {@code -Dmonopoly.session.max=N}).</li>
+     *   <li>CPU load: rejects when JVM process CPU exceeds {@link #CPU_LOAD_THRESHOLD}
+     *       (configurable via {@code -Dmonopoly.session.cpu.threshold=0.75}).</li>
+     * </ol>
+     */
+    private void checkCapacity() {
+        int count = sessions.size();
+        if (count >= MAX_SESSIONS) {
+            log.warn("session limit reached: count={} max={}", count, MAX_SESSIONS);
+            throw new SessionLimitExceededException("MAX_SESSIONS_REACHED",
+                    "Server has reached the maximum number of concurrent sessions (" + MAX_SESSIONS + ")");
+        }
+        double cpu = readCpuLoad();
+        if (cpu >= 0 && cpu > CPU_LOAD_THRESHOLD) {
+            log.warn("cpu load too high: cpu={:.1f}% threshold={:.0f}% sessions={}",
+                    cpu * 100, CPU_LOAD_THRESHOLD * 100, count);
+            throw new SessionLimitExceededException("SERVER_BUSY",
+                    "Server is currently under high load, please try again later");
+        }
+    }
+
+    /** Returns the JVM process CPU load in [0.0, 1.0], or -1.0 if unavailable. */
+    private static double readCpuLoad() {
+        try {
+            com.sun.management.OperatingSystemMXBean osBean =
+                    (com.sun.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+            return osBean.getProcessCpuLoad();
+        } catch (Exception e) {
+            return -1.0;
+        }
+    }
+
+    /** Scheduled every {@value #LOAD_LOG_INTERVAL_SECONDS}s to make CPU trends visible in logs. */
+    private void logSystemLoad() {
+        int count = sessions.size();
+        double cpu = readCpuLoad();
+        String cpuStr = cpu >= 0 ? String.format("%.1f%%", cpu * 100) : "n/a";
+        if (cpu > 0.60 || count > MAX_SESSIONS * 0.80) {
+            log.warn("load: cpu={} sessions={}/{}", cpuStr, count, MAX_SESSIONS);
+        } else {
+            log.info("load: cpu={} sessions={}/{}", cpuStr, count, MAX_SESSIONS);
+        }
+        GlobalMetrics.recordLoad(count, cpu);
     }
 
     private static Map<String, BotDifficulty> buildDifficultyMap(

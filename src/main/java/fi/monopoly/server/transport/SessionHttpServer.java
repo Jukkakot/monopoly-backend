@@ -321,6 +321,8 @@ public final class SessionHttpServer {
             resp.put("sessionId", result.sessionId());
             if (result.hostToken() != null) resp.put("hostToken", result.hostToken());
             ctx.status(201).json(resp);
+        } catch (fi.monopoly.server.session.SessionLimitExceededException e) {
+            ctx.status(503).json(Map.of("error", e.errorCode(), "message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {

@@ -18,6 +18,8 @@ public final class GlobalMetrics {
     private static final AtomicLong commandsAccepted   = new AtomicLong(0);
     private static final AtomicLong commandsRejected   = new AtomicLong(0);
     private static final AtomicLong sessionsCreated    = new AtomicLong(0);
+    private static volatile double  lastCpuLoad        = -1.0;
+    private static volatile int     lastSessionCount   = 0;
 
     public static void recordCommand(boolean accepted) {
         commandsTotal.incrementAndGet();
@@ -27,6 +29,11 @@ public final class GlobalMetrics {
 
     public static void recordSessionCreated() {
         sessionsCreated.incrementAndGet();
+    }
+
+    public static void recordLoad(int sessionCount, double cpuLoad) {
+        lastSessionCount = sessionCount;
+        lastCpuLoad = cpuLoad;
     }
 
     public static String prometheusText(int activeSessions) {
@@ -48,6 +55,9 @@ public final class GlobalMetrics {
              + "monopoly_sessions_active " + activeSessions + "\n"
              + "# HELP monopoly_uptime_seconds Server uptime in seconds\n"
              + "# TYPE monopoly_uptime_seconds gauge\n"
-             + "monopoly_uptime_seconds " + uptimeSeconds + "\n";
+             + "monopoly_uptime_seconds " + uptimeSeconds + "\n"
+             + "# HELP monopoly_cpu_load JVM process CPU load (0.0–1.0, -1 if unavailable)\n"
+             + "# TYPE monopoly_cpu_load gauge\n"
+             + "monopoly_cpu_load " + String.format("%.4f", lastCpuLoad) + "\n";
     }
 }
