@@ -106,6 +106,7 @@ public final class DebtRemediationCommandHandler {
     private void startBankruptcyAuctionsIfNeeded() {
         if (auctionCommandHandler == null) return;
         SessionState state = sessionStateSupplier.get();
+        if (state.status() == SessionStatus.GAME_OVER) return;
         List<String> queue = state.bankruptcyAuctionQueue();
         if (queue == null || queue.isEmpty()) return;
         String firstPropId = queue.get(0);

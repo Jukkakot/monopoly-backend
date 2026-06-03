@@ -249,13 +249,11 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
             log.info("declareBankruptcy debtor={} creditor={}", debtorId, creditorId);
 
             // Transfer all debtor's properties to creditor (or to bank if creditorId == null).
-            // For bank bankruptcy: clear mortgage on all transferred properties so they go to
-            // auction unencumbered (buildings are always forfeit regardless of creditor).
+            // Mortgages and buildings are always cleared on transfer (simplified rule).
             List<PropertyStateSnapshot> updatedProps = state.properties().stream()
                     .map(p -> {
                         if (!debtorId.equals(p.ownerPlayerId())) return p;
-                        boolean keepMortgage = creditorId != null && p.mortgaged();
-                        return new PropertyStateSnapshot(p.propertyId(), creditorId, keepMortgage, 0, 0);
+                        return new PropertyStateSnapshot(p.propertyId(), creditorId, false, 0, 0);
                     })
                     .toList();
 

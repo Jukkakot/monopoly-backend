@@ -10,6 +10,7 @@ import fi.monopoly.application.result.DomainEvent;
 import fi.monopoly.domain.session.AuctionState;
 import fi.monopoly.domain.session.AuctionStatus;
 import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.domain.session.SessionStatus;
 import fi.monopoly.domain.session.TurnContinuationState;
 import fi.monopoly.types.SpotType;
 import fi.monopoly.utils.MonopolyUtils;
@@ -262,7 +263,8 @@ public final class AuctionCommandHandler {
         auctionStateSetter.accept(null);
         turnContinuationSetter.accept(null);
         List<String> queue = bankruptcyQueueGetter.get();
-        if (queue != null && !queue.isEmpty()) {
+        SessionState current = currentStateSupplier.get();
+        if (queue != null && !queue.isEmpty() && current.status() != SessionStatus.GAME_OVER) {
             String nextPropertyId = queue.get(0);
             List<String> remaining = queue.size() > 1 ? queue.subList(1, queue.size()) : List.of();
             bankruptcyQueueSetter.accept(remaining);
