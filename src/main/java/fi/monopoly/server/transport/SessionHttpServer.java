@@ -192,9 +192,12 @@ public final class SessionHttpServer {
                 config.routes.get("/sessions/{id}/snapshot", ctx ->
                         ctx.json(requireSession(ctx).currentSnapshot()));
                 config.routes.sse("/sessions/{id}/events", client -> {
-                    Optional<SessionCommandPublisher> pub = registry.get(client.ctx().pathParam("id"));
+                    String sessionId = client.ctx().pathParam("id");
+                    Optional<SessionCommandPublisher> pub = registry.get(sessionId);
                     if (pub.isEmpty()) return;
-                    streamEvents(client, pub.get(), pub.get()::currentSnapshot);
+                    registry.notifySseConnected(sessionId);
+                    streamEvents(client, pub.get(), pub.get()::currentSnapshot,
+                            () -> registry.notifySseDisconnected(sessionId));
                 });
             }
         }).start(port);
@@ -527,6 +530,14 @@ public final class SessionHttpServer {
             SseClient client,
             ClientSessionUpdates updates,
             Supplier<ClientSessionSnapshot> snapshotSupplier) {
+        streamEvents(client, updates, snapshotSupplier, () -> {});
+    }
+
+    private void streamEvents(
+            SseClient client,
+            ClientSessionUpdates updates,
+            Supplier<ClientSessionSnapshot> snapshotSupplier,
+            Runnable onCloseExtra) {
         ClientSessionListener listener = snapshot -> {
             if (!client.terminated()) {
                 try {
@@ -537,7 +548,10 @@ public final class SessionHttpServer {
             }
         };
         updates.addListener(listener);
-        client.onClose(() -> updates.removeListener(listener));
+        client.onClose(() -> {
+            updates.removeListener(listener);
+            onCloseExtra.run();
+        });
         // Send initial snapshot synchronously while the response is still in synchronous
         // mode — before keepAlive() switches it to async. This is the canonical Javalin SSE
         // pattern and avoids any race between the async ctx.future() and the first write.

@@ -80,6 +80,7 @@ public final class SessionRegistry {
         Map<String, BotDifficulty> difficultyMap = buildDifficultyMap(initialState, difficulties);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, difficultyMap);
+        if (botDriver != null) botDriver.setViewerGatingEnabled(true);
         sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, new ConcurrentHashMap<>()));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
@@ -342,6 +343,18 @@ public final class SessionRegistry {
         return true;
     }
 
+    public void notifySseConnected(String sessionId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return;
+        entry.botDriver().onSseConnected();
+    }
+
+    public void notifySseDisconnected(String sessionId) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return;
+        entry.botDriver().onSseDisconnected();
+    }
+
     // -------------------------------------------------------------------------
     // Debug state import
     // -------------------------------------------------------------------------
@@ -516,6 +529,7 @@ public final class SessionRegistry {
                 .forEach(s -> diffMap.put(s.playerId(), BotDifficulty.STRONG));
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, diffMap);
+        if (botDriver != null) botDriver.setViewerGatingEnabled(true);
 
         List<String> humanNames = gameState.seats().stream()
                 .filter(s -> s.seatKind() == SeatKind.HUMAN)

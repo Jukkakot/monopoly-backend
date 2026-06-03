@@ -22,6 +22,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Server-side greedy bot driver for pure-domain sessions.
@@ -49,6 +50,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final Map<String, BotDifficulty> difficulties;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
+    private final AtomicInteger viewerCount = new AtomicInteger(0);
+    /** Disabled by default so unit tests work without simulating SSE connections. */
+    private volatile boolean viewerGatingEnabled = false;
     private volatile double speedMultiplier = 1.0;
     private volatile TradeState lastObservedTrade = null;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
@@ -133,6 +137,32 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
     }
 
+    /**
+     * Called when an SSE viewer connects to this session.
+     * If the bot was paused due to no viewers, this triggers immediate re-evaluation.
+     */
+    public void onSseConnected() {
+        if (viewerCount.incrementAndGet() == 1) {
+            log.debug("First SSE viewer connected for session {} — resuming bot", sessionId.substring(0, 8));
+            retrigger();
+        }
+    }
+
+    /**
+     * Called when an SSE viewer disconnects from this session.
+     * When the last viewer leaves, the bot pauses until someone reconnects.
+     */
+    public void onSseDisconnected() {
+        int remaining = viewerCount.updateAndGet(v -> Math.max(0, v - 1));
+        if (remaining == 0) {
+            log.debug("Last SSE viewer disconnected for session {} — bot will pause", sessionId.substring(0, 8));
+        }
+    }
+
+    public void setViewerGatingEnabled(boolean enabled) {
+        this.viewerGatingEnabled = enabled;
+    }
+
     public void setSpeedMultiplier(double multiplier) {
         this.speedMultiplier = Math.max(0.0, multiplier);
         log.debug("Bot speed multiplier set to {} for session {}", multiplier, sessionId.substring(0, 8));
@@ -171,6 +201,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (!needsBotAction(state)) {
             return;
         }
+        if (viewerGatingEnabled && viewerCount.get() == 0) {
+            return;  // no SSE viewers — pause until someone connects
+        }
         if (!pendingAction.compareAndSet(false, true)) {
             return;
         }
@@ -190,6 +223,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
         if (!needsBotAction(state)) {
             return;
+        }
+        if (viewerGatingEnabled && viewerCount.get() == 0) {
+            return;  // no SSE viewers — pause until someone connects
         }
         dispatchGreedy(state);
     }
