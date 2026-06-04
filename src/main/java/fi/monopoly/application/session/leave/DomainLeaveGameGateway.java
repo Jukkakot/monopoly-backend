@@ -15,6 +15,19 @@ import java.util.stream.Collectors;
 
 import static fi.monopoly.domain.session.GameEventHelper.*;
 
+/**
+ * Handles a player permanently leaving an in-progress game.
+ *
+ * <p><b>Leave is final</b> — the player is marked {@code eliminated=true} and cannot rejoin.
+ * Their properties are returned to the bank, any active debt/trade involving them is cancelled,
+ * and the turn advances to the next active player. If only one player remains, the game ends.</p>
+ *
+ * <p><b>Reconnect vs. rejoin</b> — there is no "rejoin" concept in the domain. A client that
+ * lost their SSE connection can reconnect (SSE reconnect with {@code Last-Event-ID}) and will
+ * still see the live game state through their existing player seat. That is different from calling
+ * {@code LeaveGame}, which eliminates the seat permanently. Future work: add a "restore" command
+ * that un-eliminates a player within a configurable grace period.</p>
+ */
 @Slf4j
 @RequiredArgsConstructor
 public final class DomainLeaveGameGateway implements LeaveGameGateway {

@@ -275,18 +275,14 @@ public final class SessionHttpServer {
 
     private void handleSessionsCreate(Context ctx) {
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            @SuppressWarnings("unchecked")
-            List<String> names = (List<String>) request.get("names");
-            @SuppressWarnings("unchecked")
-            List<String> colors = request.get("colors") != null
-                    ? (List<String>) request.get("colors") : List.of();
-            Boolean lobbyMode = request.get("lobbyMode") instanceof Boolean b ? b : Boolean.FALSE;
-            if (Boolean.TRUE.equals(lobbyMode)) {
-                String hostName = request.get("hostName") instanceof String s ? s.trim() : "Pelaaja";
-                String hostColor = request.get("hostColor") instanceof String s ? s : null;
+            JsonNode request = objectMapper.readTree(ctx.bodyAsBytes());
+            List<String> names = stringList(request, "names");
+            List<String> colors = stringList(request, "colors");
+            boolean lobbyMode = request.path("lobbyMode").asBoolean(false);
+            if (lobbyMode) {
+                String hostName = request.path("hostName").asText("Pelaaja").trim();
                 if (hostName.isEmpty()) hostName = "Pelaaja";
+                String hostColor = request.path("hostColor").textValue();
                 var result = registry.createLobby(hostName, hostColor);
                 ctx.status(201).json(Map.of(
                         "sessionId", result.sessionId(),
@@ -295,16 +291,12 @@ public final class SessionHttpServer {
                         "playerToken", result.hostPlayerToken()));
                 return;
             }
-            if (names == null || names.isEmpty()) {
+            if (names.isEmpty()) {
                 ctx.status(400).json(Map.of("error", "names is required"));
                 return;
             }
-            @SuppressWarnings("unchecked")
-            List<String> seatKindStrings = request.get("seatKinds") != null
-                    ? (List<String>) request.get("seatKinds") : List.of();
-            @SuppressWarnings("unchecked")
-            List<String> difficultyStrings = request.get("difficulties") != null
-                    ? (List<String>) request.get("difficulties") : List.of();
+            List<String> seatKindStrings = stringList(request, "seatKinds");
+            List<String> difficultyStrings = stringList(request, "difficulties");
 
             List<fi.monopoly.domain.session.SeatKind> seatKinds = seatKindStrings.stream()
                     .map(s -> {
@@ -336,10 +328,9 @@ public final class SessionHttpServer {
         try {
             String id = ctx.pathParam("id");
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            String name = body.get("name") instanceof String s ? s.trim() : "";
-            String color = body.get("color") instanceof String s ? s : null;
+            JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
+            String name = body.path("name").asText("").trim();
+            String color = body.path("color").textValue();
             if (name.isEmpty()) {
                 ctx.status(400).json(Map.of("error", "name is required"));
                 return;
@@ -372,9 +363,8 @@ public final class SessionHttpServer {
         try {
             String id = ctx.pathParam("id");
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            String hostToken = body.get("hostToken") instanceof String s ? s : null;
+            JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
+            String hostToken = body.path("hostToken").textValue();
             if (!registry.validateHostToken(id, hostToken)) {
                 ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
                 return;
@@ -396,9 +386,8 @@ public final class SessionHttpServer {
             String id = ctx.pathParam("id");
             String seatId = ctx.pathParam("seatId");
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            String hostToken = body.get("hostToken") instanceof String s ? s : null;
+            JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
+            String hostToken = body.path("hostToken").textValue();
             if (!registry.validateHostToken(id, hostToken)) {
                 ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
                 return;
@@ -421,11 +410,10 @@ public final class SessionHttpServer {
         try {
             String id = ctx.pathParam("id");
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            String playerId = body.get("playerId") instanceof String s ? s : null;
-            String playerToken = body.get("playerToken") instanceof String s ? s : null;
-            boolean ready = body.get("ready") instanceof Boolean b ? b : true;
+            JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
+            String playerId = body.path("playerId").textValue();
+            String playerToken = body.path("playerToken").textValue();
+            boolean ready = body.path("ready").asBoolean(true);
             if (!registry.validatePlayerToken(id, playerId, playerToken)) {
                 ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
                 return;
@@ -444,9 +432,8 @@ public final class SessionHttpServer {
         try {
             String id = ctx.pathParam("id");
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            String hostToken = body.get("hostToken") instanceof String s ? s : null;
+            JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
+            String hostToken = body.path("hostToken").textValue();
             if (!registry.validateHostToken(id, hostToken)) {
                 ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
                 return;
@@ -465,11 +452,10 @@ public final class SessionHttpServer {
         try {
             String id = ctx.pathParam("id");
             if (registry.get(id).isEmpty()) { ctx.status(204); return; }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
-            Object v = body.get("version");
-            if (v instanceof Number n) {
-                registry.notifyClientAck(id, n.longValue());
+            JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
+            JsonNode v = body.path("version");
+            if (v.isNumber()) {
+                registry.notifyClientAck(id, v.longValue());
             }
             ctx.status(204);
         } catch (Exception e) {
@@ -604,4 +590,13 @@ public final class SessionHttpServer {
     private record CommandResultView(
             boolean accepted,
             List<fi.monopoly.application.result.CommandRejection> rejections) {}
+
+    /** Extracts a JSON array field as a {@link List} of strings, or empty list if absent/not array. */
+    private static List<String> stringList(JsonNode node, String field) {
+        JsonNode arr = node.path(field);
+        if (!arr.isArray()) return List.of();
+        List<String> result = new ArrayList<>();
+        arr.forEach(n -> result.add(n.asText()));
+        return result;
+    }
 }

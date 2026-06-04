@@ -117,10 +117,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 initialState.sessionId().substring(0, 8), botIds,
                 botIds.stream().collect(java.util.stream.Collectors.toMap(
                         id -> id, id -> difficulties.getOrDefault(id, BotDifficulty.STRONG))));
-        // Trigger initial check with a grace period so the frontend can connect and render
-        // the game before the bot starts. Any direct onSnapshotChanged call (e.g. from tests)
-        // will win the compareAndSet race and fire before the delayed initial check.
-        long initialDelayMs = Long.getLong("monopoly.bot.initial.delay.ms", 4000L);
+        // Trigger initial check after a short grace period. Viewer-gating now handles the
+        // "wait for frontend" concern — the bot pauses immediately if viewerCount == 0, so
+        // this delay only needs to survive the session-creation HTTP round-trip (~200ms).
+        // Reduced from 4000 ms to 500 ms; override with -Dmonopoly.bot.initial.delay.ms=N.
+        long initialDelayMs = Long.getLong("monopoly.bot.initial.delay.ms", 500L);
         ClientSessionSnapshot initialSnap = ClientSessionSnapshot.from(initialState, true);
         if (initialDelayMs > 0) {
             driver.scheduler.schedule(
@@ -181,7 +182,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      */
     public void onSseConnected() {
         if (viewerCount.incrementAndGet() == 1) {
-            log.debug("First SSE viewer connected for session {} — resuming bot", sessionId.substring(0, 8));
+            log.info("First SSE viewer connected for session {} — resuming bot", sessionId.substring(0, 8));
             retrigger();
         }
     }
@@ -193,7 +194,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     public void onSseDisconnected() {
         int remaining = viewerCount.updateAndGet(v -> Math.max(0, v - 1));
         if (remaining == 0) {
-            log.debug("Last SSE viewer disconnected for session {} — bot will pause", sessionId.substring(0, 8));
+            log.info("Last SSE viewer disconnected for session {} — bot will pause", sessionId.substring(0, 8));
         }
     }
 
@@ -204,7 +205,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     public void onClientAck(long version) {
         long prev = latestClientVersion.getAndUpdate(v -> Math.max(v, version));
         if (prev < version) {
-            log.debug("Client ACK v{} for session {} — retrigger", version, sessionId.substring(0, 8));
             retrigger();
         }
     }
@@ -215,7 +215,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     public void setSpeedMultiplier(double multiplier) {
         this.speedMultiplier = Math.max(0.0, multiplier);
-        log.debug("Bot speed multiplier set to {} for session {}", multiplier, sessionId.substring(0, 8));
+        log.info("Bot speed multiplier set to {} for session {}", multiplier, sessionId.substring(0, 8));
     }
 
     public double getSpeedMultiplier() {
