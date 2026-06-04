@@ -44,7 +44,7 @@ class BotEvolutionTest {
      * Takes ~8-12 minutes with default params.
      */
     @Test
-    @Disabled("Long — run manually to find optimal 2-3 player config")
+    @Disabled("Long — run manually to find optimal 2-3 player config (~10 min)")
     void evolveSmallGame() {
         int pop  = 12, gens = 15, games = 20;
         long seed = 77777L;
@@ -185,6 +185,7 @@ class BotEvolutionTest {
      * Runs in ~90 seconds total.
      */
     @Test
+    @Disabled("Run manually to compare presets across player counts (~90s)")
     void quickBenchmark() {
         List<BotTournament.Entry> configs = List.of(
                 new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
@@ -212,6 +213,7 @@ class BotEvolutionTest {
      * Runs in ~2-3 minutes.
      */
     @Test
+    @Disabled("Run manually for 6-player analysis (~3 min)")
     void sixPlayerBenchmark() {
         List<BotTournament.Entry> configs = List.of(
                 new BotTournament.Entry("sixPlayer-A", StrongBotConfig.sixPlayer()),
@@ -237,6 +239,7 @@ class BotEvolutionTest {
      * Runs in ~5 minutes.
      */
     @Test
+    @Disabled("Run manually for 6-player ablation (~5 min)")
     void sixPlayerAblation() {
         StrongBotConfig base = StrongBotConfig.sixPlayer();
         List<BotTournament.Entry> configs = new ArrayList<>();

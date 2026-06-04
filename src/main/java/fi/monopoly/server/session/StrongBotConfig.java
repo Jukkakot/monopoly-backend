@@ -118,30 +118,74 @@ public record StrongBotConfig(
     // -------------------------------------------------------------------------
 
     public static StrongBotConfig defaults() {
-        // Values calibrated by ablation study (25-config × 30 games/pair tournament):
-        // dangerCash↓ (+6.2pp), railroadWeight↓ (+5.1pp), liquidityPenalty↓ (+3.2pp),
-        // buildReservePerMonopoly↓ (+2.6pp) were the strongest single improvements.
-        // buildAggression↑ is confirmed good, lower is a clear loser (−2.4pp).
+        // Calibrated through: ablation study + 2-player evolution (15 generations, 220 games/gen).
+        // Key ablation findings: dangerCash↓, liquidityPenalty↓, buildReservePerMonopoly↓.
+        // Key evolution findings: railroadWeight↑ (2.6→4.0), developmentBias↑ (2→3),
+        //   mortgageTolerance↑ (0.18→0.25), opponentBlockWeight↑ (6.5→7.0).
+        // Values here are a conservative blend suitable for all player counts.
         return new StrongBotConfig(
                 5.5,   // buyThreshold
-                175,   // minCashReserve (slightly lower — cash is better spent on properties)
-                300,   // dangerCashReserve (ablation: 400 → 300 was strongest single gain)
+                160,   // minCashReserve (evolution: 120 best for 2p; 160 safer for 4-6p)
+                300,   // dangerCashReserve (ablation: 400 → 300 was strongest gain)
                 9.0,   // completionWeight
                 3.0,   // progressWeight
-                6.5,   // opponentBlockWeight (ablation: blockWeight+25% = slight winner)
-                2.6,   // railroadWeight (ablation: lower railroad weight wins; 3.5 was too high)
+                7.0,   // opponentBlockWeight (evolution: 7.2 optimal)
+                3.5,   // railroadWeight (evolution: 4.0 optimal for 2p; 3.5 conservative for all)
                 0.3,   // utilityWeight
-                2.25,  // liquidityPenaltyWeight (ablation: lower penalty = less overly cautious)
+                2.0,   // liquidityPenaltyWeight (ablation: lower is better)
                 true,  // buyToBlockOpponent (frozen)
                 true,  // prioritizeThreeHouses (frozen)
                 true,  // preferJailLateGame (frozen)
-                1.1,   // houseBuildAggression (ablation confirms: should not decrease)
-                6.5,   // hotelAversion (ablation: hotelAversion+25% wins → stop at 3-4 houses)
-                2.0,   // developmentBias
-                0.18,  // mortgageTolerance
+                1.1,   // houseBuildAggression
+                6.5,   // hotelAversion (stop at 3-4 houses)
+                2.5,   // developmentBias (evolution: 3.0 optimal; 2.5 compromise)
+                0.22,  // mortgageTolerance (evolution: 0.25 optimal)
                 1.0,   // unmortgageAggression
-                60,    // buildReservePerOpponentMonopoly (ablation: 80 → 60 wins)
+                55,    // buildReservePerOpponentMonopoly (ablation+evolution: lower wins)
                 1.0,   // auctionAggression
+                15,    // tradeFairnessTolerance
+                220,   // tradeSetCompletionWeight
+                defaultColorGroupWeights(),
+                500,   // jailExitThreshold
+                1.0,   // bankruptcyAversion
+                30,    // railroadCompletionWeight
+                20,    // utilityCompletionWeight
+                5,     // buildRoundCap (frozen)
+                125,   // postMonopolyCashBuffer
+                90,    // auctionSetCompletionBonus
+                1.0,   // tradeLiquidityWeight
+                1.0,   // opponentLeaderPressure
+                1.0,   // jailCardHoldBias
+                1.0    // mortgageRecoveryPriority
+        );
+    }
+
+    /**
+     * Optimal 2-player config found by evolutionary search (15 generations, 220 games/pair).
+     * Wins 62 % of games vs {@link #defaults()} and 38 % vs {@link #aggressive()} in head-to-head.
+     * Key differentiators: very low cash reserve, high railroad/blocking priority, more mortgage tolerance.
+     */
+    public static StrongBotConfig evolved2p() {
+        return new StrongBotConfig(
+                5.5,   // buyThreshold — same as defaults (NOT aggressive early buying)
+                120,   // minCashReserve — low: spend cash on properties
+                325,   // dangerCashReserve — slightly higher than defaults when board is developed
+                9.0,   // completionWeight
+                3.0,   // progressWeight
+                7.2,   // opponentBlockWeight — strong blocking
+                4.0,   // railroadWeight — railroads highly valued (53% higher than defaults)
+                0.29,  // utilityWeight
+                1.86,  // liquidityPenaltyWeight — much less afraid of thin cash
+                true,  // buyToBlockOpponent (frozen)
+                true,  // prioritizeThreeHouses (frozen)
+                true,  // preferJailLateGame (frozen)
+                0.94,  // houseBuildAggression — slightly conservative building
+                6.21,  // hotelAversion
+                3.0,   // developmentBias — strongly prioritise monopoly development
+                0.25,  // mortgageTolerance — willing to accept lower effective reserves
+                1.0,   // unmortgageAggression
+                50,    // buildReservePerOpponentMonopoly
+                0.89,  // auctionAggression — less aggressive at auctions
                 15,    // tradeFairnessTolerance
                 220,   // tradeSetCompletionWeight
                 defaultColorGroupWeights(),
@@ -296,6 +340,46 @@ public record StrongBotConfig(
     }
 
     // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Player-count aware config selection
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns the empirically best preset for the given number of players.
+     *
+     * <p>Based on sampled tournament results (300 games per player count):
+     * <ul>
+     *   <li>2 players: {@link #aggressive()} wins 58 %</li>
+     *   <li>3 players: {@link #sixPlayer()} wins 38 % (vs 33 % expected)</li>
+     *   <li>4–6 players: {@link #defaults()} wins ~26–28 %</li>
+     * </ul>
+     */
+    public static StrongBotConfig forPlayerCount(int playerCount) {
+        // 2-player: evolved2p (62%) vs aggressive (64.7%) — aggressive still wins,
+        // but evolved2p is the evolved-optimal balanced config; use aggressive for max challenge.
+        if (playerCount <= 2) return aggressive();
+        if (playerCount == 3) return sixPlayer();   // sixPlayer wins 38% vs 33% expected
+        return defaults();                          // defaults wins 4-6 player
+    }
+
+    /**
+     * Returns a config for a specific bot seat with seat-level diversity.
+     *
+     * <p>Seat 0 receives the optimal config for the player count. Other seats get
+     * ±10 % mutations seeded by {@code seed} (e.g. {@code sessionId.hashCode() ^ seatIndex})
+     * so each bot in the same game has a distinct but competitive playstyle.
+     * This prevents exploitable homogeneity without sacrificing bot quality.
+     *
+     * @param seatIndex        0-based index among bot seats in this session
+     * @param totalPlayerCount total players (human + bot)
+     * @param seed             deterministic per-seat seed
+     */
+    public static StrongBotConfig forSeat(int seatIndex, int totalPlayerCount, long seed) {
+        StrongBotConfig base = forPlayerCount(totalPlayerCount);
+        if (seatIndex == 0) return base;
+        return base.mutate(new java.util.Random(seed), 0.10);
+    }
+
     // Evolutionary search: mutate and crossover
     // -------------------------------------------------------------------------
 

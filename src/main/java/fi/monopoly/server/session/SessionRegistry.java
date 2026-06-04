@@ -100,8 +100,9 @@ public final class SessionRegistry {
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
         baseStore.setOnChange(publisher::publishSnapshot);
         Map<String, BotDifficulty> difficultyMap = buildDifficultyMap(initialState, difficulties);
+        Map<String, StrongBotConfig> botConfigs = buildBotConfigs(initialState, sessionId);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
-                publisher, initialState, difficultyMap);
+                publisher, initialState, difficultyMap, botConfigs);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
         sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, new ConcurrentHashMap<>()));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
@@ -556,8 +557,9 @@ public final class SessionRegistry {
         gameState.seats().stream()
                 .filter(s -> s.seatKind() == SeatKind.BOT)
                 .forEach(s -> diffMap.put(s.playerId(), BotDifficulty.STRONG));
+        Map<String, StrongBotConfig> botConfigs = buildBotConfigs(gameState, sessionId);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
-                entry.publisher(), gameState, diffMap);
+                entry.publisher(), gameState, diffMap, botConfigs);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
 
         List<String> humanNames = gameState.seats().stream()
@@ -734,6 +736,29 @@ public final class SessionRegistry {
             }
         }
         return map;
+    }
+
+    /**
+     * Builds per-bot {@link StrongBotConfig} maps using player-count-aware presets
+     * with seat-level diversity.
+     *
+     * <p>Bot seat 0 gets the optimal preset for the player count. Each subsequent bot
+     * gets a ±10 % mutation seeded by sessionId hash ^ seatIndex, giving each bot a
+     * distinct but competitive playstyle — preventing exploitable homogeneity.
+     */
+    private static Map<String, StrongBotConfig> buildBotConfigs(SessionState state, String sessionId) {
+        int totalPlayers = state.players().size();
+        int sessionSeed  = sessionId.hashCode();
+        Map<String, StrongBotConfig> configs = new HashMap<>();
+        int botSeatIdx = 0;
+        for (SeatState seat : state.seats()) {
+            if (seat.seatKind() == SeatKind.BOT && seat.playerId() != null) {
+                long seed = (long) sessionSeed ^ ((long) botSeatIdx * 31);
+                configs.put(seat.playerId(), StrongBotConfig.forSeat(botSeatIdx, totalPlayers, seed));
+                botSeatIdx++;
+            }
+        }
+        return configs;
     }
 
     private void evictIdleSessions() {
