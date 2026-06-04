@@ -23,6 +23,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Server-side greedy bot driver for pure-domain sessions.
@@ -47,6 +48,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     private static final int MAX_DECLINES_PER_PARTNER = 2;
 
+    /**
+     * Maximum number of state versions the bot is allowed to advance beyond the last
+     * client-acknowledged version. Keeps the pending snapshot queue on the client bounded
+     * and prevents the backend from doing wasted work the client will never animate.
+     * Only enforced when viewerGatingEnabled is true.
+     */
+    private static final int MAX_CLIENT_LAG_VERSIONS = 5;
+
     private final SessionCommandPublisher publisher;
     private final String sessionId;
     private final Set<String> botPlayerIds;
@@ -54,6 +63,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
     private final AtomicInteger viewerCount = new AtomicInteger(0);
+    /** The highest snapshot version the client has explicitly acknowledged. -1 = no ACK received yet. */
+    private final AtomicLong latestClientVersion = new AtomicLong(-1);
     /** Disabled by default so unit tests work without simulating SSE connections. */
     private volatile boolean viewerGatingEnabled = false;
     private volatile double speedMultiplier = 1.0;
@@ -175,6 +186,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
     }
 
+    /**
+     * Called when the client acknowledges it has processed a snapshot at the given version.
+     * Advances the pacing window so the bot can continue if it was waiting.
+     */
+    public void onClientAck(long version) {
+        long prev = latestClientVersion.getAndUpdate(v -> Math.max(v, version));
+        if (prev < version) {
+            log.debug("Client ACK v{} for session {} — retrigger", version, sessionId.substring(0, 8));
+            retrigger();
+        }
+    }
+
     public void setViewerGatingEnabled(boolean enabled) {
         this.viewerGatingEnabled = enabled;
     }
@@ -220,6 +243,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (viewerGatingEnabled && viewerCount.get() == 0) {
             return;  // no SSE viewers — pause until someone connects
         }
+        if (viewerGatingEnabled && snapshot.version() - latestClientVersion.get() > MAX_CLIENT_LAG_VERSIONS) {
+            return;  // client is too far behind — wait for ACK before advancing
+        }
         if (!pendingAction.compareAndSet(false, true)) {
             return;
         }
@@ -242,6 +268,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
         if (viewerGatingEnabled && viewerCount.get() == 0) {
             return;  // no SSE viewers — pause until someone connects
+        }
+        ClientSessionSnapshot current = publisher.currentSnapshot();
+        if (viewerGatingEnabled && current != null
+                && current.version() - latestClientVersion.get() > MAX_CLIENT_LAG_VERSIONS) {
+            return;  // client is too far behind — wait for ACK before advancing
         }
         dispatchGreedy(state);
     }

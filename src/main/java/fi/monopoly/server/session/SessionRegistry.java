@@ -368,6 +368,12 @@ public final class SessionRegistry {
         entry.botDriver().onSseDisconnected();
     }
 
+    public void notifyClientAck(String sessionId, long version) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return;
+        entry.botDriver().onClientAck(version);
+    }
+
     // -------------------------------------------------------------------------
     // Debug state import
     // -------------------------------------------------------------------------

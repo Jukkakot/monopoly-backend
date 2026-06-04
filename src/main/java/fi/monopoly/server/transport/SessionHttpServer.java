@@ -186,6 +186,7 @@ public final class SessionHttpServer {
                 config.routes.get("/sessions/{id}/settings", this::handleGetSettings);
                 config.routes.put("/sessions/{id}/settings", this::handleSettings);
                 config.routes.post("/sessions/{id}/bot/retrigger", this::handleBotRetrigger);
+                config.routes.post("/sessions/{id}/ack", this::handleClientAck);
                 config.routes.put("/sessions/{id}/debug/state", this::handleDebugStateImport);
                 config.routes.post("/sessions/{id}/command", ctx ->
                         handleCommandFor(ctx, requireSession(ctx)));
@@ -457,6 +458,22 @@ public final class SessionHttpServer {
         } catch (Exception e) {
             log.error("Error retriggering bot", e);
             ctx.status(500).json(Map.of("error", "Internal server error"));
+        }
+    }
+
+    private void handleClientAck(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            if (registry.get(id).isEmpty()) { ctx.status(204); return; }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = objectMapper.readValue(ctx.bodyAsBytes(), Map.class);
+            Object v = body.get("version");
+            if (v instanceof Number n) {
+                registry.notifyClientAck(id, n.longValue());
+            }
+            ctx.status(204);
+        } catch (Exception e) {
+            ctx.status(204);  // fire-and-forget: never error to the client
         }
     }
 
