@@ -571,11 +571,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // STRONG bot: counter-offer if somewhat reasonable
+        // STRONG bot: prefer countering over declining — always counter the first time,
+        // and again if the follow-up is at least 25% reasonable (avoids infinite loops).
         if (isStrong(botId) && valueGiven > 0) {
             long counterCount = trade.history().stream()
                     .filter(e -> "COUNTERED".equals(e.actionType())).count();
-            boolean offerIsReasonable = valueReceived >= valueGiven * 0.50;
+            boolean offerIsReasonable = counterCount == 0 || valueReceived >= valueGiven * 0.25;
             if (offerIsReasonable && counterCount < 2) {
                 publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
                 return;
