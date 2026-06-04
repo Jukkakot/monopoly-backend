@@ -224,6 +224,55 @@ public record StrongBotConfig(
     }
 
     /**
+     * Optimised for 6-player games: properties vanish fast, trading is essential,
+     * build pressure is needed to actually bankrupt opponents.
+     *
+     * <p>Key differences vs {@link #defaults()}:
+     * <ul>
+     *   <li>Much lower buy threshold — grab anything affordable immediately</li>
+     *   <li>Lower cash reserves — 6 players pass Go often, cash replenishes faster</li>
+     *   <li>Higher build aggression and lower hotel aversion — hotels are required
+     *       to generate enough rent to force bankruptcies</li>
+     *   <li>Higher trade fairness tolerance — completing a monopoly by trading
+     *       at a slight loss is still the winning move</li>
+     *   <li>Leave jail early — board scarcity means you must keep buying</li>
+     * </ul>
+     */
+    public static StrongBotConfig sixPlayer() {
+        return new StrongBotConfig(
+                3.5,   // buyThreshold — grab almost everything (board fills up fast)
+                110,   // minCashReserve — lower: 6 players = more Go income per round
+                200,   // dangerCashReserve
+                9.5,   // completionWeight
+                4.0,   // progressWeight
+                8.0,   // opponentBlockWeight — very competitive, block hard
+                3.5,   // railroadWeight
+                0.4,   // utilityWeight
+                1.5,   // liquidityPenaltyWeight — less afraid of thin cash
+                true,  // buyToBlockOpponent (frozen)
+                true,  // prioritizeThreeHouses — still hit 3 first before hotels
+                false, // preferJailLateGame — early game stay active to buy
+                1.5,   // houseBuildAggression — build fast to create rent pressure
+                3.5,   // hotelAversion — low: hotels needed to force bankruptcies
+                3.0,   // developmentBias
+                0.25,  // mortgageTolerance
+                1.3,   // unmortgageAggression
+                35,    // buildReservePerOpponentMonopoly — lower: less hoarding
+                1.1,   // auctionAggression
+                45,    // tradeFairnessTolerance — accept losing trades to complete monopoly
+                300,   // tradeSetCompletionWeight
+                defaultColorGroupWeights(),
+                350,   // jailExitThreshold — leave jail sooner (board scarcity)
+                1.1,   // bankruptcyAversion
+                60, 40, 5, 80, 110,
+                0.85,  // tradeLiquidityWeight — cash matters less than monopolies
+                1.4,   // opponentLeaderPressure
+                0.5,   // jailCardHoldBias — spend jail card freely
+                1.3    // mortgageRecoveryPriority
+        );
+    }
+
+    /**
      * Color-group weights derived from landing-probability research.
      *
      * <p>The spaces reachable most often after leaving Jail (dice sum peaking at 7)

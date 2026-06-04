@@ -33,23 +33,31 @@ import java.util.*;
  */
 public final class BotTournament {
 
-    private static final int MAX_STEPS = 15_000;
+    private static final int MAX_STEPS = 20_000;
     private static final int MAX_CONSECUTIVE_REJECTS = 10;
+    private static final String[] COLOR_PALETTE = {
+            "#E63946","#2A9D8F","#E9C46A","#264653","#F4A261","#8338EC"
+    };
 
     public record Entry(String name, StrongBotConfig config) {}
+
+    /** Result of a single game: winner seat index (-1 = genuine stall) and step count. */
+    public record GameResult(int winner, int steps, boolean byBankruptcy) {}
 
     public record Standing(
             String name,
             int wins,
             int losses,
             int draws,
-            int games
+            int games,
+            long totalSteps
     ) {
-        public double winRate() { return games > 0 ? (double) wins / games : 0; }
+        public double winRate()  { return games > 0 ? (double) wins / games : 0; }
+        public double avgSteps() { return games > 0 ? (double) totalSteps / games : 0; }
 
         @Override public String toString() {
-            return String.format("%-20s  W=%3d  L=%3d  D=%3d  (%d games)  win%%=%.1f",
-                    name, wins, losses, draws, games, winRate() * 100);
+            return String.format("%-22s  W=%3d  L=%3d  D=%3d  (%d games)  win%%=%.1f  avgSteps=%.0f",
+                    name, wins, losses, draws, games, winRate() * 100, avgSteps());
         }
     }
 
@@ -69,33 +77,30 @@ public final class BotTournament {
      */
     public static List<Standing> roundRobin(List<Entry> configs, int gamesPerPair, long seedBase) {
         int n = configs.size();
-        int[] wins   = new int[n];
-        int[] losses = new int[n];
-        int[] draws  = new int[n];
-        int[] games  = new int[n];
+        int[]  wins   = new int[n];
+        int[]  losses = new int[n];
+        int[]  draws  = new int[n];
+        int[]  games  = new int[n];
+        long[] steps  = new long[n];
 
         int gameIndex = 0;
         for (int i = 0; i < n; i++) {
             for (int j = i + 1; j < n; j++) {
                 for (int g = 0; g < gamesPerPair; g++) {
                     long seed = seedBase + gameIndex++;
-                    // Alternate seat order to remove first-player bias
                     boolean swap = (g % 2 == 1);
                     int playerA = swap ? j : i;
                     int playerB = swap ? i : j;
                     List<StrongBotConfig> cfgs = List.of(configs.get(playerA).config(), configs.get(playerB).config());
-                    int winner = runGame(cfgs, seed);
-                    games[i]++;
-                    games[j]++;
-                    if (winner == 0) {
-                        wins[playerA]++;
-                        losses[playerB]++;
-                    } else if (winner == 1) {
-                        wins[playerB]++;
-                        losses[playerA]++;
+                    GameResult result = runGameDetailed(cfgs, seed);
+                    games[i]++;   games[j]++;
+                    steps[i] += result.steps(); steps[j] += result.steps();
+                    if (result.winner() == 0) {
+                        wins[playerA]++; losses[playerB]++;
+                    } else if (result.winner() == 1) {
+                        wins[playerB]++; losses[playerA]++;
                     } else {
-                        draws[i]++;
-                        draws[j]++;
+                        draws[i]++; draws[j]++;
                     }
                 }
             }
@@ -103,7 +108,7 @@ public final class BotTournament {
 
         List<Standing> standings = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            standings.add(new Standing(configs.get(i).name(), wins[i], losses[i], draws[i], games[i]));
+            standings.add(new Standing(configs.get(i).name(), wins[i], losses[i], draws[i], games[i], steps[i]));
         }
         standings.sort(Comparator.comparingDouble(Standing::winRate).reversed());
         return standings;
@@ -116,24 +121,26 @@ public final class BotTournament {
      */
     public static List<Standing> freeForAll(List<Entry> configs, int gamesPerGroup, long seedBase) {
         int n = configs.size();
-        int[] wins   = new int[n];
-        int[] losses = new int[n];
-        int[] draws  = new int[n];
-        int[] games  = new int[n];
+        int[]  wins   = new int[n];
+        int[]  losses = new int[n];
+        int[]  draws  = new int[n];
+        int[]  games  = new int[n];
+        long[] steps  = new long[n];
 
         List<StrongBotConfig> cfgs = configs.stream().map(Entry::config).toList();
 
         for (int g = 0; g < gamesPerGroup; g++) {
-            // Rotate seat order each game to remove positional bias
             List<Integer> order = new ArrayList<>();
             for (int i = 0; i < n; i++) order.add(i);
             Collections.rotate(order, g);
 
             List<StrongBotConfig> seatedCfgs = order.stream().map(cfgs::get).toList();
-            int winnerSeat = runGame(seatedCfgs, seedBase + g);
+            GameResult result = runGameDetailed(seatedCfgs, seedBase + g);
             for (int i = 0; i < n; i++) {
                 games[order.get(i)]++;
+                steps[order.get(i)] += result.steps();
             }
+            int winnerSeat = result.winner();
             if (winnerSeat >= 0 && winnerSeat < n) {
                 int winner = order.get(winnerSeat);
                 wins[winner]++;
@@ -145,7 +152,7 @@ public final class BotTournament {
 
         List<Standing> standings = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            standings.add(new Standing(configs.get(i).name(), wins[i], losses[i], draws[i], games[i]));
+            standings.add(new Standing(configs.get(i).name(), wins[i], losses[i], draws[i], games[i], steps[i]));
         }
         standings.sort(Comparator.comparingDouble(Standing::winRate).reversed());
         return standings;
@@ -156,37 +163,85 @@ public final class BotTournament {
     // -------------------------------------------------------------------------
 
     /**
-     * Runs an evolutionary tournament to find a strong config.
-     *
-     * <p>Algorithm:
-     * <ol>
-     *   <li>Initial population: defaults, aggressive, cautious + random mutations</li>
-     *   <li>Each generation: round-robin tournament to rank configs</li>
-     *   <li>Top 50% survive; bottom 50% replaced by crossover+mutate of survivors</li>
-     *   <li>Returns the best config found across all generations</li>
-     * </ol>
-     *
-     * @param populationSize  number of configs per generation (≥4)
-     * @param generations     number of evolutionary cycles
-     * @param gamesPerPair    games per pair per generation
-     * @param seedBase        base random seed
-     * @param verbose         if true, prints per-generation results to stdout
+     * Runs a sampled tournament where each game picks {@code playerCount} configs
+     * at random from the population, plays the game, and awards the winner.
+     * Runs {@code totalGames} games total. Used for 3–6 player optimization where
+     * full round-robin is too expensive.
      */
-    public static Entry evolve(int populationSize, int generations, int gamesPerPair,
+    public static List<Standing> sampledTournament(List<Entry> configs, int totalGames,
+                                                    int playerCount, long seedBase) {
+        int n = configs.size();
+        int[]  wins   = new int[n];
+        int[]  losses = new int[n];
+        int[]  draws  = new int[n];
+        int[]  games  = new int[n];
+        long[] steps  = new long[n];
+
+        Random rng = new Random(seedBase);
+        for (int g = 0; g < totalGames; g++) {
+            // Sample playerCount distinct configs
+            List<Integer> indices = new ArrayList<>();
+            List<Integer> pool = new ArrayList<>();
+            for (int i = 0; i < n; i++) pool.add(i);
+            Collections.shuffle(pool, rng);
+            for (int k = 0; k < Math.min(playerCount, n); k++) indices.add(pool.get(k));
+
+            List<StrongBotConfig> cfgs = indices.stream().map(i -> configs.get(i).config()).toList();
+            GameResult result = runGameDetailed(cfgs, seedBase + g);
+
+            for (int k = 0; k < indices.size(); k++) {
+                int idx = indices.get(k);
+                games[idx]++;
+                steps[idx] += result.steps();
+                if (result.winner() == k) wins[idx]++;
+                else if (result.winner() >= 0) losses[idx]++;
+                else draws[idx]++;
+            }
+        }
+
+        List<Standing> standings = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            standings.add(new Standing(configs.get(i).name(), wins[i], losses[i], draws[i], games[i], steps[i]));
+        }
+        standings.sort(Comparator.comparingDouble(Standing::winRate).reversed());
+        return standings;
+    }
+
+    /**
+     * Evolutionary search for optimal bot config.
+     *
+     * <p>Uses {@code playerCount} to choose the tournament format:
+     * <ul>
+     *   <li>2 → full pair round-robin (most precise, recommended for 2–3 player tuning)</li>
+     *   <li>3–6 → sampled N-player groups (approximation, used for 4–6 player tuning)</li>
+     * </ul>
+     *
+     * @param populationSize  configs per generation (≥4)
+     * @param generations     evolutionary cycles
+     * @param gamesPerGen     games per generation (pairs for playerCount=2, total for others)
+     * @param playerCount     players per simulated game (2–6)
+     * @param baseConfigs     initial seed configs (defaults/aggressive/cautious added automatically)
+     * @param seedBase        base random seed
+     * @param verbose         print per-generation standings
+     */
+    public static Entry evolve(int populationSize, int generations, int gamesPerGen,
+                               int playerCount, List<Entry> baseConfigs,
                                long seedBase, boolean verbose) {
         Random rng = new Random(seedBase);
-        List<Entry> population = new ArrayList<>();
-        population.add(new Entry("defaults",   StrongBotConfig.defaults()));
-        population.add(new Entry("aggressive", StrongBotConfig.aggressive()));
-        population.add(new Entry("cautious",   StrongBotConfig.cautious()));
+        List<Entry> population = new ArrayList<>(baseConfigs);
+        // Ensure standard presets are included
+        if (population.stream().noneMatch(e -> "defaults".equals(e.name())))
+            population.add(new Entry("defaults", StrongBotConfig.defaults()));
+        if (population.stream().noneMatch(e -> "aggressive".equals(e.name())))
+            population.add(new Entry("aggressive", StrongBotConfig.aggressive()));
+        // Fill remainder with mutations of the first base config
+        StrongBotConfig seedConfig = baseConfigs.isEmpty()
+                ? StrongBotConfig.defaults() : baseConfigs.get(0).config();
         while (population.size() < populationSize) {
-            StrongBotConfig base = StrongBotConfig.defaults();
-            // Apply 3-6 mutations to create diversity
+            StrongBotConfig base = seedConfig;
             int mutations = 3 + rng.nextInt(4);
-            for (int m = 0; m < mutations; m++) {
-                base = base.mutate(rng, 0.30);
-            }
-            population.add(new Entry("random-" + population.size(), base));
+            for (int m = 0; m < mutations; m++) base = base.mutate(rng, 0.30);
+            population.add(new Entry("rnd-" + population.size(), base));
         }
 
         Entry bestEver = population.get(0);
@@ -194,80 +249,79 @@ public final class BotTournament {
 
         for (int gen = 0; gen < generations; gen++) {
             long genSeed = seedBase + (long) gen * 100_000;
-            List<Standing> standings = roundRobin(population, gamesPerPair, genSeed);
+            List<Standing> standings = playerCount == 2
+                    ? roundRobin(population, gamesPerGen, genSeed)
+                    : sampledTournament(population, gamesPerGen, playerCount, genSeed);
 
             if (verbose) {
-                System.out.printf("=== Generation %d ===%n", gen + 1);
-                standings.forEach(s -> System.out.println("  " + s));
+                System.out.printf("=== Generation %d (playerCount=%d) ===%n", gen + 1, playerCount);
+                standings.subList(0, Math.min(6, standings.size()))
+                         .forEach(s -> System.out.println("  " + s));
             }
 
-            // Track best ever
             Standing top = standings.get(0);
-            double topWinRate = top.winRate();
             Entry topEntry = population.stream()
                     .filter(e -> e.name().equals(top.name()))
                     .findFirst().orElse(population.get(0));
-            if (topWinRate > bestWinRate) {
-                bestWinRate = topWinRate;
-                bestEver = topEntry;
-            }
+            if (top.winRate() > bestWinRate) { bestWinRate = top.winRate(); bestEver = topEntry; }
 
-            // Selection: keep top 50%, replace bottom 50% with children
             int survivors = populationSize / 2;
             List<Entry> nextGen = new ArrayList<>();
-
-            // Survivors (in standing order)
             for (Standing s : standings.subList(0, survivors)) {
                 population.stream().filter(e -> e.name().equals(s.name()))
                         .findFirst().ifPresent(nextGen::add);
             }
-
-            // Children: crossover pairs of survivors + mutation
             int child = 0;
             while (nextGen.size() < populationSize) {
-                Entry parent1 = nextGen.get(rng.nextInt(survivors));
-                Entry parent2 = nextGen.get(rng.nextInt(survivors));
-                StrongBotConfig childCfg = parent1.config().crossover(parent2.config(), rng);
-                childCfg = childCfg.mutate(rng, 0.15);
+                Entry p1 = nextGen.get(rng.nextInt(survivors));
+                Entry p2 = nextGen.get(rng.nextInt(survivors));
+                StrongBotConfig childCfg = p1.config().crossover(p2.config(), rng).mutate(rng, 0.15);
                 nextGen.add(new Entry("child-" + gen + "-" + child++, childCfg));
             }
-
             population = nextGen;
         }
 
-        if (verbose) {
-            System.out.printf("%nBest config overall: %s (win rate %.1f%%)%n",
-                    bestEver.name(), bestWinRate * 100);
-        }
+        if (verbose) System.out.printf("%nBest: %s  win=%.1f%%%n", bestEver.name(), bestWinRate * 100);
         return bestEver;
+    }
+
+    /** Convenience overload for 2-player evolution with standard seed configs. */
+    public static Entry evolve(int populationSize, int generations, int gamesPerPair,
+                               long seedBase, boolean verbose) {
+        return evolve(populationSize, generations, gamesPerPair, 2,
+                List.of(new Entry("defaults", StrongBotConfig.defaults()),
+                        new Entry("aggressive", StrongBotConfig.aggressive()),
+                        new Entry("cautious", StrongBotConfig.cautious())),
+                seedBase, verbose);
     }
 
     // -------------------------------------------------------------------------
     // Single-game engine
     // -------------------------------------------------------------------------
 
+    /** Runs one headless game; returns winner seat or -1. */
+    public static int runGame(List<StrongBotConfig> configs, long seed) {
+        return runGameDetailed(configs, seed).winner();
+    }
+
     /**
      * Runs one complete headless game with the given configs in seat order.
-     *
-     * @return seat index (0-based) of the winner, or -1 if the game stalled/drew
+     * Returns full {@link GameResult} including step count and whether the game
+     * ended by bankruptcy (vs net-worth tiebreaker).
      */
-    public static int runGame(List<StrongBotConfig> configs, long seed) {
+    public static GameResult runGameDetailed(List<StrongBotConfig> configs, long seed) {
         int n = configs.size();
-        List<String> names   = new ArrayList<>();
-        List<String> colors  = new ArrayList<>();
-        String[] palette = {"#E63946","#2A9D8F","#E9C46A","#264653"};
+        List<String> names  = new ArrayList<>();
+        List<String> colors = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             names.add("Bot" + i);
-            colors.add(palette[i % palette.length]);
+            colors.add(COLOR_PALETTE[i % COLOR_PALETTE.length]);
         }
 
         SessionState initial = PureDomainSessionFactory.initialGameState(
                 "tournament-" + seed, names, colors, new Random(seed));
-
-        // Map player IDs (in seat order) to configs
         List<String> playerIds = initial.players().stream()
-                .map(PlayerSnapshot::playerId)
-                .toList();
+                .map(PlayerSnapshot::playerId).toList();
         Map<String, StrongBotConfig> cfgByPlayer = new HashMap<>();
         for (int i = 0; i < Math.min(n, playerIds.size()); i++) {
             cfgByPlayer.put(playerIds.get(i), configs.get(i));
@@ -282,25 +336,27 @@ public final class BotTournament {
             SessionState state = service.currentState();
 
             if (state.status() == SessionStatus.GAME_OVER) {
-                return findWinnerSeat(state, playerIds);
+                return new GameResult(findWinnerSeat(state, playerIds), steps, true);
             }
-
             long active = state.players().stream().filter(p -> !p.bankrupt() && !p.eliminated()).count();
             if (active <= 1) {
-                return findWinnerSeat(state, playerIds);
+                return new GameResult(findWinnerSeat(state, playerIds), steps, true);
             }
 
             String activeId = resolveActivePlayer(state);
-            StrongBotConfig cfg = activeId != null ? cfgByPlayer.getOrDefault(activeId, StrongBotConfig.defaults()) : StrongBotConfig.defaults();
+            StrongBotConfig cfg = activeId != null
+                    ? cfgByPlayer.getOrDefault(activeId, StrongBotConfig.defaults())
+                    : StrongBotConfig.defaults();
 
             CommandResult result = dispatch(service, state, activeId, cfg, cfgByPlayer);
             if (!result.accepted()) {
-                if (++consecutiveRejects >= MAX_CONSECUTIVE_REJECTS) return -1;
+                if (++consecutiveRejects >= MAX_CONSECUTIVE_REJECTS) return new GameResult(-1, steps, false);
             } else {
                 consecutiveRejects = 0;
             }
         }
-        return winnerByNetWorth(service.currentState(), playerIds);
+        // Hit step limit — net-worth tiebreaker
+        return new GameResult(winnerByNetWorth(service.currentState(), playerIds), steps, false);
     }
 
     // -------------------------------------------------------------------------
@@ -319,17 +375,21 @@ public final class BotTournament {
 
         if (activeId == null) return reject("no-active-player", state);
 
-        // Trade state: bots don't initiate trades in simulations — just decline incoming
+        // Trade state handling
         if (state.tradeState() != null) {
             TradeState trade = state.tradeState();
-            if (trade.decisionRequiredFromPlayerId() != null
-                    && cfgByPlayer.containsKey(trade.decisionRequiredFromPlayerId())) {
-                return service.handle(new DeclineTradeCommand(
-                        state.sessionId(), trade.decisionRequiredFromPlayerId(), trade.tradeId()));
+            // Someone needs to evaluate an incoming offer
+            String evaluator = trade.decisionRequiredFromPlayerId();
+            if (evaluator != null && cfgByPlayer.containsKey(evaluator)) {
+                StrongBotConfig evalCfg = cfgByPlayer.getOrDefault(evaluator, StrongBotConfig.defaults());
+                return dispatchTradeDecision(service, state, evaluator, trade, evalCfg);
             }
-            if (trade.status() == TradeStatus.EDITING || trade.status() == TradeStatus.COUNTERED) {
-                return service.handle(new CancelTradeCommand(state.sessionId(), activeId, trade.tradeId()));
+            // Bot is the proposer — fill in or cancel the offer
+            if (trade.status() == TradeStatus.EDITING && cfgByPlayer.containsKey(activeId)) {
+                return dispatchTradeEditing(service, state, activeId, trade, cfg, cfgByPlayer);
             }
+            // Countered or stuck — cancel
+            return service.handle(new CancelTradeCommand(state.sessionId(), activeId, trade.tradeId()));
         }
 
         TurnPhase phase = state.turn() != null ? state.turn().phase() : null;
@@ -338,7 +398,7 @@ public final class BotTournament {
         return switch (phase) {
             case WAITING_FOR_ROLL     -> service.handle(new RollDiceCommand(state.sessionId(), activeId));
             case WAITING_FOR_CARD_ACK -> service.handle(new AcknowledgeCardCommand(state.sessionId(), activeId));
-            case WAITING_FOR_END_TURN -> dispatchEndTurn(service, state, activeId, cfg);
+            case WAITING_FOR_END_TURN -> dispatchEndTurn(service, state, activeId, cfg, cfgByPlayer);
             case WAITING_FOR_DECISION -> dispatchDecision(service, state, activeId, cfg);
             case RESOLVING_DEBT       -> dispatchDebt(service, state);
             case WAITING_FOR_AUCTION  -> dispatchAuction(service, state, cfg, cfgByPlayer);
@@ -347,19 +407,25 @@ public final class BotTournament {
     }
 
     private static CommandResult dispatchEndTurn(SessionApplicationService service, SessionState state,
-                                                  String activeId, StrongBotConfig cfg) {
+                                                  String activeId, StrongBotConfig cfg,
+                                                  Map<String, StrongBotConfig> cfgByPlayer) {
         PlayerSnapshot player = StrongBotStrategy.findPlayer(state, activeId);
         if (player == null) return service.handle(new EndTurnCommand(state.sessionId(), activeId));
 
         int reserve = StrongBotStrategy.dynamicReserve(state, activeId, cfg);
 
-        // Try unmortgage first
         CommandResult unmortgage = tryUnmortgage(service, state, activeId, cfg, player, reserve);
         if (unmortgage != null && unmortgage.accepted()) return unmortgage;
 
-        // Try build
         CommandResult build = tryBuild(service, state, activeId, cfg, player, reserve);
         if (build != null && build.accepted()) return build;
+
+        // Try to open a strategic trade if bot has enough cash and no monopoly yet
+        if (StrongBotStrategy.completedColorGroups(state, activeId).isEmpty()
+                && player.cash() > reserve + 80) {
+            CommandResult trade = tryOpenStrategicTrade(service, state, activeId, cfg, cfgByPlayer);
+            if (trade != null && trade.accepted()) return trade;
+        }
 
         return service.handle(new EndTurnCommand(state.sessionId(), activeId));
     }
@@ -500,11 +566,144 @@ public final class BotTournament {
     }
 
     // -------------------------------------------------------------------------
+    // Trading helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Evaluates an incoming trade offer and accepts, counters, or declines.
+     * Accepts if value received >= value given minus tradeFairnessTolerance,
+     * OR if the trade completes a color monopoly for the bot.
+     */
+    private static CommandResult dispatchTradeDecision(SessionApplicationService service, SessionState state,
+                                                        String botId, TradeState trade, StrongBotConfig cfg) {
+        TradeOfferState offer = trade.currentOffer();
+        boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
+        TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
+        TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+
+        int valueReceived = evaluateTradeSelection(state, botId, myReceiving, true, cfg);
+        int valueGiven    = evaluateTradeSelection(state, botId, myGiving,    false, cfg);
+
+        // Accept if within fairness tolerance or if it completes a monopoly
+        boolean monopolyGain = myReceiving.propertyIds().stream()
+                .anyMatch(p -> StrongBotStrategy.wouldCompleteSet(state, botId, p));
+        if (monopolyGain || valueReceived >= valueGiven - cfg.tradeFairnessTolerance()) {
+            return service.handle(new AcceptTradeCommand(state.sessionId(), botId, trade.tradeId()));
+        }
+        return service.handle(new DeclineTradeCommand(state.sessionId(), botId, trade.tradeId()));
+    }
+
+    /**
+     * Fills in a trade offer the bot initiated: first requests a target property,
+     * then offers money (up to the property price, capped by available cash).
+     */
+    private static CommandResult dispatchTradeEditing(SessionApplicationService service, SessionState state,
+                                                       String botId, TradeState trade, StrongBotConfig cfg,
+                                                       Map<String, StrongBotConfig> cfgByPlayer) {
+        TradeOfferState offer = trade.currentOffer();
+        String tradeId = trade.tradeId();
+        boolean iAmProposer = botId.equals(trade.initiatorPlayerId());
+        TradeSelectionState myRequest = iAmProposer ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+        TradeSelectionState myGive    = iAmProposer ? offer.offeredToRecipient() : offer.requestedFromRecipient();
+        boolean requestSide = !iAmProposer;
+        boolean giveSide    = iAmProposer;
+
+        // Step 1: request a target property
+        if (myRequest.propertyIds().isEmpty()) {
+            String partnerId = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
+            String target = findBestTradeTarget(state, botId, partnerId);
+            if (target == null) return service.handle(new CancelTradeCommand(state.sessionId(), botId, tradeId));
+            return service.handle(new EditTradeOfferCommand(state.sessionId(), botId, tradeId,
+                    new TradeEditPatch(null, requestSide, null, List.of(target), List.of(), null)));
+        }
+
+        // Step 2: offer money
+        if (myGive.moneyAmount() == 0) {
+            String targetId = myRequest.propertyIds().get(0);
+            int price = SpotType.valueOf(targetId).getIntegerProperty("price");
+            PlayerSnapshot bot = StrongBotStrategy.findPlayer(state, botId);
+            int reserve = StrongBotStrategy.dynamicReserve(state, botId, cfg);
+            int available = bot != null ? Math.max(0, bot.cash() - reserve) : 0;
+            int offer2 = Math.min(price, available);
+            if (offer2 < 10) return service.handle(new CancelTradeCommand(state.sessionId(), botId, tradeId));
+            return service.handle(new EditTradeOfferCommand(state.sessionId(), botId, tradeId,
+                    new TradeEditPatch(null, giveSide, offer2, List.of(), List.of(), null)));
+        }
+
+        // Step 3: submit
+        return service.handle(new SubmitTradeOfferCommand(state.sessionId(), botId, tradeId));
+    }
+
+    /** Try to open a trade with any opponent who has a property the bot needs. */
+    private static CommandResult tryOpenStrategicTrade(SessionApplicationService service, SessionState state,
+                                                        String botId, StrongBotConfig cfg,
+                                                        Map<String, StrongBotConfig> cfgByPlayer) {
+        for (PlayerSnapshot other : state.players()) {
+            if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            if (findBestTradeTarget(state, botId, other.playerId()) == null) continue;
+            CommandResult r = service.handle(new OpenTradeCommand(state.sessionId(), botId, other.playerId()));
+            if (r.accepted()) return r;
+        }
+        return null;
+    }
+
+    /** Find the best property from partnerId's portfolio that would help botId form a monopoly. */
+    private static String findBestTradeTarget(SessionState state, String botId, String partnerId) {
+        // Priority 1: completes a monopoly
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            int gs = StrongBotStrategy.setSize(group);
+            if (gs == 0) continue;
+            if (StrongBotStrategy.ownedInSet(state, botId, group) != gs - 1) continue;
+            String found = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && StrongBotStrategy.spotType(p.propertyId()).streetType == group)
+                    .map(PropertyStateSnapshot::propertyId).findFirst().orElse(null);
+            if (found != null) return found;
+        }
+        // Priority 2: any group where bot has most properties (≥1)
+        return StreetType.values() == null ? null :
+                java.util.Arrays.stream(StreetType.values())
+                        .filter(g -> g.placeType == PlaceType.STREET)
+                        .filter(g -> StrongBotStrategy.ownedInSet(state, botId, g) > 0)
+                        .sorted(Comparator.comparingInt((StreetType g) ->
+                                StrongBotStrategy.ownedInSet(state, botId, g)).reversed())
+                        .flatMap(g -> state.properties().stream()
+                                .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                                        && p.houseCount() == 0 && p.hotelCount() == 0
+                                        && StrongBotStrategy.spotType(p.propertyId()).streetType == g)
+                                .map(PropertyStateSnapshot::propertyId))
+                        .findFirst().orElse(null);
+    }
+
+    /** Evaluate a trade selection from the bot's perspective. */
+    private static int evaluateTradeSelection(SessionState state, String botId,
+                                               TradeSelectionState selection, boolean receiving,
+                                               StrongBotConfig cfg) {
+        int value = (int)(selection.moneyAmount() * cfg.tradeLiquidityWeight());
+        value += selection.jailCardCount() * 50;
+        for (String propId : selection.propertyIds()) {
+            int price = SpotType.valueOf(propId).getIntegerProperty("price");
+            value += receiving && StrongBotStrategy.wouldCompleteSet(state, botId, propId)
+                    ? price + cfg.tradeSetCompletionWeight()
+                    : price;
+        }
+        return value;
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
     private static String resolveActivePlayer(SessionState state) {
-        if (state.tradeState() != null) return state.tradeState().decisionRequiredFromPlayerId();
+        if (state.tradeState() != null) {
+            TradeState t = state.tradeState();
+            // If someone needs to decide on an offer, they are "active"
+            if (t.decisionRequiredFromPlayerId() != null) return t.decisionRequiredFromPlayerId();
+            // Otherwise the initiator/proposer is editing
+            return t.initiatorPlayerId();
+        }
         if (state.activeDebt() != null) return state.activeDebt().debtorPlayerId();
         if (state.auctionState() != null) return state.auctionState().currentActorPlayerId();
         return state.turn() != null ? state.turn().activePlayerId() : null;
@@ -604,12 +803,12 @@ public final class BotTournament {
     // -------------------------------------------------------------------------
 
     public static void printStandings(List<Standing> standings) {
-        System.out.println("=".repeat(65));
+        System.out.println("=".repeat(90));
         System.out.println("Bot Tournament Results");
-        System.out.println("=".repeat(65));
+        System.out.println("=".repeat(90));
         for (int i = 0; i < standings.size(); i++) {
             System.out.printf("#%d  %s%n", i + 1, standings.get(i));
         }
-        System.out.println("=".repeat(65));
+        System.out.println("=".repeat(90));
     }
 }

@@ -23,7 +23,6 @@ import java.util.Random;
  * <p>Prints per-generation standings and a final diff of the best config vs defaults.
  * Update {@link StrongBotConfig#defaults()} based on the output.</p>
  */
-@Disabled("Long-running evolutionary test, run manually when needed")
 class BotEvolutionTest {
 
     @BeforeAll
@@ -39,35 +38,71 @@ class BotEvolutionTest {
         }
     }
 
-    /** Full evolutionary run — takes ~8-12 minutes. */
+    /**
+     * Evolutionary search for 2–3 player optimal config.
+     * Uses full pair round-robin per generation.
+     * Takes ~8-12 minutes with default params.
+     */
     @Test
-    void evolveOptimalConfig() {
-        int populationSize = 12;
-        int generations    = 15;
-        int gamesPerPair   = 20;
-        long seedBase      = 77777L;
+    @Disabled("Long — run manually to find optimal 2-3 player config")
+    void evolveSmallGame() {
+        int pop  = 12, gens = 15, games = 20;
+        long seed = 77777L;
 
-        System.out.println("Starting evolution: pop=" + populationSize
-                + " gens=" + generations + " games/pair=" + gamesPerPair);
-        System.out.println("Estimated time: ~"
-                + (populationSize * (populationSize - 1) / 2 * gamesPerPair * generations / 10) + "s");
-
-        BotTournament.Entry best = BotTournament.evolve(
-                populationSize, generations, gamesPerPair, seedBase, true);
+        System.out.printf("Evolving 2-player config: pop=%d gens=%d games/pair=%d%n", pop, gens, games);
+        BotTournament.Entry best = BotTournament.evolve(pop, gens, games, 2,
+                List.of(new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
+                        new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
+                        new BotTournament.Entry("cautious",   StrongBotConfig.cautious())),
+                seed, true);
 
         System.out.println("\n" + "=".repeat(70));
-        System.out.println("BEST CONFIG FOUND: " + best.name());
-        System.out.println("=".repeat(70));
+        System.out.println("BEST 2-PLAYER CONFIG: " + best.name());
         printDiff(best.config(), StrongBotConfig.defaults());
 
-        // Verify best beats defaults in a larger head-to-head
-        System.out.println("\nVerification: best vs defaults (50 games each direction)");
+        // Verify against known presets
         List<BotTournament.Standing> verify = BotTournament.roundRobin(List.of(
-                new BotTournament.Entry("best",     best.config()),
-                new BotTournament.Entry("defaults", StrongBotConfig.defaults()),
+                new BotTournament.Entry("best",       best.config()),
+                new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
                 new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
                 new BotTournament.Entry("cautious",   StrongBotConfig.cautious())
-        ), 50, seedBase + 999_999L);
+        ), 50, seed + 999_999L);
+        BotTournament.printStandings(verify);
+    }
+
+    /**
+     * Evolutionary search for 4–6 player optimal config.
+     * Uses sampled N-player groups per generation.
+     * Takes ~5-10 minutes with default params.
+     */
+    @Test
+    @Disabled("Long — run manually to find optimal 4-6 player config")
+    void evolveLargeGame() {
+        int pop  = 12, gens = 15;
+        int gamesPerGen = 200;  // total sampled games per generation
+        int playerCount = 4;    // players per game (try 4, 5, or 6)
+        long seed = 88888L;
+
+        System.out.printf("Evolving %d-player config: pop=%d gens=%d games/gen=%d%n",
+                playerCount, pop, gens, gamesPerGen);
+        BotTournament.Entry best = BotTournament.evolve(pop, gens, gamesPerGen, playerCount,
+                List.of(new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer()),
+                        new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
+                        new BotTournament.Entry("defaults",   StrongBotConfig.defaults())),
+                seed, true);
+
+        System.out.println("\n" + "=".repeat(70));
+        System.out.printf("BEST %d-PLAYER CONFIG: %s%n", playerCount, best.name());
+        printDiff(best.config(), StrongBotConfig.sixPlayer());
+
+        // Verify in a freeForAll benchmark
+        List<BotTournament.Standing> verify = BotTournament.sampledTournament(List.of(
+                new BotTournament.Entry("best",      best.config()),
+                new BotTournament.Entry("sixPlayer", StrongBotConfig.sixPlayer()),
+                new BotTournament.Entry("aggressive",StrongBotConfig.aggressive()),
+                new BotTournament.Entry("defaults",  StrongBotConfig.defaults()),
+                new BotTournament.Entry("cautious",  StrongBotConfig.cautious())
+        ), 300, playerCount, seed + 999_999L);
         BotTournament.printStandings(verify);
     }
 
@@ -76,6 +111,7 @@ class BotEvolutionTest {
      * Runs in ~2 minutes.
      */
     @Test
+    @Disabled("Long — run manually for parameter sensitivity analysis")
     void ablationStudy() {
         long seed = 42424242L;
         int games = 30;
@@ -145,17 +181,108 @@ class BotEvolutionTest {
     }
 
     /**
-     * Quick sanity: current defaults vs aggressive vs cautious.
-     * Runs in ~30 seconds.
+     * Quick sanity: current defaults vs aggressive vs cautious vs sixPlayer (2-player, 3-player, 4-player).
+     * Runs in ~90 seconds total.
      */
     @Test
     void quickBenchmark() {
-        List<BotTournament.Standing> standings = BotTournament.roundRobin(List.of(
+        List<BotTournament.Entry> configs = List.of(
                 new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
                 new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
-                new BotTournament.Entry("cautious",   StrongBotConfig.cautious())
-        ), 50, 12345L);
+                new BotTournament.Entry("cautious",   StrongBotConfig.cautious()),
+                new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer())
+        );
+
+        System.out.println("--- 2-player round-robin (50 games/pair) ---");
+        BotTournament.printStandings(BotTournament.roundRobin(configs, 50, 12345L));
+
+        System.out.println("--- 3-player sampled (300 games) ---");
+        BotTournament.printStandings(BotTournament.sampledTournament(configs, 300, 3, 23456L));
+
+        System.out.println("--- 4-player sampled (300 games) ---");
+        BotTournament.printStandings(BotTournament.sampledTournament(configs, 300, 4, 34567L));
+
+        System.out.println("--- 6-player sampled (300 games) ---");
+        BotTournament.printStandings(BotTournament.sampledTournament(configs, 300, 6, 45678L));
+    }
+
+    /**
+     * 6-player free-for-all: defaults, aggressive, cautious, sixPlayer × 2.
+     * Tests whether games actually end (bankruptcies) and which config wins.
+     * Runs in ~2-3 minutes.
+     */
+    @Test
+    void sixPlayerBenchmark() {
+        List<BotTournament.Entry> configs = List.of(
+                new BotTournament.Entry("sixPlayer-A", StrongBotConfig.sixPlayer()),
+                new BotTournament.Entry("sixPlayer-B", StrongBotConfig.sixPlayer()),
+                new BotTournament.Entry("aggressive",  StrongBotConfig.aggressive()),
+                new BotTournament.Entry("defaults",    StrongBotConfig.defaults()),
+                new BotTournament.Entry("cautious",    StrongBotConfig.cautious()),
+                new BotTournament.Entry("sixPlayer-C", StrongBotConfig.sixPlayer())
+        );
+
+        System.out.println("=== 6-player free-for-all (100 games) ===");
+        List<BotTournament.Standing> standings = BotTournament.freeForAll(configs, 100, 55555L);
         BotTournament.printStandings(standings);
+
+        long bankruptcyGames = standings.stream().mapToLong(s -> s.wins() + s.losses()).sum() / (configs.size() - 1);
+        double avgSteps = standings.stream().mapToDouble(BotTournament.Standing::avgSteps).average().orElse(0);
+        System.out.printf("%nGames decided by bankruptcy: %d/100  avg steps per game: %.0f%n",
+                bankruptcyGames, avgSteps);
+    }
+
+    /**
+     * 6-player ablation: which parameters matter most in 6-player games.
+     * Runs in ~5 minutes.
+     */
+    @Test
+    void sixPlayerAblation() {
+        StrongBotConfig base = StrongBotConfig.sixPlayer();
+        List<BotTournament.Entry> configs = new ArrayList<>();
+        configs.add(new BotTournament.Entry("sixPlayer-base", base));
+
+        String[] names = {
+                "buyThreshold+25%", "buyThreshold-25%",
+                "hotelAversion+25%", "hotelAversion-25%",
+                "buildAggression+25%", "buildAggression-25%",
+                "dangerCash+25%", "dangerCash-25%",
+                "tradeTolerance+50%", "tradeTolerance-50%",
+                "liquidityPenalty+25%", "liquidityPenalty-25%",
+        };
+        StrongBotConfig[] variants = {
+                base.toBuilder().buyThreshold(base.buyThreshold() * 1.25).build(),
+                base.toBuilder().buyThreshold(base.buyThreshold() * 0.75).build(),
+                base.toBuilder().hotelAversion(base.hotelAversion() * 1.25).build(),
+                base.toBuilder().hotelAversion(base.hotelAversion() * 0.75).build(),
+                base.toBuilder().houseBuildAggression(base.houseBuildAggression() * 1.25).build(),
+                base.toBuilder().houseBuildAggression(base.houseBuildAggression() * 0.75).build(),
+                base.toBuilder().dangerCashReserve((int)(base.dangerCashReserve() * 1.25)).build(),
+                base.toBuilder().dangerCashReserve((int)(base.dangerCashReserve() * 0.75)).build(),
+                base.toBuilder().tradeFairnessTolerance((int)(base.tradeFairnessTolerance() * 1.5)).build(),
+                base.toBuilder().tradeFairnessTolerance((int)(base.tradeFairnessTolerance() * 0.5)).build(),
+                base.toBuilder().liquidityPenaltyWeight(base.liquidityPenaltyWeight() * 1.25).build(),
+                base.toBuilder().liquidityPenaltyWeight(base.liquidityPenaltyWeight() * 0.75).build(),
+        };
+        for (int k = 0; k < names.length; k++) {
+            configs.add(new BotTournament.Entry(names[k], variants[k]));
+        }
+
+        System.out.println("=== 6-player ablation (" + configs.size() + " configs) ===");
+        // Use freeForAll with all configs to simulate real 6-player dynamics
+        // Run round-robin between base and each variant in 3-player games
+        List<BotTournament.Standing> standings = BotTournament.roundRobin(configs, 20, 66666L);
+        BotTournament.printStandings(standings);
+
+        double baseWin = standings.stream()
+                .filter(s -> "sixPlayer-base".equals(s.name()))
+                .findFirst().map(BotTournament.Standing::winRate).orElse(0.0);
+        System.out.println("\nParams that beat base in round-robin:");
+        standings.stream()
+                .filter(s -> s.winRate() > baseWin && !"sixPlayer-base".equals(s.name()))
+                .sorted(Comparator.comparingDouble(BotTournament.Standing::winRate).reversed())
+                .forEach(s -> System.out.printf("  %-30s  %.1f%%  (+%.1f%%)%n",
+                        s.name(), s.winRate() * 100, (s.winRate() - baseWin) * 100));
     }
 
     // -------------------------------------------------------------------------
