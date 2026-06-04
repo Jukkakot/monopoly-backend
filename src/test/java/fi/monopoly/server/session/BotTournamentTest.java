@@ -1,5 +1,6 @@
 package fi.monopoly.server.session;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -16,7 +17,12 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * For a full tournament or evolutionary search, run {@link BotTournament#main(String[])}
  * directly or use {@link BotTournament#evolve}.
+ *
+ * <p><strong>Ei koskaan CI-ajoon</strong> — turnaus-simulaatiot vievät useita minuutteja.
+ * Aja manuaalisesti kun muutat bot-logiikkaa:
+ * {@code mvn test -Dtest=BotTournamentTest}
  */
+@Disabled("Hidas (useita min) — aja manuaalisesti: mvn test -Dtest=BotTournamentTest")
 class BotTournamentTest {
 
     @Test

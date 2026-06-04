@@ -1,5 +1,6 @@
 package fi.monopoly.server.session;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -19,7 +20,12 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>2-player: aggressive > evolved2p > defaults > cautious</li>
  *   <li>4-player: defaults ≈ sixPlayer > aggressive > cautious</li>
  * </ul>
+ *
+ * <p><strong>Ei koskaan CI-ajoon</strong> — nämä testit ajavat satoja pelejä ja vievät
+ * useita minuutteja. Aja manuaalisesti kun muutat bot-strategiaa:
+ * {@code mvn test -Dtest=BotQualityRegressionTest}
  */
+@Disabled("Hidas (~30 s) — aja manuaalisesti: mvn test -Dtest=BotQualityRegressionTest")
 class BotQualityRegressionTest {
 
     private static final long SEED = 999_001L;
