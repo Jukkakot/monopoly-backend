@@ -106,7 +106,7 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");

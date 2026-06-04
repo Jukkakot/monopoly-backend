@@ -36,9 +36,13 @@ public final class SessionRegistry {
     /** Hard cap on concurrent sessions. Configurable via -Dmonopoly.session.max=N. */
     private static final int MAX_SESSIONS =
             Integer.getInteger("monopoly.session.max", 50);
-    /** Reject new sessions when JVM process CPU load exceeds this fraction (0.0–1.0). */
+    /**
+     * Reject new sessions when the smoothed CPU load exceeds this fraction (0.0–1.0).
+     * Raised from 0.75 → 0.90 because bot sessions now pause when no viewer is connected,
+     * making them much cheaper to maintain. Configurable via -Dmonopoly.session.cpu.threshold=N.
+     */
     private static final double CPU_LOAD_THRESHOLD =
-            Double.parseDouble(System.getProperty("monopoly.session.cpu.threshold", "0.75"));
+            Double.parseDouble(System.getProperty("monopoly.session.cpu.threshold", "0.90"));
     private static final long LOAD_LOG_INTERVAL_SECONDS = 30L;
 
     public record CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken) {}
@@ -56,6 +60,12 @@ public final class SessionRegistry {
     private final ConcurrentHashMap<String, Entry> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastActivityAt = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleaner;
+    /**
+     * Exponentially-weighted moving average of CPU load, updated every LOAD_LOG_INTERVAL_SECONDS.
+     * α=0.3 means a single spike decays to <5% of its original weight after ~8 samples (4 min).
+     * -1.0 = no samples yet (fall back to instant reading for first checkCapacity call).
+     */
+    private volatile double smoothedCpu = -1.0;
 
     public SessionRegistry() {
         cleaner = Executors.newSingleThreadScheduledExecutor(
@@ -675,9 +685,11 @@ public final class SessionRegistry {
             throw new SessionLimitExceededException("MAX_SESSIONS_REACHED",
                     "Server has reached the maximum number of concurrent sessions (" + MAX_SESSIONS + ")");
         }
-        double cpu = readCpuLoad();
+        // Use smoothed EWMA to avoid rejecting on transient spikes (e.g. GC, test bursts).
+        // Fall back to instant reading only before the first scheduled log sample.
+        double cpu = smoothedCpu >= 0 ? smoothedCpu : readCpuLoad();
         if (cpu >= 0 && cpu > CPU_LOAD_THRESHOLD) {
-            log.warn("cpu load too high: cpu={:.1f}% threshold={:.0f}% sessions={}",
+            log.warn("cpu load too high: smoothed={:.1f}% threshold={:.0f}% sessions={}",
                     cpu * 100, CPU_LOAD_THRESHOLD * 100, count);
             throw new SessionLimitExceededException("SERVER_BUSY",
                     "Server is currently under high load, please try again later");
@@ -699,6 +711,10 @@ public final class SessionRegistry {
     private void logSystemLoad() {
         int count = sessions.size();
         double cpu = readCpuLoad();
+        // Update EWMA: α=0.3 so a single spike fades to <5% after ~8 samples (~4 min).
+        if (cpu >= 0) {
+            smoothedCpu = smoothedCpu < 0 ? cpu : smoothedCpu * 0.7 + cpu * 0.3;
+        }
         String cpuStr = cpu >= 0 ? String.format("%.1f%%", cpu * 100) : "n/a";
         if (cpu > 0.60 || count > MAX_SESSIONS * 0.80) {
             log.warn("load: cpu={} sessions={}/{}", cpuStr, count, MAX_SESSIONS);
