@@ -895,9 +895,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (propId != null && wouldCompleteSet(state, bidderId, propId)) {
                 ceiling += cfg.auctionSetCompletionBonus();
             }
-            boolean canAfford = cash - minBid >= reserve;
-            if (canAfford && minBid <= ceiling) {
-                publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), minBid));
+            int maxBid = Math.min(ceiling, cash - reserve);
+            if (maxBid >= minBid) {
+                // Jump ~⅓ of remaining headroom toward ceiling with ±40 % random jitter
+                int headroom = maxBid - minBid;
+                double factor = 0.6 + ThreadLocalRandom.current().nextDouble() * 0.8; // 0.6–1.4
+                int extra = ((int) (headroom / 3.0 * factor) / 10) * 10;
+                int bid = Math.min(maxBid, minBid + Math.max(10, extra));
+                publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), bid));
             } else {
                 publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
             }
