@@ -145,7 +145,7 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
         if (debtorId == null || !debtorId.equals(prop.ownerPlayerId())) return false;
 
         SpotType spotType = spotTypeOf(propertyId);
-        if (spotType == null) return false;
+        if (spotType == null || spotType.streetType.placeType != PlaceType.STREET) return false;
 
         int housePrice = spotType.getIntegerProperty("housePrice");
         if (housePrice <= 0) return false;

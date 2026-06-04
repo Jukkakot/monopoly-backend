@@ -23,6 +23,7 @@ import java.util.Random;
  * <p>Prints per-generation standings and a final diff of the best config vs defaults.
  * Update {@link StrongBotConfig#defaults()} based on the output.</p>
  */
+@Disabled("Long-running evolutionary test, run manually when needed")
 class BotEvolutionTest {
 
     @BeforeAll

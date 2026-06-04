@@ -536,8 +536,12 @@ public final class BotTournament {
                     .filter(p -> pid.equals(p.ownerPlayerId()))
                     .mapToInt(p -> {
                         int price = SpotType.valueOf(p.propertyId()).getIntegerProperty("price");
-                        int housePrice = SpotType.valueOf(p.propertyId()).getIntegerProperty("housePrice");
-                        int buildingValue = (p.hotelCount() > 0 ? 5 : p.houseCount()) * (housePrice / 2);
+                        SpotType spotType = SpotType.valueOf(p.propertyId());
+                        int buildingValue = 0;
+                        if (spotType.streetType.placeType == PlaceType.STREET) {
+                            int housePrice = spotType.getIntegerProperty("housePrice");
+                            buildingValue = (p.hotelCount() > 0 ? 5 : p.houseCount()) * (housePrice / 2);
+                        }
                         return p.mortgaged() ? price / 2 : price + buildingValue;
                     })
                     .sum();
