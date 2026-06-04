@@ -13,7 +13,6 @@ import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -456,83 +455,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     private double buyScore(SessionState state, String botId, String propId, StrongBotConfig cfg) {
-        SpotType st = spotType(propId);
-        StreetType group = st.streetType;
-        double score = 0;
-        // Completion and progress
-        score += cfg.completionWeight() * (wouldCompleteSet(state, botId, propId) ? 1.0 : 0.0);
-        int ownedInSet = ownedInSet(state, botId, group);
-        int setSize = setSize(group);
-        if (setSize > 1) score += cfg.progressWeight() * (ownedInSet + 1.0) / setSize;
-        // Opponent blocking
-        if (cfg.buyToBlockOpponent()) {
-            int bestOpponent = state.players().stream()
-                    .filter(p -> !p.playerId().equals(botId) && !p.eliminated() && !p.bankrupt())
-                    .mapToInt(p -> ownedInSet(state, p.playerId(), group))
-                    .max().orElse(0);
-            if (bestOpponent == setSize - 1) score += cfg.opponentBlockWeight() * cfg.opponentLeaderPressure();
-        }
-        // Type bonuses
-        score += switch (group.placeType) {
-            case RAILROAD -> cfg.railroadWeight() + ownedInSet * cfg.railroadCompletionWeight() / 10.0;
-            case UTILITY  -> cfg.utilityWeight()  + ownedInSet * cfg.utilityCompletionWeight()  / 10.0;
-            case STREET   -> {
-                int price = st.getIntegerProperty("price");
-                yield price >= 200 ? 1.5 : 0.5;
-            }
-            default -> 0;
-        };
-        // Development bias
-        if (wouldCompleteSet(state, botId, propId)) score += cfg.developmentBias();
-        else if (ownedInSet > 0) score += cfg.developmentBias() * 0.5;
-        // Color weight
-        score *= cfg.colorGroupWeight(group);
-        // Liquidity penalty
-        int reserve = dynamicReserve(state, botId);
-        PlayerSnapshot player = findPlayer(state, botId);
-        int postCash = (player != null ? player.cash() : 0) - st.getIntegerProperty("price");
-        double liquidityRisk = Math.max(0, reserve - postCash) / 100.0;
-        score -= cfg.liquidityPenaltyWeight() * liquidityRisk;
-        return score;
+        return StrongBotStrategy.buyScore(state, botId, propId, cfg);
     }
 
     private double buyThreshold(SessionState state, String propId, StrongBotConfig cfg) {
-        int unowned = unownedCount(state);
-        SpotType st = spotType(propId);
-        if (unowned > 20) return switch (st.streetType.placeType) {
-            case STREET   -> 1.5;
-            case RAILROAD -> 2.75;
-            case UTILITY  -> 2.0;
-            default -> cfg.buyThreshold();
-        };
-        if (unowned > 10) return switch (st.streetType.placeType) {
-            case STREET   -> 2.5;
-            case RAILROAD -> 3.5;
-            case UTILITY  -> 4.5;
-            default -> cfg.buyThreshold();
-        };
-        return cfg.buyThreshold();
+        return StrongBotStrategy.buyThreshold(state, propId, cfg);
     }
 
     private boolean wouldCompleteSet(SessionState state, String botId, String propId) {
-        StreetType group = spotType(propId).streetType;
-        return ownedInSet(state, botId, group) + 1 >= setSize(group);
-    }
-
-    private int ownedInSet(SessionState state, String playerId, StreetType group) {
-        return (int) state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId())
-                        && spotType(p.propertyId()).streetType == group)
-                .count();
-    }
-
-    private static int setSize(StreetType group) {
-        return switch (group.placeType) {
-            case STREET   -> (group == StreetType.BROWN || group == StreetType.DARK_BLUE) ? 2 : 3;
-            case RAILROAD -> 4;
-            case UTILITY  -> 2;
-            default -> 0;
-        };
+        return StrongBotStrategy.wouldCompleteSet(state, botId, propId);
     }
 
     /**
@@ -554,7 +485,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     return true;
                 })
                 // Do not sacrifice complete monopolies — they are most valuable
-                .filter(p -> !botOwnsFullGroup(state, playerId, spotType(p.propertyId()).streetType))
+                .filter(p -> !StrongBotStrategy.botOwnsFullGroup(state, playerId, spotType(p.propertyId()).streetType))
                 .toList();
 
         if (candidates.isEmpty()) return null;
@@ -1082,68 +1013,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      */
     private int dynamicReserve(SessionState state, String playerId) {
         if (!isStrong(playerId)) return MIN_CASH_RESERVE;
-        StrongBotConfig cfg = configFor(playerId);
-
-        int dangerScore = boardDangerScore(state, playerId);
-        int unowned = unownedCount(state);
-
-        int baseReserve = (dangerScore >= cfg.dangerCashReserve() || unowned <= 10)
-                ? cfg.dangerCashReserve() : cfg.minCashReserve();
-
-        int dynamic = cfg.minCashReserve();
-        if (dangerScore > cfg.minCashReserve()) {
-            dynamic += (int) Math.round((dangerScore - cfg.minCashReserve()) * 0.6);
-        }
-        if (unowned <= 10) dynamic += 100;
-        if (unowned <= 5)  dynamic += 100;
-        dynamic += opponentMonopolyCount(state, playerId) * cfg.buildReservePerOpponentMonopoly();
-        if (!completedColorGroups(state, playerId).isEmpty()) dynamic += cfg.postMonopolyCashBuffer();
-
-        int raw = Math.max(baseReserve, dynamic);
-        int discount = (int) Math.round(Math.max(0, raw - cfg.minCashReserve()) * cfg.mortgageTolerance());
-        return Math.max(cfg.minCashReserve(), raw - discount);
-    }
-
-    /** Sum of current rents from opponent-owned built properties — proxy for "board danger". */
-    private static int boardDangerScore(SessionState state, String playerId) {
-        return state.properties().stream()
-                .filter(p -> p.ownerPlayerId() != null && !p.ownerPlayerId().equals(playerId))
-                .filter(p -> p.houseCount() > 0 || p.hotelCount() > 0)
-                .mapToInt(p -> {
-                    String rentsStr = SpotType.valueOf(p.propertyId()).getStringProperty("rents");
-                    if (rentsStr == null || rentsStr.isBlank()) return 0;
-                    String[] rents = rentsStr.split(",");
-                    int level = buildingLevel(p);
-                    if (level >= rents.length) return 0;
-                    try { return Integer.parseInt(rents[level].trim()); } catch (Exception e) { return 0; }
-                })
-                .sum();
-    }
-
-    private static int unownedCount(SessionState state) {
-        return (int) state.properties().stream().filter(p -> p.ownerPlayerId() == null).count();
-    }
-
-    private static int opponentMonopolyCount(SessionState state, String playerId) {
-        return state.players().stream()
-                .filter(p -> !p.playerId().equals(playerId) && !p.eliminated() && !p.bankrupt())
-                .mapToInt(p -> completedColorGroupsForPlayer(state, p.playerId()))
-                .sum();
-    }
-
-    private static int completedColorGroupsForPlayer(SessionState state, String playerId) {
-        int count = 0;
-        for (StreetType group : StreetType.values()) {
-            if (group.placeType != PlaceType.STREET) continue;
-            Integer gs = SpotType.getNumberOfSpots(group);
-            if (gs == null || gs == 0) continue;
-            long owned = state.properties().stream()
-                    .filter(p -> playerId.equals(p.ownerPlayerId())
-                            && spotType(p.propertyId()).streetType == group)
-                    .count();
-            if (owned == gs) count++;
-        }
-        return count;
+        return StrongBotStrategy.dynamicReserve(state, playerId, configFor(playerId));
     }
 
     /**
@@ -1152,56 +1022,21 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * NORMAL: unmortgages cheapest mortgaged property in a complete group.
      */
     private boolean tryUnmortgageGreedy(SessionState state, String playerId) {
-        PlayerSnapshot player = findPlayer(state, playerId);
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, playerId);
         if (player == null) return false;
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
 
         PropertyStateSnapshot candidate = state.properties().stream()
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && p.mortgaged())
-                .filter(p -> botOwnsFullGroup(state, playerId, spotType(p.propertyId()).streetType))
-                .filter(p -> player.cash() - unmortgageCost(p.propertyId()) >= reserve)
-                .max(java.util.Comparator.comparingDouble(p -> unmortgageScore(p, state, cfg)))
+                .filter(p -> StrongBotStrategy.botOwnsFullGroup(state, playerId, StrongBotStrategy.spotType(p.propertyId()).streetType))
+                .filter(p -> player.cash() - StrongBotStrategy.unmortgageCost(p.propertyId()) >= reserve)
+                .max(java.util.Comparator.comparingDouble(p -> StrongBotStrategy.unmortgageScore(p, state, cfg)))
                 .orElse(null);
         if (candidate == null) return false;
         CommandResult result = publisher.handle(
                 new ToggleMortgageCommand(sessionId, playerId, candidate.propertyId()));
         return result.accepted();
-    }
-
-    private double unmortgageScore(PropertyStateSnapshot prop, SessionState state, StrongBotConfig cfg) {
-        StreetType group = spotType(prop.propertyId()).streetType;
-        double score = streetStrengthScore(group) * 2.5;
-        String rentsStr = spotType(prop.propertyId()).getStringProperty("rents");
-        if (rentsStr != null && !rentsStr.isBlank()) {
-            try {
-                int baseRent = Integer.parseInt(rentsStr.split(",")[0].trim());
-                score += baseRent / 20.0;
-            } catch (Exception ignored) {}
-        }
-        if (botOwnsFullGroup(state, prop.ownerPlayerId(), group)) score += 12.0 + cfg.developmentBias();
-        if (group.placeType == PlaceType.RAILROAD) score += 2.0;
-        if (group.placeType == PlaceType.UTILITY)  score -= 1.0;
-        if (unownedCount(state) > 10) score -= 2.0;
-        score *= cfg.unmortgageAggression();
-        score *= cfg.mortgageRecoveryPriority();
-        score *= cfg.colorGroupWeight(group);
-        return score;
-    }
-
-    private static boolean botOwnsFullGroup(SessionState state, String playerId, StreetType group) {
-        Integer groupSize = SpotType.getNumberOfSpots(group);
-        if (groupSize == null || groupSize == 0) return false;
-        long owned = state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId())
-                        && spotType(p.propertyId()).streetType == group)
-                .count();
-        return owned == groupSize;
-    }
-
-    private static int unmortgageCost(String propertyId) {
-        int mortgageValue = SpotType.valueOf(propertyId).getIntegerProperty("price") / 2;
-        return mortgageValue + (int) (mortgageValue * 0.1);
     }
 
     /**
@@ -1211,7 +1046,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * NORMAL/EASY: simple even-build greedy.
      */
     private boolean tryBuildGreedy(SessionState state, String playerId) {
-        PlayerSnapshot player = findPlayer(state, playerId);
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, playerId);
         if (player == null) return false;
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
@@ -1219,128 +1054,28 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         StreetType bestGroup = null;
         double bestScore = Double.NEGATIVE_INFINITY;
 
-        for (StreetType group : completedColorGroups(state, playerId)) {
-            // Check buildRoundCap
-            int maxLevel = maxLevelInGroup(state, playerId, group);
+        for (StreetType group : StrongBotStrategy.completedColorGroups(state, playerId)) {
+            int maxLevel = StrongBotStrategy.maxLevelInGroup(state, playerId, group);
             if (maxLevel >= cfg.buildRoundCap()) continue;
-            // Affordable check: sum of house prices for all group props at min level
-            if (!canAffordBuildRound(state, player, group, reserve)) continue;
-            double score = buildGroupScore(state, playerId, group, cfg);
+            if (!StrongBotStrategy.canAffordBuildRound(state, player, group, reserve)) continue;
+            double score = StrongBotStrategy.buildGroupScore(state, playerId, group, cfg);
             if (score > bestScore) { bestScore = score; bestGroup = group; }
         }
 
         if (bestGroup == null) return false;
-        PropertyStateSnapshot target = findBuildTarget(state, playerId, bestGroup);
+        PropertyStateSnapshot target = StrongBotStrategy.findBuildTarget(state, playerId, bestGroup);
         if (target == null) return false;
         CommandResult result = publisher.handle(
                 new BuyBuildingRoundCommand(sessionId, playerId, target.propertyId()));
         return result.accepted();
     }
 
-    private boolean canAffordBuildRound(SessionState state, PlayerSnapshot player, StreetType group, int reserve) {
-        int roundCost = state.properties().stream()
-                .filter(p -> player.playerId().equals(p.ownerPlayerId())
-                        && !p.mortgaged()
-                        && spotType(p.propertyId()).streetType == group)
-                .mapToInt(p -> spotType(p.propertyId()).getIntegerProperty("housePrice"))
-                .sum();
-        return roundCost > 0 && player.cash() - roundCost >= reserve;
-    }
-
-    private double buildGroupScore(SessionState state, String playerId, StreetType group, StrongBotConfig cfg) {
-        double score = streetStrengthScore(group) * 3.0;
-        // expected rent growth / cost
-        int roundCost = state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId()) && !p.mortgaged()
-                        && spotType(p.propertyId()).streetType == group)
-                .mapToInt(p -> spotType(p.propertyId()).getIntegerProperty("housePrice"))
-                .sum();
-        if (roundCost > 0) {
-            int rentGrowth = state.properties().stream()
-                    .filter(p -> playerId.equals(p.ownerPlayerId()) && !p.mortgaged()
-                            && spotType(p.propertyId()).streetType == group)
-                    .mapToInt(p -> {
-                        String rentsStr = spotType(p.propertyId()).getStringProperty("rents");
-                        if (rentsStr == null) return 0;
-                        String[] rents = rentsStr.split(",");
-                        int level = buildingLevel(p);
-                        int next = Math.min(5, level + 1);
-                        try {
-                            int cur  = level < rents.length ? Integer.parseInt(rents[level].trim()) : 0;
-                            int nxt  = next < rents.length ? Integer.parseInt(rents[next].trim()) : 0;
-                            return nxt - cur;
-                        } catch (Exception e) { return 0; }
-                    })
-                    .sum();
-            score += rentGrowth / (double) roundCost * 100.0;
-            score += 100.0 / roundCost; // cheap-house bonus
-        }
-        score += cfg.developmentBias();
-        double avgLevel = state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
-                .mapToInt(PureDomainBotDriver::buildingLevel)
-                .average().orElse(0);
-        if (cfg.prioritizeThreeHouses() && avgLevel < 3.0) score += 4.0;
-        boolean wouldPushToHotel = state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
-                .anyMatch(p -> buildingLevel(p) >= 4);
-        if (wouldPushToHotel) score -= cfg.hotelAversion();
-        if (unownedCount(state) > 8) score -= 2.0;
-        if (boardDangerScore(state, playerId) >= cfg.dangerCashReserve()) score -= 6.0;
-        score *= cfg.houseBuildAggression();
-        score *= cfg.colorGroupWeight(group);
-        return score;
-    }
-
-    private int maxLevelInGroup(SessionState state, String playerId, StreetType group) {
-        return state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
-                .mapToInt(PureDomainBotDriver::buildingLevel)
-                .max().orElse(0);
-    }
-
-    private PropertyStateSnapshot findBuildTarget(SessionState state, String playerId, StreetType group) {
-        List<PropertyStateSnapshot> groupProps = state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId()) && !p.mortgaged()
-                        && spotType(p.propertyId()).streetType == group
-                        && p.hotelCount() == 0)
-                .toList();
-        int minLevel = groupProps.stream().mapToInt(PropertyStateSnapshot::houseCount).min().orElse(0);
-        return groupProps.stream().filter(p -> p.houseCount() == minLevel).findFirst().orElse(null);
-    }
-
-    private static double streetStrengthScore(StreetType group) {
-        return switch (group) {
-            case ORANGE, RED -> 5;
-            case YELLOW, LIGHT_BLUE -> 4;
-            case GREEN, PURPLE -> 3;
-            case DARK_BLUE, BROWN -> 2;
-            default -> 1;
-        };
-    }
-
-    private static Set<StreetType> completedColorGroups(SessionState state, String playerId) {
-        Set<StreetType> result = new HashSet<>();
-        for (StreetType group : StreetType.values()) {
-            if (group.placeType != PlaceType.STREET) continue;
-            Integer groupSize = SpotType.getNumberOfSpots(group);
-            if (groupSize == null || groupSize == 0) continue;
-            long owned = state.properties().stream()
-                    .filter(p -> playerId.equals(p.ownerPlayerId())
-                            && !p.mortgaged()
-                            && spotType(p.propertyId()).streetType == group)
-                    .count();
-            if (owned == groupSize) result.add(group);
-        }
-        return result;
-    }
-
     private static SpotType spotType(String propertyId) {
-        return SpotType.valueOf(propertyId);
+        return StrongBotStrategy.spotType(propertyId);
     }
 
     private static int buildingLevel(PropertyStateSnapshot p) {
-        return p.hotelCount() > 0 ? 5 : p.houseCount();
+        return StrongBotStrategy.buildingLevel(p);
     }
 
     /** Mirrors DomainDebtRemediationGateway even-selling rule: (level-1) >= (maxRest-1), i.e. level >= maxRest. */
