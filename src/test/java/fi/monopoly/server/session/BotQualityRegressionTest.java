@@ -23,8 +23,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class BotQualityRegressionTest {
 
     private static final long SEED = 999_001L;
-    private static final int GAMES = 40;
-    private static final double LENIENCY = 0.08; // 8 pp tolerance for stochastic variance
+    // 100 games per pair: variance is ~5pp at 50% win rate, so 12pp leniency catches
+    // real regressions while tolerating bad luck. Runs in ~25s on Render's build server.
+    private static final int GAMES = 100;
+    private static final double LENIENCY = 0.12; // 12 pp tolerance for stochastic variance
 
     @Test
     @Timeout(value = 60, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
@@ -81,7 +83,7 @@ class BotQualityRegressionTest {
                 new BotTournament.Entry("sixPlayer", StrongBotConfig.sixPlayer()),
                 new BotTournament.Entry("defaults",  StrongBotConfig.defaults()),
                 new BotTournament.Entry("cautious",  StrongBotConfig.cautious())
-        ), 120, 3, SEED + 3);
+        ), 300, 3, SEED + 3);
 
         double sixPlayerWin = winRate(s, "sixPlayer");
         double cautiousWin  = winRate(s, "cautious");
