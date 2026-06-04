@@ -7,13 +7,11 @@ INFRASTRUCTURE
       startup. SessionState is already an immutable record with Jackson annotations,
       so serialisation cost is low. Required before any production deployment.
 
-[High] Player authorisation — any HTTP caller can submit commands as any playerId.
-      Issue a per-seat token (UUID) when the session is created (included in the
-      POST /sessions response). The command endpoint validates the token before
-      dispatching. Design decision needed: per-seat vs. per-session token model.
+[Done] Player authorisation — implemented via per-seat playerToken issued at
+      lobby join / session creation. SessionHttpServer validates the token before
+      dispatching every command. Bot-only sessions bypass token checks.
 
-[Medium] Human-only E2E test — PureDomainGameSimulationTest covers bot-vs-bot games.
-         Add a test that drives a full game through the HTTP API using only explicit
-         commands (no bots) to validate the complete request/response lifecycle and
-         catch transport-level regressions.
+[Done] Human-only E2E test — HttpApiE2EGameTest.threeHumanPlayerGameProgressesViaHttpApi
+       drives a full 3-player game through the HTTP API with only explicit commands
+       (no bots). Covers the complete request/response lifecycle.
 
