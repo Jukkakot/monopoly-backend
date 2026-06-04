@@ -5,6 +5,7 @@ import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
 import fi.monopoly.domain.session.SeatState;
 import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.types.SpotType;
 import lombok.RequiredArgsConstructor;
 
 import java.util.ArrayList;
@@ -16,10 +17,10 @@ import java.util.stream.Collectors;
 /**
  * Pure domain implementation of {@link AuctionGateway} — no Processing runtime objects.
  *
- * <p>Bot bidding strategy is simplified: max bid equals the bidder's full cash balance.
- * This differs from {@code LegacyAuctionGateway} which applies bot-specific reserves and
- * property-valuation multipliers. The simplified strategy is functionally correct
- * (prevents over-spending) and will be refined when bot AI is extracted to domain layer.</p>
+ * <p>Bot bidding strategy: bots never bid more than the property list price (capped at
+ * list price) and always keep a cash reserve ({@value #AUCTION_CASH_RESERVE} €).
+ * The bid increment is spread over the available headroom so bots don't jump straight
+ * to their maximum — they bid roughly ⅓ of the remaining headroom each step.</p>
  */
 @RequiredArgsConstructor
 public final class DomainAuctionGateway implements AuctionGateway {
@@ -37,6 +38,8 @@ public final class DomainAuctionGateway implements AuctionGateway {
 
     @Override
     public int maxBidFor(String bidderId, String propertyId) {
+        // Returns full cash — used for bid validation so human players can bid
+        // whatever they can afford. Bots apply their own ceiling in nextBidAmount.
         return store.get().players().stream()
                 .filter(p -> bidderId.equals(p.playerId()))
                 .mapToInt(PlayerSnapshot::cash)
@@ -46,17 +49,30 @@ public final class DomainAuctionGateway implements AuctionGateway {
 
     @Override
     public int nextBidAmount(String bidderId, String propertyId, int currentBid) {
-        int maxBid = maxBidFor(bidderId, propertyId);
+        int cash = maxBidFor(bidderId, propertyId);
         int minBid = currentBid == 0 ? OPENING_BID : currentBid + BID_INCREMENT;
-        if (maxBid < minBid) {
+        if (cash < minBid) {
             return 0;
         }
-        if (maxBid <= minBid) {
-            return minBid;
+        // Bots never auto-bid above list price — paying more than list price for an
+        // unbuilt property is a bad deal. Cap applies only to bot auto-bidding here.
+        int listPrice = listPriceOf(propertyId);
+        int botMax = listPrice > 0 ? Math.min(cash, listPrice) : cash;
+        if (botMax < minBid) {
+            return 0;  // bot passes — current bid already exceeds what it's willing to pay
         }
-        int headroom = maxBid - minBid;
-        int extraStep = Math.max(BID_INCREMENT, roundDown(Math.max(BID_INCREMENT, headroom / 3)));
-        return Math.min(maxBid, minBid + extraStep);
+        // Bid ~⅓ of the remaining headroom so bots don't immediately jump to their ceiling.
+        int headroom = botMax - minBid;
+        int extraStep = Math.max(BID_INCREMENT, roundDown(headroom / 3));
+        return Math.min(botMax, minBid + extraStep);
+    }
+
+    private static int listPriceOf(String propertyId) {
+        try {
+            return SpotType.valueOf(propertyId).getIntegerProperty("price");
+        } catch (IllegalArgumentException e) {
+            return 0;
+        }
     }
 
     @Override

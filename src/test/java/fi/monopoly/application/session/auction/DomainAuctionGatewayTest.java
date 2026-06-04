@@ -66,6 +66,8 @@ class DomainAuctionGatewayTest {
 
     @Test
     void maxBidForReturnsCashAmount() {
+        // maxBidFor returns full cash for bid validation — bots apply the list-price
+        // ceiling only inside nextBidAmount so human players aren't restricted.
         InMemorySessionState store = storeWithPlayers(player(PLAYER_1, 0, 750));
         DomainAuctionGateway gateway = new DomainAuctionGateway(store);
 
@@ -97,9 +99,22 @@ class DomainAuctionGatewayTest {
 
         int next = gateway.nextBidAmount(PLAYER_1, PROPERTY_ID, 0);
 
+        // B1 list price = 60; bot should not auto-bid above it
         assertTrue(next >= AuctionGateway.OPENING_BID);
-        assertTrue(next <= 500);
+        assertTrue(next <= 60, "bot should not auto-bid above list price (60) for B1");
         assertEquals(0, next % AuctionGateway.BID_INCREMENT, "bid must be multiple of BID_INCREMENT");
+    }
+
+    @Test
+    void nextBidAmountReturnsZeroWhenCurrentBidAlreadyAtListPrice() {
+        // Bot won't auto-bid above the property's list price — returns 0 (pass)
+        InMemorySessionState store = storeWithPlayers(player(PLAYER_1, 0, 500));
+        DomainAuctionGateway gateway = new DomainAuctionGateway(store);
+
+        // B1 list price = 60; current bid is already 60, so next minimum is 70 > list price
+        int next = gateway.nextBidAmount(PLAYER_1, PROPERTY_ID, 60);
+
+        assertEquals(0, next, "bot should pass when minimum bid exceeds list price");
     }
 
     @Test
