@@ -692,8 +692,8 @@ public final class SessionRegistry {
         // currently overloaded — not because of a past spike that has since subsided.
         double cpu = readCpuLoad();
         if (cpu >= 0 && cpu > CPU_LOAD_THRESHOLD) {
-            log.warn("cpu load too high: smoothed={:.1f}% threshold={:.0f}% sessions={}",
-                    cpu * 100, CPU_LOAD_THRESHOLD * 100, count);
+            log.warn("cpu load too high: cpu={}% threshold={}% sessions={}",
+                    String.format("%.1f", cpu * 100), String.format("%.0f", CPU_LOAD_THRESHOLD * 100), count);
             throw new SessionLimitExceededException("SERVER_BUSY",
                     "Server is currently under high load, please try again later");
         }

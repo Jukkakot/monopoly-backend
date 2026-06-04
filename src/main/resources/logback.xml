@@ -29,6 +29,10 @@
     </if>
 
     <appender name="AXIOM" class="fi.monopoly.logging.AxiomAppender">
+        <!-- Only ship INFO+ to Axiom — DEBUG/TRACE stay local -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
         <token>${AXIOM_TOKEN:-}</token>
         <dataset>${AXIOM_DATASET:-}</dataset>
         <env>${APP_ENV}</env>
