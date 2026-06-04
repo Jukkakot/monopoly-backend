@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 /**
  * Static helpers for appending {@link GameEventEntry} records to {@link SessionState}.
@@ -31,10 +32,15 @@ public final class GameEventHelper {
         List<GameEventEntry> log = new ArrayList<>(s.eventLog());
         long id = s.nextEventId();
         long now = System.currentTimeMillis();
-        for (GameEventEntry e : newEvents) {
-            GameEventEntry entry = new GameEventEntry(id++, now, e.type(), e.playerIds(), e.data());
-            logger.debug("[event] id={} type={} players={} data={}", entry.id(), entry.type(), entry.playerIds(), entry.data());
-            log.add(entry);
+        MDC.put("audit", "true");
+        try {
+            for (GameEventEntry e : newEvents) {
+                GameEventEntry entry = new GameEventEntry(id++, now, e.type(), e.playerIds(), e.data());
+                logger.debug("[event] id={} type={} players={} data={}", entry.id(), entry.type(), entry.playerIds(), entry.data());
+                log.add(entry);
+            }
+        } finally {
+            MDC.remove("audit");
         }
         if (log.size() > MAX_EVENT_LOG) {
             log = new ArrayList<>(log.subList(log.size() - MAX_EVENT_LOG, log.size()));

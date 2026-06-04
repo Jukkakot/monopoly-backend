@@ -66,9 +66,7 @@ public class AxiomAppender extends AppenderBase<ILoggingEvent> {
 
         Map<String, String> mdc = event.getMDCPropertyMap();
         if (mdc != null) {
-            if (mdc.containsKey("session")) entry.put("session", mdc.get("session"));
-            if (mdc.containsKey("actor")) entry.put("actor", mdc.get("actor"));
-            if (mdc.containsKey("phase")) entry.put("phase", mdc.get("phase"));
+            mdc.forEach(entry::put);
         }
 
         IThrowableProxy t = event.getThrowableProxy();
