@@ -37,12 +37,13 @@ public final class SessionRegistry {
     private static final int MAX_SESSIONS =
             Integer.getInteger("monopoly.session.max", 50);
     /**
-     * Reject new sessions when the smoothed CPU load exceeds this fraction (0.0–1.0).
-     * Raised from 0.75 → 0.90 because bot sessions now pause when no viewer is connected,
-     * making them much cheaper to maintain. Configurable via -Dmonopoly.session.cpu.threshold=N.
+     * Reject new sessions when the instantaneous CPU load exceeds this fraction (0.0–1.0).
+     * Raised 0.75 → 0.90 → 0.95; check uses the instant reading so a past spike does not
+     * continue blocking new sessions once the server has recovered.
+     * Configurable via -Dmonopoly.session.cpu.threshold=N.
      */
     private static final double CPU_LOAD_THRESHOLD =
-            Double.parseDouble(System.getProperty("monopoly.session.cpu.threshold", "0.90"));
+            Double.parseDouble(System.getProperty("monopoly.session.cpu.threshold", "0.95"));
     private static final long LOAD_LOG_INTERVAL_SECONDS = 30L;
 
     public record CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken) {}
@@ -687,9 +688,9 @@ public final class SessionRegistry {
             throw new SessionLimitExceededException("MAX_SESSIONS_REACHED",
                     "Server has reached the maximum number of concurrent sessions (" + MAX_SESSIONS + ")");
         }
-        // Use smoothed EWMA to avoid rejecting on transient spikes (e.g. GC, test bursts).
-        // Fall back to instant reading only before the first scheduled log sample.
-        double cpu = smoothedCpu >= 0 ? smoothedCpu : readCpuLoad();
+        // Use the instant CPU reading so sessions are rejected only when the server is
+        // currently overloaded — not because of a past spike that has since subsided.
+        double cpu = readCpuLoad();
         if (cpu >= 0 && cpu > CPU_LOAD_THRESHOLD) {
             log.warn("cpu load too high: smoothed={:.1f}% threshold={:.0f}% sessions={}",
                     cpu * 100, CPU_LOAD_THRESHOLD * 100, count);
