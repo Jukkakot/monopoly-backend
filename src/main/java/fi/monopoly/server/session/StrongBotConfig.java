@@ -118,25 +118,29 @@ public record StrongBotConfig(
     // -------------------------------------------------------------------------
 
     public static StrongBotConfig defaults() {
+        // Values calibrated by ablation study (25-config × 30 games/pair tournament):
+        // dangerCash↓ (+6.2pp), railroadWeight↓ (+5.1pp), liquidityPenalty↓ (+3.2pp),
+        // buildReservePerMonopoly↓ (+2.6pp) were the strongest single improvements.
+        // buildAggression↑ is confirmed good, lower is a clear loser (−2.4pp).
         return new StrongBotConfig(
-                5.5,   // buyThreshold — slightly more aggressive buying
-                200,   // minCashReserve
-                400,   // dangerCashReserve
+                5.5,   // buyThreshold
+                175,   // minCashReserve (slightly lower — cash is better spent on properties)
+                300,   // dangerCashReserve (ablation: 400 → 300 was strongest single gain)
                 9.0,   // completionWeight
                 3.0,   // progressWeight
-                6.0,   // opponentBlockWeight
-                3.5,   // railroadWeight — railroads underrated
-                0.3,   // utilityWeight — utilities are weak
-                3.0,   // liquidityPenaltyWeight
+                6.5,   // opponentBlockWeight (ablation: blockWeight+25% = slight winner)
+                2.6,   // railroadWeight (ablation: lower railroad weight wins; 3.5 was too high)
+                0.3,   // utilityWeight
+                2.25,  // liquidityPenaltyWeight (ablation: lower penalty = less overly cautious)
                 true,  // buyToBlockOpponent (frozen)
                 true,  // prioritizeThreeHouses (frozen)
                 true,  // preferJailLateGame (frozen)
-                1.0,   // houseBuildAggression
-                5.5,   // hotelAversion — 3 houses is the sweet spot
+                1.1,   // houseBuildAggression (ablation confirms: should not decrease)
+                6.5,   // hotelAversion (ablation: hotelAversion+25% wins → stop at 3-4 houses)
                 2.0,   // developmentBias
-                0.15,  // mortgageTolerance
+                0.18,  // mortgageTolerance
                 1.0,   // unmortgageAggression
-                80,    // buildReservePerOpponentMonopoly
+                60,    // buildReservePerOpponentMonopoly (ablation: 80 → 60 wins)
                 1.0,   // auctionAggression
                 15,    // tradeFairnessTolerance
                 220,   // tradeSetCompletionWeight
