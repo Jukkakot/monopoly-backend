@@ -334,4 +334,62 @@ final class StrongBotStrategy {
                 .filter(p -> playerId.equals(p.playerId()))
                 .findFirst().orElse(null);
     }
+
+    // -------------------------------------------------------------------------
+    // Debt resolution helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Priority for mortgaging a property during debt resolution.
+     * Lower = sacrifice first (least strategically valuable).
+     *
+     * <ol>
+     *   <li>1 — Utility (worst investment, no group synergy)</li>
+     *   <li>2 — Single railroad owned (no synergy yet)</li>
+     *   <li>3 — Isolated street (only 1 in the group owned)</li>
+     *   <li>4 — Partial railroad set (2+ owned, some synergy)</li>
+     *   <li>5 — Partial street group (not near completion)</li>
+     *   <li>6 — Near-monopoly street (bot owns n-1 of group — very costly to lose)</li>
+     *   <li>9 — Complete monopoly (absolute last resort)</li>
+     * </ol>
+     */
+    static int debtMortgagePriority(SessionState state, String playerId, PropertyStateSnapshot prop) {
+        SpotType st = spotType(prop.propertyId());
+        StreetType group = st.streetType;
+
+        if (group.placeType == PlaceType.UTILITY) return 1;
+
+        if (group.placeType == PlaceType.RAILROAD) {
+            return ownedInSet(state, playerId, group) <= 1 ? 2 : 4;
+        }
+
+        int owned = ownedInSet(state, playerId, group);
+        int gs    = setSize(group);
+        if (owned == gs)         return 9; // full monopoly — last resort
+        if (owned == gs - 1)     return 6; // near-monopoly — keep if at all possible
+        if (owned == 1)          return 3; // isolated — OK to sacrifice
+        return 5;                          // partial group
+    }
+
+    /**
+     * Score for which building to sell first during debt resolution.
+     * Lower = sell first (least valuable building to keep).
+     *
+     * Computed as rent-loss-per-sell-value — the lower this ratio, the less
+     * it hurts to sell that building compared to the cash it frees up.
+     */
+    static double debtBuildingSellScore(PropertyStateSnapshot prop) {
+        String rentsStr = spotType(prop.propertyId()).getStringProperty("rents");
+        if (rentsStr == null || rentsStr.isBlank()) return 0;
+        String[] rents = rentsStr.split(",");
+        int level = buildingLevel(prop);
+        if (level < 1 || level >= rents.length) return 0;
+        try {
+            int rentCur  = Integer.parseInt(rents[level].trim());
+            int rentPrev = level > 0 ? Integer.parseInt(rents[level - 1].trim()) : 0;
+            int rentLoss = rentCur - rentPrev;
+            int sellValue = spotType(prop.propertyId()).getIntegerProperty("housePrice") / 2;
+            return sellValue > 0 ? (double) rentLoss / sellValue : 0;
+        } catch (Exception e) { return 0; }
+    }
 }

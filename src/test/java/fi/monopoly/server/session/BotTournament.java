@@ -517,20 +517,25 @@ public final class BotTournament {
             return service.handle(new PayDebtCommand(state.sessionId(), debtorId, debt.debtId()));
         }
         if (allowed.contains(DebtAction.SELL_BUILDING)) {
+            // Sell building with lowest rent-loss-per-sell-value first (least costly)
             PropertyStateSnapshot best = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
                     .filter(p -> evenSellEligible(state, p))
-                    .max(Comparator.comparingInt(BotTournament::buildingLevel))
+                    .min(Comparator.comparingDouble(StrongBotStrategy::debtBuildingSellScore)
+                            .thenComparingInt(p -> -buildingLevel(p)))
                     .orElse(null);
             if (best != null) return service.handle(new SellBuildingForDebtCommand(
                     state.sessionId(), debtorId, debt.debtId(), best.propertyId(), 1));
         }
         if (allowed.contains(DebtAction.MORTGAGE_PROPERTY)) {
-            PropertyStateSnapshot unmortgaged = state.properties().stream()
+            // Mortgage in strategic priority: utilities first, monopolies last
+            PropertyStateSnapshot toMortgage = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && !p.mortgaged())
-                    .findFirst().orElse(null);
-            if (unmortgaged != null) return service.handle(new MortgagePropertyForDebtCommand(
-                    state.sessionId(), debtorId, debt.debtId(), unmortgaged.propertyId()));
+                    .min(Comparator.comparingInt(
+                            p -> StrongBotStrategy.debtMortgagePriority(state, debtorId, p)))
+                    .orElse(null);
+            if (toMortgage != null) return service.handle(new MortgagePropertyForDebtCommand(
+                    state.sessionId(), debtorId, debt.debtId(), toMortgage.propertyId()));
         }
         return service.handle(new DeclareBankruptcyCommand(state.sessionId(), debtorId, debt.debtId()));
     }

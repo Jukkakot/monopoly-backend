@@ -515,22 +515,27 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
         if (allowed.contains(DebtAction.SELL_BUILDING)) {
-            // Pick the eligible property with most buildings (even-selling rule: level >= maxRest)
+            // Sell the building where rent-loss-per-sell-value is lowest (least costly to remove).
+            // Among tied scores, prefer the property with the most buildings (even-sell rule).
             var buildingProp = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
                     .filter(p -> evenSellEligible(state, p))
-                    .max(java.util.Comparator.comparingInt(PureDomainBotDriver::buildingLevel));
+                    .min(java.util.Comparator
+                            .comparingDouble(StrongBotStrategy::debtBuildingSellScore)
+                            .thenComparingInt(p -> -buildingLevel(p)));
             if (buildingProp.isPresent()) {
                 publisher.handle(new SellBuildingForDebtCommand(sessionId, debtorId, debt.debtId(), buildingProp.get().propertyId(), 1));
                 return;
             }
         }
         if (allowed.contains(DebtAction.MORTGAGE_PROPERTY)) {
-            var unmortgaged = state.properties().stream()
+            // Mortgage in strategic priority order: utilities first, monopolies last.
+            var toMortgage = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && !p.mortgaged())
-                    .findFirst();
-            if (unmortgaged.isPresent()) {
-                publisher.handle(new MortgagePropertyForDebtCommand(sessionId, debtorId, debt.debtId(), unmortgaged.get().propertyId()));
+                    .min(java.util.Comparator.comparingInt(
+                            p -> StrongBotStrategy.debtMortgagePriority(state, debtorId, p)));
+            if (toMortgage.isPresent()) {
+                publisher.handle(new MortgagePropertyForDebtCommand(sessionId, debtorId, debt.debtId(), toMortgage.get().propertyId()));
                 return;
             }
         }
