@@ -12,9 +12,12 @@ import lombok.extern.slf4j.Slf4j;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -92,6 +95,8 @@ public final class SessionRegistry {
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
                                List<BotDifficulty> difficulties) {
         checkCapacity();
+        validateNoDuplicateNames(names);
+        validateNoDuplicateColors(colors);
         String sessionId = SessionIdGenerator.generate();
         boolean allBots = !seatKinds.isEmpty() && seatKinds.stream().allMatch(k -> k == SeatKind.BOT);
         String hostToken = allBots ? null : UUID.randomUUID().toString();
@@ -681,6 +686,26 @@ public final class SessionRegistry {
      *       (configurable via {@code -Dmonopoly.session.cpu.threshold=0.75}).</li>
      * </ol>
      */
+    private static void validateNoDuplicateNames(List<String> names) {
+        Set<String> seen = new HashSet<>();
+        for (String name : names) {
+            if (name == null) continue;
+            if (!seen.add(name.trim().toLowerCase(Locale.ROOT))) {
+                throw new IllegalArgumentException("DUPLICATE_PLAYER_NAME");
+            }
+        }
+    }
+
+    private static void validateNoDuplicateColors(List<String> colors) {
+        Set<String> seen = new HashSet<>();
+        for (String color : colors) {
+            if (color == null || color.isBlank()) continue;
+            if (!seen.add(color.trim().toUpperCase(Locale.ROOT))) {
+                throw new IllegalArgumentException("DUPLICATE_PLAYER_COLOR");
+            }
+        }
+    }
+
     private void checkCapacity() {
         int count = sessions.size();
         if (count >= MAX_SESSIONS) {

@@ -91,6 +91,42 @@ class SessionRegistryHttpIntegrationTest {
         assertEquals(400, response.statusCode());
     }
 
+    @Test
+    void createSessionWithDuplicateNamesReturns400() throws Exception {
+        HttpResponse<String> response = post("/sessions",
+                "{\"names\":[\"Eka\",\"Eka\"],\"colors\":[\"#E63946\",\"#2A9D8F\"]}");
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("DUPLICATE_PLAYER_NAME"),
+                "Error body should contain DUPLICATE_PLAYER_NAME, got: " + response.body());
+    }
+
+    @Test
+    void createSessionWithDuplicateNamesCaseInsensitiveReturns400() throws Exception {
+        HttpResponse<String> response = post("/sessions",
+                "{\"names\":[\"alice\",\"Alice\"],\"colors\":[\"#E63946\",\"#2A9D8F\"]}");
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("DUPLICATE_PLAYER_NAME"),
+                "Error body should contain DUPLICATE_PLAYER_NAME, got: " + response.body());
+    }
+
+    @Test
+    void createSessionWithDuplicateColorsReturns400() throws Exception {
+        HttpResponse<String> response = post("/sessions",
+                "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#E63946\",\"#E63946\"]}");
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("DUPLICATE_PLAYER_COLOR"),
+                "Error body should contain DUPLICATE_PLAYER_COLOR, got: " + response.body());
+    }
+
+    @Test
+    void createSessionWithDuplicateColorsCaseInsensitiveReturns400() throws Exception {
+        HttpResponse<String> response = post("/sessions",
+                "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#e63946\",\"#E63946\"]}");
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("DUPLICATE_PLAYER_COLOR"),
+                "Error body should contain DUPLICATE_PLAYER_COLOR, got: " + response.body());
+    }
+
     // -------------------------------------------------------------------------
     // GET /sessions
     // -------------------------------------------------------------------------
