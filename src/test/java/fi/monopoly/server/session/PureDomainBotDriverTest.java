@@ -719,6 +719,65 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Trade: bot does not repeat the same declined offer
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void strongBotDoesNotRepeatSameDeclinedTradeOffer() throws InterruptedException {
+        CopyOnWriteArrayList<SessionCommand> commands = new CopyOnWriteArrayList<>();
+        CountDownLatch anyCommand = new CountDownLatch(1);
+
+        PropertyStateSnapshot b1 = new PropertyStateSnapshot("B1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", HUMAN_PLAYER, false, 0, 0);
+
+        SessionState baseState = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(b1, b2));
+
+        // Trade where bot offered 60€ for B2 and human has to decide (but hasn't yet)
+        // decisionRequiredFromPlayerId = HUMAN → needsBotAction = false, so driver won't act on it
+        TradeOfferState declinedOffer = new TradeOfferState(
+                BOT_PLAYER, HUMAN_PLAYER,
+                new TradeSelectionState(60, List.of(), 0),
+                new TradeSelectionState(0, List.of("B2"), 0));
+        TradeState pendingHumanDecision = new TradeState(
+                "trade-1", BOT_PLAYER, HUMAN_PLAYER, TradeStatus.SUBMITTED,
+                declinedOffer, null, true, HUMAN_PLAYER, BOT_PLAYER, List.of());
+        SessionState stateWithTrade = baseState.toBuilder().tradeState(pendingHumanDecision).build();
+
+        SessionCommandPort port = new SessionCommandPort() {
+            @Override
+            public CommandResult handle(SessionCommand command) {
+                commands.add(command);
+                anyCommand.countDown();
+                SessionState over = baseState.toBuilder().status(SessionStatus.GAME_OVER).build();
+                return new CommandResult(true, over, List.of(), List.of(), List.of());
+            }
+            @Override
+            public SessionState currentState() { return baseState; }
+        };
+
+        SessionCommandPublisher publisher = new SessionCommandPublisher(port);
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, baseState,
+                Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+
+        // Inject trade-pending snapshot (driver won't act — human decides, not bot)
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(stateWithTrade, true));
+        // Inject trade-gone snapshot → decline is detected, lastDeclinedOfferAmount[HUMAN][B2]=60
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(baseState, true));
+
+        assertTrue(anyCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch some command after decline");
+
+        // Bot's max affordable offer for B2 is min(60, cash-reserve) = 60.
+        // Since 60 <= lastDeclined(60), re-proposing is blocked → no OpenTradeCommand.
+        assertFalse(commands.stream().anyMatch(c -> c instanceof OpenTradeCommand),
+                "Bot must not re-propose same trade when it cannot beat the declined offer; got: " + commands);
+        assertTrue(commands.stream().anyMatch(c -> c instanceof EndTurnCommand),
+                "Bot should fall through to EndTurn instead; got: " + commands);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

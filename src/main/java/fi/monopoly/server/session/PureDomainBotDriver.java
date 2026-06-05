@@ -72,6 +72,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private volatile TradeState lastObservedTrade = null;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
             = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * Last money amount the bot offered per (partnerId -> propertyId) that was declined.
+     * Next offer for the same property+partner must strictly exceed this amount.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, Integer>>
+            lastDeclinedOfferAmount = new java.util.concurrent.ConcurrentHashMap<>();
 
     private PureDomainBotDriver(
             SessionCommandPublisher publisher,
@@ -247,6 +253,23 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             tradeDeclinesByPartnerId.merge(partner, 1, Integer::sum);
             log.debug("Bot trade declined by {} (cumulative: {})", partner,
                     tradeDeclinesByPartnerId.get(partner));
+            // Record what was offered so we require a strictly better offer next time
+            TradeOfferState lastOffer = prevTrade.currentOffer();
+            if (lastOffer != null) {
+                boolean botIsProposer = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId());
+                TradeSelectionState botWanted = botIsProposer
+                        ? lastOffer.requestedFromRecipient() : lastOffer.offeredToRecipient();
+                TradeSelectionState botGave = botIsProposer
+                        ? lastOffer.offeredToRecipient() : lastOffer.requestedFromRecipient();
+                if (!botWanted.propertyIds().isEmpty()) {
+                    String propId = botWanted.propertyIds().get(0);
+                    lastDeclinedOfferAmount
+                            .computeIfAbsent(partner, k -> new java.util.concurrent.ConcurrentHashMap<>())
+                            .put(propId, botGave.moneyAmount());
+                    log.debug("Recorded declined offer: partner={} prop={} amount={}",
+                            partner, propId, botGave.moneyAmount());
+                }
+            }
         }
         if (!needsBotAction(state)) {
             return;
@@ -670,11 +693,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Step 2: offer money (full price of the target property, capped by available cash)
         if (myGive.moneyAmount() == 0) {
             String targetPropId = myRequest.propertyIds().get(0);
+            String partnerId = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
             int price = SpotType.valueOf(targetPropId).getIntegerProperty("price");
             PlayerSnapshot bot = findPlayer(state, botId);
             int available = bot != null ? Math.max(0, bot.cash() - dynamicReserve(state, botId)) : 0;
             int offerAmount = Math.min(price, available);
-            if (offerAmount < 10) {
+            // Must strictly beat the last declined offer for this partner+property
+            int prevDeclined = lastDeclinedOfferAmount
+                    .getOrDefault(partnerId, new java.util.concurrent.ConcurrentHashMap<>())
+                    .getOrDefault(targetPropId, 0);
+            if (offerAmount < 10 || offerAmount <= prevDeclined) {
                 publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
             }
@@ -705,7 +733,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (targetProp == null) continue;
             int price = SpotType.valueOf(targetProp).getIntegerProperty("price");
             int available = Math.max(0, bot.cash() - reserve);
-            if (Math.min(price, available) < 10) continue;
+            int wouldOffer = Math.min(price, available);
+            if (wouldOffer < 10) continue;
+            // Skip if this offer would not beat the last declined offer for this partner+property
+            int prevDeclined = lastDeclinedOfferAmount
+                    .getOrDefault(other.playerId(), new java.util.concurrent.ConcurrentHashMap<>())
+                    .getOrDefault(targetProp, 0);
+            if (wouldOffer <= prevDeclined) continue;
             CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
             return result.accepted();
         }
