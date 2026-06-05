@@ -577,6 +577,51 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Regression: STRONG bot must build counter-offer, not decline, when status=COUNTERED.
+    // Bug: handleCounter() sets decisionRequiredFromPlayerId=bot, causing dispatchGreedy to
+    // call handleTradeDecision (which declines) instead of handleCounterEditing.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void strongBotBuildsCounterOfferInsteadOfDeclining() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Unfavorable offer: human requests 150€ from bot, offers nothing in return.
+        // handleTradeDecision would decline this; handleCounterEditing should edit it.
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(0, List.of(), 0),    // offered to bot: nothing
+                new TradeSelectionState(150, List.of(), 0)); // requested from bot: 150€
+        // COUNTERED state mirrors what handleCounter() produces:
+        // editingPlayerId = BOT_PLAYER, decisionRequiredFromPlayerId = BOT_PLAYER (the bug trigger)
+        TradeState trade = new TradeState(
+                "trade-1", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.COUNTERED,
+                offer,
+                BOT_PLAYER,   // editingPlayerId
+                false,
+                BOT_PLAYER,   // decisionRequiredFromPlayerId — same as editor, triggers old bug
+                HUMAN_PLAYER,
+                List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of());
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof DeclineTradeCommand),
+                "STRONG bot in COUNTERED editing mode must not decline — it should edit or submit; got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof EditTradeOfferCommand || c instanceof SubmitTradeOfferCommand),
+                "STRONG bot should edit or submit the counter-offer; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
     // STRONG mode: proactive trade initiation and editing
     // -------------------------------------------------------------------------
 

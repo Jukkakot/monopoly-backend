@@ -329,16 +329,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             String tradeActor = trade.decisionRequiredFromPlayerId();
             String editor = trade.editingPlayerId();
 
-            if (tradeActor != null && botPlayerIds.contains(tradeActor)) {
-                handleTradeDecision(state, tradeActor);
+            // COUNTERED editing must be checked before tradeActor: handleCounter sets
+            // decisionRequiredFromPlayerId = bot (the counter editor), which would
+            // otherwise route to handleTradeDecision and immediately decline the offer.
+            if (trade.status() == TradeStatus.COUNTERED && editor != null && botPlayerIds.contains(editor)) {
+                handleCounterEditing(state, editor);
                 return;
             }
             if (trade.status() == TradeStatus.EDITING && editor != null && botPlayerIds.contains(editor)) {
                 handleTradeEditing(state, editor);
                 return;
             }
-            if (trade.status() == TradeStatus.COUNTERED && editor != null && botPlayerIds.contains(editor)) {
-                handleCounterEditing(state, editor);
+            if (tradeActor != null && botPlayerIds.contains(tradeActor)) {
+                handleTradeDecision(state, tradeActor);
                 return;
             }
         }
