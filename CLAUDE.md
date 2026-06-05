@@ -56,6 +56,8 @@ fi.monopoly.
 - **Integration tests** (e.g. `SessionRegistryHttpIntegrationTest`, `HttpApiE2EGameTest`) spin up a real in-process Javalin server and hit it with HTTP.
 - **Simulation tests** (`PureDomainGameSimulationTest`) run bot-vs-bot games to end and verify no crashes.
 
+**Bug → test rule:** When a bug is fixed, always add a regression test that would have caught it. Name the test after the scenario, not the fix (e.g. `strongBotBidsWhenHumanBidReachesFacePrice`). Place it in the nearest existing test class.
+
 ## Known backlog (TODO.txt)
 
 - Session persistence — currently in-memory only; JSON/SQLite persistence is needed before production.
