@@ -888,7 +888,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // STRONG bot: bid up to a config-based ceiling based on property value and set completion
         if (isStrong(bidderId) && minBid > 0) {
             StrongBotConfig cfg = configFor(bidderId);
-            int reserve = dynamicReserve(state, bidderId);
+            // Auction reserve is capped at dangerCashReserve — the full dynamic reserve (which
+            // can exceed 500 late game) is for purchase decisions, not competitive bidding.
+            int reserve = Math.min(dynamicReserve(state, bidderId), cfg.dangerCashReserve());
             String propId = auction.propertyId();
             int facePrice = propId != null
                     ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;

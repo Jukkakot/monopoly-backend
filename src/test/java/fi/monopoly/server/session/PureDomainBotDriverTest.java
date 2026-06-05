@@ -202,6 +202,91 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Regression: STRONG bot must still bid in late-game auction despite high dynamic reserve.
+    // Previously the full dynamicReserve (500+) was applied, making maxBid negative.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void strongBotBidsInAuctionDespiteHighLateGameReserve() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Human owns all RED properties with hotels → dangerScore >> 300 → dynamicReserve >> 500
+        List<PropertyStateSnapshot> props = List.of(
+                new PropertyStateSnapshot("R1", HUMAN_PLAYER, false, 0, 1),
+                new PropertyStateSnapshot("R2", HUMAN_PLAYER, false, 0, 1),
+                new PropertyStateSnapshot("R3", HUMAN_PLAYER, false, 0, 1)
+        );
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false);
+        SessionState state = buildTwoPlayerState(turn, props);
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 600, 1, false, false, false, 0, 0, List.of()),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+
+        // Auction for O1 (Hermanni €180); human already bid 90, bot's min is 100
+        AuctionState auction = new AuctionState(
+                "auction-1", "O1", HUMAN_PLAYER,
+                BOT_PLAYER, HUMAN_PLAYER,
+                90, 100,
+                Set.of(), List.of(BOT_PLAYER, HUMAN_PLAYER),
+                AuctionStatus.ACTIVE, 0, null
+        );
+        state = state.toBuilder().auctionState(auction).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PlaceAuctionBidCommand),
+                "STRONG bot with 600 cash should bid in auction even with high late-game reserve; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
+    // Regression: STRONG bot must bid when human bids at face price (auctionAggression 1.1 > 1.0).
+    // Previously ceiling = facePrice * 1.0 meant any bid at face price ended the auction.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void strongBotBidsWhenHumanBidReachesFacePrice() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false);
+        SessionState state = buildTwoPlayerState(turn, List.of());
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 600, 1, false, false, false, 0, 0, List.of()),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+
+        // O1 = Hermanni, face price €180. Human bid exactly 180 → next min = 190.
+        // With auctionAggression=1.1 ceiling is 198, so bot can still bid 190.
+        AuctionState auction = new AuctionState(
+                "auction-1", "O1", HUMAN_PLAYER,
+                BOT_PLAYER, HUMAN_PLAYER,
+                180, 190,
+                Set.of(), List.of(BOT_PLAYER, HUMAN_PLAYER),
+                AuctionStatus.ACTIVE, 0, null
+        );
+        state = state.toBuilder().auctionState(auction).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PlaceAuctionBidCommand),
+                "STRONG bot should bid after human bids face price (auctionAggression=1.1 gives ceiling 198 > minBid 190); got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
     // NORMAL mode: unmortgages when owns full group
     // -------------------------------------------------------------------------
 

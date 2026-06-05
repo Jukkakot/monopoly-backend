@@ -142,7 +142,7 @@ public record StrongBotConfig(
                 0.22,  // mortgageTolerance (evolution: 0.25 optimal)
                 1.0,   // unmortgageAggression
                 55,    // buildReservePerOpponentMonopoly (ablation+evolution: lower wins)
-                1.0,   // auctionAggression
+                1.1,   // auctionAggression
                 15,    // tradeFairnessTolerance
                 220,   // tradeSetCompletionWeight
                 defaultColorGroupWeights(),
