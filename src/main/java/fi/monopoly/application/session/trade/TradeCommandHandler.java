@@ -197,21 +197,23 @@ public final class TradeCommandHandler {
         if (state.currentOffer().isEmpty() || !gateway.isValidOffer(state.currentOffer())) {
             return reject("INVALID_TRADE_OFFER", "Trade counter offer is not valid");
         }
-        String nextResponder = state.currentOffer().recipientPlayerId();
+        // Counter-offerer becomes editor; the other party gets to decide only after
+        // the counter-offerer submits (handleSubmit uses actor-vs-participants logic).
+        String counterEditor = command.actorPlayerId();
         TradeState updated = new TradeState(
                 state.tradeId(),
                 state.initiatorPlayerId(),
                 state.recipientPlayerId(),
                 TradeStatus.COUNTERED,
                 state.currentOffer(),
-                nextResponder,
+                counterEditor,
                 false,
-                nextResponder,
+                null,
                 state.openedByPlayerId(),
                 appendHistory(state, new TradeHistoryEntry(command.actorPlayerId(), "COUNTERED", "Trade countered"))
         );
         tradeStateSetter.accept(updated);
-        return accepted(List.of(new DomainEvent("TradeCountered", command.actorPlayerId(), nextResponder)));
+        return accepted(List.of(new DomainEvent("TradeCountered", command.actorPlayerId(), counterEditor)));
     }
 
     private CommandResult handleCancel(CancelTradeCommand command) {
@@ -232,11 +234,8 @@ public final class TradeCommandHandler {
         if (state == null) {
             return null;
         }
-        if (state.status() == TradeStatus.EDITING && Objects.equals(state.editingPlayerId(), actorPlayerId)) {
-            return state;
-        }
-        if ((state.status() == TradeStatus.SUBMITTED || state.status() == TradeStatus.COUNTERED)
-                && Objects.equals(state.decisionRequiredFromPlayerId(), actorPlayerId)) {
+        if ((state.status() == TradeStatus.EDITING || state.status() == TradeStatus.COUNTERED)
+                && Objects.equals(state.editingPlayerId(), actorPlayerId)) {
             return state;
         }
         return null;
@@ -247,7 +246,7 @@ public final class TradeCommandHandler {
         if (state == null) {
             return null;
         }
-        if (state.status() != TradeStatus.SUBMITTED && state.status() != TradeStatus.COUNTERED) {
+        if (state.status() != TradeStatus.SUBMITTED) {
             return null;
         }
         if (!Objects.equals(state.decisionRequiredFromPlayerId(), actorPlayerId)) {
