@@ -12,29 +12,115 @@ import java.util.*;
 /**
  * Evolutionary bot optimizer — run manually to tune {@link StrongBotConfig}.
  *
- * <h3>How to run</h3>
- * <pre>
- *   mvn test -Dtest=BotEvolutionTest#quickBenchmark            # ~90s  — sanity / preset comparison
- *   mvn test -Dtest=BotEvolutionTest#ablationStudy             # ~4min — which params matter most?
- *   mvn test -Dtest=BotEvolutionTest#evolveSmallGame           # ~8min — find optimal 2-player config
- *   mvn test -Dtest=BotEvolutionTest#evolveLargeGame           # ~10min — find optimal 4-player config
- *   mvn test -Dtest=BotEvolutionTest -Dsurefire.failIfNoSpecifiedTests=false
- * </pre>
+ * <p>All tests are {@code @Disabled} so they never run in CI.
+ * Run them one at a time from the terminal (see commands below).
  *
- * <h3>Output design — incremental printing</h3>
- * <p>Every test prints results as soon as each piece of work finishes, so you can
- * watch the numbers arrive and terminate early if you see a clear winner.
- * {@code roundRobin()} and {@code sampledTournament()} both use parallel streams
- * internally, so each generation/batch runs fast even as the outer loop is sequential.</p>
+ * =========================================================================
+ * STEP-BY-STEP GUIDE: how to improve the 2–3 player bot without AI help
+ * =========================================================================
  *
- * <h3>Workflow: improving a preset</h3>
- * <ol>
- *   <li>Run {@code ablationStudy()} to see which parameters have the biggest impact.</li>
- *   <li>Run {@code evolveSmallGame()} or {@code evolveLargeGame()} to get an optimised config.</li>
- *   <li>Copy-paste the Builder snippet from the final diff into {@link StrongBotConfig#defaults()}
- *       (or the relevant preset).</li>
- *   <li>Run {@code quickBenchmark()} to verify the new preset beats the old one.</li>
- * </ol>
+ * WHAT YOU'RE TUNING
+ *   The 2-player bot uses {@link StrongBotConfig#aggressive()} (see {@code forPlayerCount(2)}).
+ *   The 3-player bot uses {@link StrongBotConfig#sixPlayer()} (see {@code forPlayerCount(3)}).
+ *   All tunable parameters and what they do are documented in {@link StrongBotConfig}.
+ *
+ * -------------------------------------------------------------------------
+ * STEP 1 — find out which parameters matter most  (~4 min)
+ * -------------------------------------------------------------------------
+ *   mvn test -Dtest=BotEvolutionTest#ablationStudy -pl . -Dsurefire.failIfNoSpecifiedTests=false
+ *
+ *   Output: one line per parameter, printed as it finishes. Example:
+ *     buildAggression+25%           vs defaults   base=50.0%  var=61.3%  Δ=+11.3 pp  ▲ IMPROVES
+ *     hotelAversion-25%             vs defaults   base=50.0%  var=38.7%  Δ=-11.3 pp  ▼ HURTS
+ *     railroadWeight+25%            vs defaults   base=50.0%  var=52.0%  Δ= +2.0 pp  ≈ noise
+ *
+ *   Reading the output:
+ *     ▲ IMPROVES  = the +25% variant beats defaults by >10 pp — this direction is worth pursuing
+ *     ▼ HURTS     = the +25% variant loses by >10 pp — go the other direction or leave it
+ *     ≈ noise     = difference is within the 95% confidence interval — this param doesn't matter much
+ *
+ *   Confidence: with 150 games the margin of error is ±8 pp.
+ *   Ignore any result with |Δ| < 10 pp — it's statistical noise.
+ *
+ * -------------------------------------------------------------------------
+ * STEP 2 — let evolution find a better config automatically  (~8 min)
+ * -------------------------------------------------------------------------
+ *   2-player (improves aggressive preset):
+ *   mvn test -Dtest=BotEvolutionTest#evolveSmallGame -pl . -Dsurefire.failIfNoSpecifiedTests=false
+ *
+ *   3-player (improves sixPlayer preset):
+ *   mvn test -Dtest=BotEvolutionTest#evolveLargeGame -pl . -Dsurefire.failIfNoSpecifiedTests=false
+ *
+ *   You can kill the process early (Ctrl+C) — it prints the best config found so far
+ *   at the end of each generation. Each generation takes ~25–30 s on a modern laptop.
+ *
+ *   Output per generation looks like:
+ *     === Generation 3 (playerCount=2) ===
+ *       child-2-4     W=31  L=9  D=0  (40 games)  win%=77.5  avgSteps=1840
+ *       defaults      W=28  L=12 D=0  (40 games)  win%=70.0  avgSteps=1901
+ *       ...
+ *
+ *   The top entry in each generation is the current best. At the end of all
+ *   generations (or when you kill it), you get a full parameter diff + Builder snippet.
+ *
+ * -------------------------------------------------------------------------
+ * STEP 3 — copy-paste the result into the preset  (~2 min)
+ * -------------------------------------------------------------------------
+ *   After evolution finishes (or after you kill it), the output contains:
+ *
+ *     COPY-PASTEABLE Builder snippet (paste into the preset method):
+ *     return new Builder()
+ *         .buyThreshold(3.8120)          // was 4.0000 (-4.7%)
+ *         .houseBuildAggression(1.7431)  // was 1.5000 (+16.2%) ▲
+ *         ...
+ *         .build();
+ *
+ *   Open {@link StrongBotConfig} and paste this into the matching preset method:
+ *   - 2-player result → replace the body of {@code aggressive()}
+ *   - 3-player result → replace the body of {@code sixPlayer()}
+ *
+ *   The diff table above the snippet shows which params changed and by how much.
+ *   Params with ▲/▼ changed more than 5 % — those are the meaningful changes.
+ *
+ * -------------------------------------------------------------------------
+ * STEP 4 — verify the new preset actually wins  (~90 s)
+ * -------------------------------------------------------------------------
+ *   mvn test -Dtest=BotEvolutionTest#quickBenchmark -pl . -Dsurefire.failIfNoSpecifiedTests=false
+ *
+ *   This compares all presets across 2/3/4/6-player brackets.
+ *   The new preset should rank higher than the old one in its target bracket.
+ *   If it doesn't, the evolution overfit to its random seeds — discard and re-run with
+ *   a different seed (change the {@code seed} variable in the test method).
+ *
+ * =========================================================================
+ * WHAT THE NUMBERS MEAN
+ * =========================================================================
+ *
+ *   win%  = percentage of games won (50% = random, >60% = meaningfully better)
+ *   Δ pp  = percentage-point difference from baseline (base is always ~50% in head-to-head)
+ *   95% CI with 40 games/pair: ±15 pp  (coarse — trust only big deltas)
+ *   95% CI with 100 games/pair: ±10 pp  (ablation uses 150 → ±8 pp)
+ *
+ *   A preset that wins 58% in a 100-game bracket is reliably better.
+ *   A preset that wins 53% might just be luck — run more games if unsure.
+ *
+ * =========================================================================
+ * IMPORTANT LIMITATIONS
+ * =========================================================================
+ *
+ *   Config tuning only goes so far. The bot strategy code itself (StrongBotStrategy,
+ *   BotTournament dispatch) has structural limitations that no config value can fix:
+ *
+ *   - preferJailLateGame / jailExitThreshold / bankruptcyAversion / jailCardHoldBias
+ *     are in the config but NOT WIRED INTO ANY STRATEGY CODE — changing them has zero effect.
+ *     (Marked in StrongBotConfig Javadoc.)
+ *
+ *   - Trade logic is simple: offer one property + cash. No property-for-property swaps.
+ *   - Auction logic ignores other players' cash levels.
+ *   - Debt logic always sells the cheapest asset first.
+ *
+ *   Fixing these requires code changes in StrongBotStrategy / BotTournament — that's
+ *   where to go after config tuning hits a ceiling.
  */
 class BotEvolutionTest {
 
