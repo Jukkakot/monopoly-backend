@@ -126,7 +126,13 @@ public final class TradeCommandHandler {
         if (!gateway.isValidOffer(state.currentOffer())) {
             return reject("INVALID_TRADE_OFFER", "Trade offer is no longer valid");
         }
-        String responderId = state.currentOffer().recipientPlayerId();
+        // The responder is always the OTHER party — the player who did NOT submit this offer.
+        // Using currentOffer.recipientPlayerId() was wrong when B submits a counter-offer,
+        // because recipientPlayerId stays B (original recipient) throughout, making B = responderId
+        // which would let B accept their own counter. Use actor-vs-participants logic instead.
+        String responderId = Objects.equals(command.actorPlayerId(), state.initiatorPlayerId())
+                ? state.recipientPlayerId()
+                : state.initiatorPlayerId();
         TradeState updated = new TradeState(
                 state.tradeId(),
                 state.initiatorPlayerId(),
