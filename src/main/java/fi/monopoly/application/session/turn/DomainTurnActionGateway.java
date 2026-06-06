@@ -936,8 +936,37 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             int totalOwed = Math.abs(amountPerPlayer) * others.size();
             PlayerSnapshot active = findPlayer(current, playerId);
             if (active != null && active.cash() < totalOwed) {
-                // Can't afford: open debt (bank creditor; P3 will give the money to others properly)
-                applyRentOrDebt(current, playerId, null, totalOwed, isDoubles, consecutiveDoubles, "Card payment");
+                // Can't fully afford: distribute whatever cash the active player has
+                // proportionally (capped per receiver), then enter debt for the remainder.
+                // This ensures other players receive money rather than the bank.
+                final int available = active != null ? active.cash() : 0;
+                final int perPlayerPartial = others.isEmpty() ? 0 : available / others.size();
+                final int totalPartial = perPlayerPartial * others.size();
+                if (totalPartial > 0) {
+                    store.update(s -> {
+                        final int perP = perPlayerPartial;
+                        List<PlayerSnapshot> updated = s.players().stream()
+                                .map(p -> {
+                                    if (playerId.equals(p.playerId())) {
+                                        return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() - totalPartial,
+                                                p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                                p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                                    }
+                                    if (!p.eliminated()) {
+                                        return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() + perP,
+                                                p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
+                                                p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
+                                    }
+                                    return p;
+                                })
+                                .toList();
+                        return s.toBuilder().players(updated).build();
+                    });
+                }
+                SessionState afterPartial = store.get();
+                // Open debt for the remaining amount with no single creditor (treated as card penalty)
+                int remaining = totalOwed - totalPartial;
+                applyRentOrDebt(afterPartial, playerId, null, remaining, isDoubles, consecutiveDoubles, "Card payment");
                 return;
             }
             // Can afford: deduct from active, distribute to others

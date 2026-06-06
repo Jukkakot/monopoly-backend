@@ -920,4 +920,111 @@ class DomainTurnActionGatewayTest {
                 .build();
         return new InMemorySessionState(state);
     }
+
+    private static final String PLAYER_3 = "player-3";
+
+    private static InMemorySessionState storeWithChanceDeckThreePlayers(
+            PlayerSnapshot p1, PlayerSnapshot p2, PlayerSnapshot p3, List<String> chanceDeck) {
+        List<SeatState> seats = List.of(
+                new SeatState("seat-0", 0, p1.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p1.name(), "HUMAN", "#000000"),
+                new SeatState("seat-1", 1, p2.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p2.name(), "HUMAN", "#FFFFFF"),
+                new SeatState("seat-2", 2, p3.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p3.name(), "HUMAN", "#0000FF")
+        );
+        SessionState state = SessionState.builder()
+                .sessionId(SESSION_ID).version(0L).status(SessionStatus.IN_PROGRESS)
+                .seats(seats).players(List.of(p1, p2, p3)).properties(List.of())
+                .turn(new TurnState(p1.playerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                .chanceDeck(chanceDeck).communityDeck(List.of())
+                .build();
+        return new InMemorySessionState(state);
+    }
+
+    // -------------------------------------------------------------------------
+    // ALL_PLAYERS_MONEY — pay each player / collect from each player
+    // -------------------------------------------------------------------------
+
+    @Test
+    void chanceCardPayEachPlayerDistributesToOthers() {
+        // ALL_PLAYERS_MONEY with -50: active player pays €50 to each other player.
+        // 3 players: p1(active,1500), p2(1000), p3(800)
+        // p1 pays 50 to p2 and 50 to p3 → p1=1400, p2=1050, p3=850
+        // Player starts at index 4 (TAX1), rolls 2+1=3 → index 7 = CHANCE1
+        PlayerSnapshot p1 = new PlayerSnapshot(PLAYER_1, "seat-0", PLAYER_1, 1500, 4, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p2 = new PlayerSnapshot(PLAYER_2, "seat-1", PLAYER_2, 1000, 0, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p3 = new PlayerSnapshot(PLAYER_3, "seat-2", PLAYER_3,  800, 0, false, false, false, 0, 0, List.of());
+
+        InMemorySessionState store = storeWithChanceDeckThreePlayers(p1, p2, p3, List.of("ALL_PLAYERS_MONEY:0"));
+        // Override card values: -50 (pay 50 to each player)
+        store.update(s -> s.toBuilder()
+                .chanceDeck(List.of("ALL_PLAYERS_MONEY:0"))
+                .build());
+        // Inject a card value override by manipulating the chance properties directly — instead
+        // use a raw manual approach: set the pending effect directly after drawing the card.
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        gateway.rollDice(); // draws ALL_PLAYERS_MONEY:0 from chance deck, sets WAITING_FOR_CARD_ACK
+
+        // Set amount to -50 (pay each player) by injecting a pending effect override
+        store.update(s -> {
+            PendingCardEffect pe = s.pendingCardEffect();
+            if (pe == null) return s;
+            return s.toBuilder()
+                    .pendingCardEffect(new PendingCardEffect(pe.playerId(), pe.cardType(),
+                            List.of("-50"), pe.isDoubles(), pe.consecutiveDoubles(), pe.diceTotal()))
+                    .build();
+        });
+
+        gateway.acknowledgeCard();
+
+        assertEquals(1400, playerById(store.get(), PLAYER_1).cash(), "Active player should pay 2×50=100");
+        assertEquals(1050, playerById(store.get(), PLAYER_2).cash(), "Player 2 should receive 50");
+        assertEquals(850,  playerById(store.get(), PLAYER_3).cash(), "Player 3 should receive 50");
+    }
+
+    @Test
+    void communityCardCollectFromEachPlayerDistributesCorrectly() {
+        // Birthday card: active player collects 10 from each other player.
+        // 3 players: p1(active,1500), p2(1000), p3(800)
+        // p1 gains 10+10=20 → p1=1520, p2=990, p3=790
+        PlayerSnapshot p1 = new PlayerSnapshot(PLAYER_1, "seat-0", PLAYER_1, 1500, 0, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p2 = new PlayerSnapshot(PLAYER_2, "seat-1", PLAYER_2, 1000, 0, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p3 = new PlayerSnapshot(PLAYER_3, "seat-2", PLAYER_3,  800, 0, false, false, false, 0, 0, List.of());
+
+        List<SeatState> seats = List.of(
+                new SeatState("seat-0", 0, p1.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p1.name(), "HUMAN", "#000000"),
+                new SeatState("seat-1", 1, p2.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p2.name(), "HUMAN", "#FFFFFF"),
+                new SeatState("seat-2", 2, p3.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p3.name(), "HUMAN", "#0000FF")
+        );
+        // p1 starts at 0, rolls 1+1=2 (doubles) → index 2 = COMMUNITY1
+        SessionState state = SessionState.builder()
+                .sessionId(SESSION_ID).version(0L).status(SessionStatus.IN_PROGRESS)
+                .seats(seats).players(List.of(p1, p2, p3)).properties(List.of())
+                .turn(new TurnState(p1.playerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                .chanceDeck(List.of()).communityDeck(List.of("ALL_PLAYERS_MONEY:0"))
+                .build();
+        InMemorySessionState store = new InMemorySessionState(state);
+
+        // Inject amount=10 (collect from each player) via pending effect override after roll
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 1); // sum=2, doubles → COMMUNITY1
+
+        gateway.rollDice();
+
+        // Verify ALL_PLAYERS_MONEY card was drawn and card values=10 (from properties)
+        PendingCardEffect pe = store.get().pendingCardEffect();
+        assertNotNull(pe, "Card effect should be pending");
+        assertEquals("ALL_PLAYERS_MONEY", pe.cardType());
+        // The deck value for community ALL_PLAYERS_MONEY:0 is 10 (birthday collect)
+        // Just run acknowledgeCard with whatever the deck loaded
+        gateway.acknowledgeCard();
+
+        // Active player gains from each other player (10 per player = 20 total)
+        int p1Cash = playerById(store.get(), PLAYER_1).cash();
+        int p2Cash = playerById(store.get(), PLAYER_2).cash();
+        int p3Cash = playerById(store.get(), PLAYER_3).cash();
+        assertTrue(p1Cash > 1500, "Active player should have gained cash, got " + p1Cash);
+        assertTrue(p2Cash < 1000, "Player 2 should have lost cash, got " + p2Cash);
+        assertTrue(p3Cash < 800, "Player 3 should have lost cash, got " + p3Cash);
+        // Total cash should be conserved
+        assertEquals(1500 + 1000 + 800, p1Cash + p2Cash + p3Cash, "Total cash must be conserved");
+    }
 }
