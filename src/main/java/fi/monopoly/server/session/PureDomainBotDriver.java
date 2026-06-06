@@ -70,6 +70,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private volatile boolean viewerGatingEnabled = false;
     private volatile double speedMultiplier = 1.0;
     private volatile TradeState lastObservedTrade = null;
+    /** True until the bot acts for the first time this game — adds extra delay so players can orient. */
+    private volatile boolean isFirstTurn = true;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
             = new java.util.concurrent.ConcurrentHashMap<>();
     /**
@@ -173,6 +175,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     private void takeStepForced() {
         pendingAction.set(false);
+        isFirstTurn = false;
         SessionState state = publisher.currentState();
         if (state == null || state.status() == SessionStatus.GAME_OVER
                 || state.status() == SessionStatus.LOBBY) {
@@ -292,6 +295,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     private void takeStep() {
         pendingAction.set(false);
+        isFirstTurn = false;
         SessionState state = publisher.currentState();
         if (state == null || state.status() == SessionStatus.GAME_OVER
                 || state.status() == SessionStatus.LOBBY) {
@@ -973,6 +977,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         double speed = speedMultiplier;
         if (speed == 0.0) return MIN_FAST_DELAY_MS;
         long base = computeBaseDelay(state);
+        if (isFirstTurn) {
+            long firstTurnExtraMs = Long.getLong("monopoly.bot.first.turn.extra.delay.ms", 2500L);
+            base += firstTurnExtraMs;
+        }
         String actorId = resolveActorId(state);
         BotDifficulty diff = actorId != null
                 ? difficulties.getOrDefault(actorId, BotDifficulty.STRONG)
