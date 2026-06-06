@@ -354,36 +354,33 @@ public record StrongBotConfig(
      */
     public static StrongBotConfig aggressive() {
         return new Builder()
-                .buyThreshold(4.0)
-                .minCashReserve(120)
-                .dangerCashReserve(280)
-                .completionWeight(9.0)
-                .progressWeight(3.5)
-                .opponentBlockWeight(5.0)
-                .railroadWeight(4.0)
-                .utilityWeight(0.3)
-                .liquidityPenaltyWeight(2.0)      // less afraid of thin cash
-                .preferJailLateGame(false)         // stay active to keep buying
-                .houseBuildAggression(1.5)         // builds sooner
-                .hotelAversion(3.0)               // willing to push to hotels
-                .developmentBias(3.0)
-                .mortgageTolerance(0.25)
-                .unmortgageAggression(1.2)
-                .buildReservePerOpponentMonopoly(50)
-                .auctionAggression(1.3)
-                .tradeFairnessTolerance(30)
-                .tradeSetCompletionWeight(260)
-                .jailExitThreshold(700)            // leaves jail eagerly
-                .bankruptcyAversion(1.3)
-                .railroadCompletionWeight(50)
-                .utilityCompletionWeight(35)
-                .buildRoundCap(5)
-                .postMonopolyCashBuffer(75)
-                .auctionSetCompletionBonus(120)
-                .tradeLiquidityWeight(0.9)
-                .opponentLeaderPressure(1.2)
-                .jailCardHoldBias(0.7)             // spends jail card freely
-                .mortgageRecoveryPriority(1.2)
+                .buyThreshold                          (4)
+                .minCashReserve                        (120)
+                .dangerCashReserve                     (467)  // was 280,000 (+66,8%)
+                .completionWeight                      (9.5000)  // was 9,000 (+5,6%)
+                .progressWeight                        (3)
+                .opponentBlockWeight                   (7.8166)  // was 4,730 (+65,3%)
+                .railroadWeight                        (5.5000)  // was 5,160 (+6,6%)
+                .utilityWeight                         (0.3393)  // was 0,280 (+21,2%)
+                .liquidityPenaltyWeight                (1.7100)
+                .opponentLeaderPressure                (0.8000)  // was 1,000 (-20,0%)
+                .railroadCompletionWeight              (20)  // was 30,000 (-33,3%)
+                .utilityCompletionWeight               (15)  // was 20,000 (-25,0%)
+                .houseBuildAggression                  (1.3800)
+                .hotelAversion                         (6.5300)
+                .developmentBias                       (2.5000)
+                .buildRoundCap                         (4)  // was 5,000 (-20,0%)
+                .buildReservePerOpponentMonopoly       (44)
+                .postMonopolyCashBuffer                (75)
+                .mortgageTolerance                     (0.2500)
+                .unmortgageAggression                  (1)
+                .mortgageRecoveryPriority              (0.8000)  // was 1,000 (-20,0%)
+                .auctionAggression                     (1.0749)  // was 1,300 (-17,3%)
+                .auctionSetCompletionBonus             (90)
+                .tradeFairnessTolerance                (0)  // was 30,000 (-100,0%)
+                .tradeSetCompletionWeight              (180)  // was 220,000 (-18,2%)
+                .tradeLiquidityWeight                  (1.2000)  // was 1,000 (+20,0%)
+                .preferJailLateGame                    (true)
                 .build();
     }
 
