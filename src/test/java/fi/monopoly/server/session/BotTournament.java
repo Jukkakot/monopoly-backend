@@ -44,6 +44,12 @@ public final class BotTournament {
     /** Result of a single game: winner seat index (-1 = genuine stall) and step count. */
     public record GameResult(int winner, int steps, boolean byBankruptcy) {}
 
+    /** Internal: game task for parallel execution */
+    private record GameTask(int i, int j, long seed, boolean swapped) {}
+
+    /** Internal: game result with metadata */
+    private record GameResultTask(int i, int j, GameResult result) {}
+
     public record Standing(
             String name,
             int wins,
@@ -83,26 +89,45 @@ public final class BotTournament {
         int[]  games  = new int[n];
         long[] steps  = new long[n];
 
+        // Build list of all game tasks
+        List<GameTask> allGames = new ArrayList<>();
         int gameIndex = 0;
         for (int i = 0; i < n; i++) {
             for (int j = i + 1; j < n; j++) {
                 for (int g = 0; g < gamesPerPair; g++) {
                     long seed = seedBase + gameIndex++;
-                    boolean swap = (g % 2 == 1);
-                    int playerA = swap ? j : i;
-                    int playerB = swap ? i : j;
-                    List<StrongBotConfig> cfgs = List.of(configs.get(playerA).config(), configs.get(playerB).config());
-                    GameResult result = runGameDetailed(cfgs, seed);
-                    games[i]++;   games[j]++;
-                    steps[i] += result.steps(); steps[j] += result.steps();
-                    if (result.winner() == 0) {
-                        wins[playerA]++; losses[playerB]++;
-                    } else if (result.winner() == 1) {
-                        wins[playerB]++; losses[playerA]++;
-                    } else {
-                        draws[i]++; draws[j]++;
-                    }
+                    boolean swapped = (g % 2 == 1);
+                    allGames.add(new GameTask(i, j, seed, swapped));
                 }
+            }
+        }
+
+        // Execute all games in parallel
+        List<GameResultTask> results = allGames.parallelStream()
+            .map(task -> {
+                int playerA = task.swapped() ? task.j() : task.i();
+                int playerB = task.swapped() ? task.i() : task.j();
+                List<StrongBotConfig> cfgs = List.of(configs.get(playerA).config(), configs.get(playerB).config());
+                GameResult result = runGameDetailed(cfgs, task.seed());
+                return new GameResultTask(task.i(), task.j(), result);
+            })
+            .toList();
+
+        // Aggregate results (single-threaded, safe because no concurrent modification)
+        for (GameResultTask task : results) {
+            int i = task.i();
+            int j = task.j();
+            GameResult result = task.result();
+            
+            games[i]++;   games[j]++;
+            steps[i] += result.steps(); steps[j] += result.steps();
+            
+            if (result.winner() == 0) {
+                wins[i]++; losses[j]++;
+            } else if (result.winner() == 1) {
+                wins[j]++; losses[i]++;
+            } else {
+                draws[i]++; draws[j]++;
             }
         }
 
@@ -129,13 +154,32 @@ public final class BotTournament {
 
         List<StrongBotConfig> cfgs = configs.stream().map(Entry::config).toList();
 
+        // Build list of all free-for-all game tasks
+        List<Integer> gameIndices = new ArrayList<>();
+        for (int g = 0; g < gamesPerGroup; g++) gameIndices.add(g);
+
+        // Execute all games in parallel
+        List<GameResultTask> results = gameIndices.parallelStream()
+            .map(g -> {
+                List<Integer> order = new ArrayList<>();
+                for (int i = 0; i < n; i++) order.add(i);
+                Collections.rotate(order, g);
+                
+                List<StrongBotConfig> seatedCfgs = order.stream().map(cfgs::get).toList();
+                GameResult result = runGameDetailed(seatedCfgs, seedBase + g);
+                // For freeForAll, encode the order rotation in the result's indices
+                // We'll handle this in aggregation
+                return new GameResultTask(g, -1, result);  // g used as groupIndex, -1 as placeholder
+            })
+            .toList();
+
+        // Aggregate results (need to recompute orders for each game)
         for (int g = 0; g < gamesPerGroup; g++) {
+            GameResult result = results.get(g).result();
             List<Integer> order = new ArrayList<>();
             for (int i = 0; i < n; i++) order.add(i);
             Collections.rotate(order, g);
-
-            List<StrongBotConfig> seatedCfgs = order.stream().map(cfgs::get).toList();
-            GameResult result = runGameDetailed(seatedCfgs, seedBase + g);
+            
             for (int i = 0; i < n; i++) {
                 games[order.get(i)]++;
                 steps[order.get(i)] += result.steps();
