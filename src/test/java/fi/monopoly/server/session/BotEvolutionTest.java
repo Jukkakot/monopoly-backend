@@ -40,11 +40,11 @@ class BotEvolutionTest {
 
     /**
      * Evolutionary search for 2–3 player optimal config.
-     * Uses full pair round-robin per generation.
-     * Takes ~8-12 minutes with default params.
+     * Uses full pair round-robin per generation with warm-start and parallelization.
+     * Takes ~7-10 minutes with 8-core system (was 60 min before parallelization).
      */
     @Test
-    @Disabled("Long — run manually to find optimal 2-3 player config (~10 min)")
+    @Disabled("Long — run manually to find optimal 2-3 player config (~7 min with warm-start)")
     void evolveSmallGame() {
         int pop  = 12, gens = 15, games = 20;
         long seed = 77777L;

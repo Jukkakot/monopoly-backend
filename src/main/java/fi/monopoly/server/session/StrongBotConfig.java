@@ -118,29 +118,29 @@ public record StrongBotConfig(
     // -------------------------------------------------------------------------
 
     public static StrongBotConfig defaults() {
-        // Updated after latest evolution run (15 generations, 220 games/pair).
-        // This config wins 62.7% vs aggressive and 62.7% vs defaults in head-to-head.
-        // Key tunings: low cash reserves, high railroad value, low opponent-block weight,
-        // high auction/trade tolerance, moderate building aggression.
+        // Updated after latest evolution run (15 gens, 19800 games, 7 min with warm-start).
+        // This config wins 57.3% vs aggressive and 51.9% vs cautious in round-robin.
+        // Key tunings: lower hotel aversion, minimal liquidity penalty, less blocking,
+        // reduced cash reserves per opponent monopoly (fine-tuned from prior run).
         return new StrongBotConfig(
-                4.0,   // buyThreshold (was 5.5, evolved: 4.0)
-                120,   // minCashReserve (was 160, evolved: 120)
-                280,   // dangerCashReserve (was 300, evolved: 280)
+                4.0,   // buyThreshold
+                120,   // minCashReserve
+                280,   // dangerCashReserve
                 9.0,   // completionWeight
                 3.0,   // progressWeight
-                5.0,   // opponentBlockWeight (was 7.0, evolved: 5.0)
-                4.0,   // railroadWeight (was 3.5, evolved: 4.0)
-                0.3,   // utilityWeight
-                2.0,   // liquidityPenaltyWeight
+                4.73,  // opponentBlockWeight (was 5.0, evolved: 4.73)
+                4.0,   // railroadWeight
+                0.28,  // utilityWeight (was 0.3, evolved: 0.28)
+                1.71,  // liquidityPenaltyWeight (was 2.0, evolved: 1.71)
                 true,  // buyToBlockOpponent (frozen)
                 true,  // prioritizeThreeHouses (frozen)
                 true,  // preferJailLateGame (frozen)
-                1.23,  // houseBuildAggression (was 1.1, evolved: 1.23)
-                7.17,  // hotelAversion (was 6.5, evolved: 7.17)
+                1.23,  // houseBuildAggression
+                6.53,  // hotelAversion (was 7.17, evolved: 6.53)
                 2.5,   // developmentBias
-                0.25,  // mortgageTolerance (was 0.22, evolved: 0.25)
+                0.25,  // mortgageTolerance
                 1.0,   // unmortgageAggression
-                50,    // buildReservePerOpponentMonopoly (was 55, evolved: 50)
+                44,    // buildReservePerOpponentMonopoly (was 50, evolved: 44)
                 1.3,   // auctionAggression (was 1.1, evolved: 1.3)
                 30,    // tradeFairnessTolerance (was 15, evolved: 30)
                 220,   // tradeSetCompletionWeight
