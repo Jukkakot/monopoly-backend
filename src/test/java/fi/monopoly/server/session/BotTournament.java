@@ -226,30 +226,47 @@ public final class BotTournament {
     public static List<Standing> sampledTournament(List<Entry> configs, int totalGames,
                                                     int playerCount, long seedBase) {
         int n = configs.size();
+
+        // Pre-generate all game player orders deterministically (single-threaded, then run in parallel).
+        // Using a shared Random here is safe because we do it before forking the parallel stream.
+        Random rng = new Random(seedBase);
+        List<List<Integer>> gameOrders = new ArrayList<>(totalGames);
+        for (int g = 0; g < totalGames; g++) {
+            List<Integer> pool = new ArrayList<>();
+            for (int i = 0; i < n; i++) pool.add(i);
+            Collections.shuffle(pool, rng);
+            // copy to avoid mutation after the list is handed to the parallel stream
+            gameOrders.add(List.copyOf(pool.subList(0, Math.min(playerCount, n))));
+        }
+
+        record SampledResult(GameResult result, List<Integer> order) {}
+
+        // Run all games in parallel — each game is independent
+        List<SampledResult> results = java.util.stream.IntStream.range(0, totalGames)
+                .boxed().parallel()
+                .map(g -> {
+                    List<Integer> indices = gameOrders.get(g);
+                    List<StrongBotConfig> cfgs = indices.stream()
+                            .map(i -> configs.get(i).config()).toList();
+                    return new SampledResult(runGameDetailed(cfgs, seedBase + g), indices);
+                })
+                .toList();
+
+        // Aggregate results (single-threaded)
         int[]  wins   = new int[n];
         int[]  losses = new int[n];
         int[]  draws  = new int[n];
         int[]  games  = new int[n];
         long[] steps  = new long[n];
 
-        Random rng = new Random(seedBase);
-        for (int g = 0; g < totalGames; g++) {
-            // Sample playerCount distinct configs
-            List<Integer> indices = new ArrayList<>();
-            List<Integer> pool = new ArrayList<>();
-            for (int i = 0; i < n; i++) pool.add(i);
-            Collections.shuffle(pool, rng);
-            for (int k = 0; k < Math.min(playerCount, n); k++) indices.add(pool.get(k));
-
-            List<StrongBotConfig> cfgs = indices.stream().map(i -> configs.get(i).config()).toList();
-            GameResult result = runGameDetailed(cfgs, seedBase + g);
-
+        for (SampledResult r : results) {
+            List<Integer> indices = r.order();
             for (int k = 0; k < indices.size(); k++) {
                 int idx = indices.get(k);
                 games[idx]++;
-                steps[idx] += result.steps();
-                if (result.winner() == k) wins[idx]++;
-                else if (result.winner() >= 0) losses[idx]++;
+                steps[idx] += r.result().steps();
+                if (r.result().winner() == k) wins[idx]++;
+                else if (r.result().winner() >= 0) losses[idx]++;
                 else draws[idx]++;
             }
         }

@@ -30,71 +30,271 @@ import java.util.Random;
  * {@link #cautious()} is available as a diversity seed for evolutionary search.
  */
 public record StrongBotConfig(
-        /** Baseline purchase score threshold — higher = pickier buyer. */
+        /**
+         * Purchase score gate — the bot only buys when buyScore() reaches this value.
+         * <p>Higher = pickier; fewer properties bought, more cash retained.
+         * Matters mostly in late-game (>10 unowned) — early game uses a lower hardwired
+         * threshold (1.5 for streets) regardless of this setting.
+         * Range: 4.0 (grab almost anything) … 9.0 (very selective).
+         */
         double buyThreshold,
-        /** Minimum cash kept in normal conditions. */
+
+        /**
+         * Normal cash floor. The bot won't spend below this in safe conditions.
+         * <p>Higher = more conservative, less exposed to rents but slower to buy/build.
+         * Affects every purchase, build, unmortgage, and auction bid.
+         * Range: 80 … 450.
+         */
         int minCashReserve,
-        /** Larger reserve when board is dangerous or late-game. */
+
+        /**
+         * Emergency cash floor, active when the board is dangerous (opponent monopolies, late game).
+         * <p>When {@code boardDangerScore ≥ dangerCashReserve}, the bot switches from
+         * {@code minCashReserve} to this higher floor, halting discretionary spending.
+         * Higher = more defensive in threatening positions.
+         * Range: 200 … 700.
+         */
         int dangerCashReserve,
-        /** Score bonus for completing a full color group. */
+
+        /**
+         * Buy-score bonus when the purchase would complete a full color monopoly.
+         * <p>This is the single most powerful purchase signal — set-completing buys are
+         * almost always worth it regardless of price. Rarely needs tuning.
+         * Range: 7.0 … 12.0.
+         */
         double completionWeight,
-        /** Score bonus for partial group progress. */
+
+        /**
+         * Buy-score bonus that scales with partial group progress.
+         * <p>Score += progressWeight × (owned+1) / setSize. Encourages focusing on
+         * a group where the bot already holds some deeds. Higher = more "finish what you started".
+         * Range: 1.0 … 5.0.
+         */
         double progressWeight,
-        /** Score bonus for denying an opponent a near-complete set. */
+
+        /**
+         * Buy-score bonus applied when the purchase would deny an opponent their last needed deed
+         * in a color group (i.e. opponent owns setSize−1 properties in that group).
+         * <p>Higher = more defensive buying. Combines multiplicatively with
+         * {@link #opponentLeaderPressure} when the opponent is the board leader.
+         * Range: 2.0 … 10.0.
+         */
         double opponentBlockWeight,
-        /** Flat score bonus for railroads. */
+
+        /**
+         * Base buy-score bonus for railroad deeds (stacks with completion synergy via
+         * {@link #railroadCompletionWeight}).
+         * <p>Higher = prioritises railroads over color groups of similar score.
+         * Range: 1.5 … 5.5.
+         */
         double railroadWeight,
-        /** Flat score bonus for utilities. */
+
+        /**
+         * Base buy-score bonus for utility deeds.
+         * <p>Utilities have poor ROI (dice-dependent rent), so this is intentionally low.
+         * Higher = buys utilities earlier; usually not worth tuning above 1.0.
+         * Range: 0.05 … 1.0.
+         */
         double utilityWeight,
-        /** Penalty multiplier for ending up below reserve after purchase. */
+
+        /**
+         * Penalty multiplier for post-purchase cash falling below the dynamic reserve.
+         * <p>Score -= liquidityPenaltyWeight × max(0, reserve − postCash) / 100.
+         * Higher = bot is more reluctant to thin its cash; fewer "stretch" purchases.
+         * Range: 1.0 … 6.0.
+         */
         double liquidityPenaltyWeight,
-        /** Always {@code true} — hardwired. Blocking near-monopolies is always correct. */
+
+        /**
+         * Always {@code true} — hardwired in {@link Builder#build()}.
+         * Enables the opponent-block bonus in {@code buyScore()}.
+         * Not tunable; removing it weakens the bot.
+         */
         boolean buyToBlockOpponent,
-        /** Always {@code true} — hardwired. 3 houses is the ROI sweet spot. */
+
+        /**
+         * Always {@code true} — hardwired in {@link Builder#build()}.
+         * Adds +4.0 to build score when the group average is below 3 houses,
+         * capturing the well-known 3-house ROI sweet spot.
+         * Not tunable.
+         */
         boolean prioritizeThreeHouses,
-        /** {@code true} = prefer staying jailed when board is dangerous (conservative). */
+
+        /**
+         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
+         * <p>Intended to make the bot prefer staying in jail when the board is dangerous.
+         * Currently has no effect on bot decisions — kept as a future extension point.
+         * Use {@link #jailExitThreshold} / {@link #dangerCashReserve} for risk aversion.
+         */
         boolean preferJailLateGame,
-        /** Multiplier for building score — higher = builds sooner. */
+
+        /**
+         * Overall multiplier for the build score returned by {@code buildGroupScore()}.
+         * <p>Higher = builds houses/hotels sooner, spending cash faster to create rent pressure.
+         * This is the most impactful "aggression" knob after buyThreshold.
+         * Range: 0.4 (passive builder) … 2.0 (aggressive builder).
+         */
         double houseBuildAggression,
-        /** Penalty for pushing into hotel territory (level 4→5). */
+
+        /**
+         * Score penalty subtracted from {@code buildGroupScore()} when the next build step
+         * would push any property in the group to hotel level (4 → 5).
+         * <p>Higher = bot caps itself at 4 houses per property; lower = builds hotels freely.
+         * {@link #buildRoundCap} offers a hard cap instead of a soft penalty.
+         * Range: 1.5 … 10.0.
+         */
         double hotelAversion,
-        /** Score bonus for deepening already-owned monopolies. */
+
+        /**
+         * Buy/build/unmortgage score bonus for properties in groups the bot already owns.
+         * <p>Encourages the bot to deepen existing holdings rather than scatter across groups.
+         * Applies in {@code buyScore()}, {@code buildGroupScore()}, and {@code unmortgageScore()}.
+         * Range: 1.0 … 5.0.
+         */
         double developmentBias,
-        /** Fraction of excess reserve pressure the bot tolerates for mortgaging. */
+
+        /**
+         * Fraction of the excess reserve pressure that is discounted when deciding whether
+         * to spend (buy, build, unmortgage).
+         * <p>Effective reserve = max(minCash, raw − raw×mortgageTolerance). Higher tolerance
+         * lets the bot act despite a temporarily inflated reserve estimate.
+         * Range: 0.0 (no discount) … 0.5 (can ignore up to half the danger premium).
+         */
         double mortgageTolerance,
-        /** Multiplier for unmortgage score — higher = reactivates sooner. */
+
+        /**
+         * Multiplier on {@code unmortgageScore()}.
+         * <p>Higher = the bot reactivates mortgaged deeds sooner after a cash crunch.
+         * Compounds with {@link #mortgageRecoveryPriority}.
+         * Range: 0.5 … 2.0.
+         */
         double unmortgageAggression,
-        /** Extra cash reserve per threatening opponent monopoly. */
+
+        /**
+         * Extra cash reserved per active opponent monopoly (i.e. opponent owns a full color group).
+         * <p>Adds directly to the dynamic reserve: each opponent monopoly raises the bot's spending
+         * floor by this amount, protecting against catastrophic rents.
+         * Range: 20 … 180.
+         */
         int buildReservePerOpponentMonopoly,
-        /** Multiplier for auction bid ceiling. */
+
+        /**
+         * Auction ceiling multiplier: bot bids up to {@code facePrice × auctionAggression}.
+         * <p>Higher = willing to overpay at auction; lower = lets properties go cheap.
+         * The ceiling is lifted further by {@link #auctionSetCompletionBonus} for monopoly-completing deeds.
+         * Range: 0.5 … 1.5.
+         */
         double auctionAggression,
-        /** Points of unfairness tolerated for strategic trade upside. */
+
+        /**
+         * How many value-points of disadvantage the bot tolerates in an incoming trade offer.
+         * <p>Trade is accepted when: valueReceived ≥ valueGiven − tradeFairnessTolerance.
+         * Higher = more generous; the bot will accept slightly losing trades to gain strategic position.
+         * Range: −30 (demands overpayment) … 80 (very loose).
+         */
         int tradeFairnessTolerance,
-        /** Bonus for trades that complete or break a color monopoly. */
+
+        /**
+         * Bonus value added to a property's trade worth when receiving it would complete a monopoly.
+         * <p>Makes the bot willing to overpay significantly for a set-completing deed in trades.
+         * Stacks with {@link #tradeFairnessTolerance}.
+         * Range: 100 … 400.
+         */
         int tradeSetCompletionWeight,
-        /** Per-group value multipliers for buy/build/trade/auction. */
+
+        /**
+         * Per-group buy/build/trade/auction score multipliers derived from landing probability.
+         * <p>Orange (1.35) and Red (1.25) are statistically the most visited groups after jail.
+         * Light Blue (1.15) has the best early rent/cost ratio.
+         * These are set globally in {@link #defaultColorGroupWeights()} and rarely need tuning
+         * unless you have new landing-frequency data.
+         */
         Map<StreetType, Double> colorGroupWeights,
-        /** Danger score above which bot prefers staying jailed. */
+
+        /**
+         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
+         * <p>Intended as a board-danger threshold above which the bot uses its roll-to-exit right
+         * or jail card. Currently has no effect on bot decisions.
+         * Kept as a future extension point.
+         */
         int jailExitThreshold,
-        /** Multiplier for willingness to liquidate assets near bankruptcy. */
+
+        /**
+         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
+         * <p>Intended to control willingness to sell assets in debt situations.
+         * Currently has no effect. Kept as a future extension point.
+         */
         double bankruptcyAversion,
-        /** Extra bonus for gaining railroad synergy (2nd/3rd/4th railroad). */
+
+        /**
+         * Extra buy-score bonus per railroad already owned, applied when buying another railroad.
+         * <p>Score += ownedInSet × railroadCompletionWeight / 10. Incentivises completing
+         * the railroad monopoly (4 railroads = €200/stop). Higher = hoards railroads.
+         * Range: 0 … 80.
+         */
         int railroadCompletionWeight,
-        /** Extra bonus for gaining the second utility. */
+
+        /**
+         * Extra buy-score bonus when buying the second utility (completing the utility set).
+         * <p>The second utility changes rent from dice×4 to dice×10, making the set
+         * significantly more valuable. This bonus captures that step-change.
+         * Range: 0 … 60.
+         */
         int utilityCompletionWeight,
-        /** Max building level bot will voluntarily push toward (1–5). Use 4 to avoid hotels. */
+
+        /**
+         * Hard cap on building level the bot will voluntarily reach (1–5, where 5 = hotel).
+         * <p>Set to 4 to prevent hotel building entirely. Operates independently of
+         * {@link #hotelAversion} (soft penalty) — this is a hard stop in {@code dispatchEndTurn()}.
+         * Range: 1 … 5.
+         */
         int buildRoundCap,
-        /** Extra cash buffer once bot owns at least one monopoly. */
+
+        /**
+         * Extra cash buffer added to the dynamic reserve once the bot owns at least one monopoly.
+         * <p>Owning a monopoly makes the bot a target — this padding ensures it can weather
+         * retaliation while still building. Higher = more conservative post-monopoly spending.
+         * Range: 0 … 300.
+         */
         int postMonopolyCashBuffer,
-        /** Extra auction bonus when deed would complete a color set. */
+
+        /**
+         * Extra bid ceiling added to an auction when winning the deed would complete a color monopoly.
+         * <p>Added directly to the ceiling computed by {@code facePrice × auctionAggression}.
+         * Ensures the bot fights hard for set-completing properties even if they go above face value.
+         * Range: 0 … 200.
+         */
         int auctionSetCompletionBonus,
-        /** Multiplier for cash value inside trade evaluation. */
+
+        /**
+         * Multiplier for the cash component when evaluating a trade offer.
+         * <p>In {@code evaluateTradeSelection()}: value += moneyAmount × tradeLiquidityWeight.
+         * Higher = values cash more than property in trades; lower = more willing to trade cash for deeds.
+         * Range: 0.5 … 2.0.
+         */
         double tradeLiquidityWeight,
-        /** Multiplier for denial/pressure against the leading opponent. */
+
+        /**
+         * Multiplier applied to {@link #opponentBlockWeight} when the opponent being blocked
+         * is the board leader (highest net worth).
+         * <p>Higher = bot focuses denial specifically on the strongest opponent.
+         * Range: 0.5 … 2.0.
+         */
         double opponentLeaderPressure,
-        /** Bias toward keeping jail card when board is dangerous. */
+
+        /**
+         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
+         * <p>Intended to bias the bot toward holding get-out-of-jail cards when the board is dangerous.
+         * Currently has no effect on bot decisions. Kept as a future extension point.
+         */
         double jailCardHoldBias,
-        /** Multiplier for how eagerly bot unmortgages high-quality assets. */
+
+        /**
+         * Secondary multiplier on {@code unmortgageScore()}, stacking with {@link #unmortgageAggression}.
+         * <p>Separates the general eagerness to unmortgage ({@code unmortgageAggression}) from
+         * a per-property recovery priority tuned for high-quality assets (monopoly groups).
+         * Range: 0.5 … 2.0.
+         */
         double mortgageRecoveryPriority
 ) {
     public StrongBotConfig {
