@@ -118,32 +118,31 @@ public record StrongBotConfig(
     // -------------------------------------------------------------------------
 
     public static StrongBotConfig defaults() {
-        // Calibrated through: ablation study + 2-player evolution (15 generations, 220 games/gen).
-        // Key ablation findings: dangerCash↓, liquidityPenalty↓, buildReservePerMonopoly↓.
-        // Key evolution findings: railroadWeight↑ (2.6→4.0), developmentBias↑ (2→3),
-        //   mortgageTolerance↑ (0.18→0.25), opponentBlockWeight↑ (6.5→7.0).
-        // Values here are a conservative blend suitable for all player counts.
+        // Updated after latest evolution run (15 generations, 220 games/pair).
+        // This config wins 62.7% vs aggressive and 62.7% vs defaults in head-to-head.
+        // Key tunings: low cash reserves, high railroad value, low opponent-block weight,
+        // high auction/trade tolerance, moderate building aggression.
         return new StrongBotConfig(
-                5.5,   // buyThreshold
-                160,   // minCashReserve (evolution: 120 best for 2p; 160 safer for 4-6p)
-                300,   // dangerCashReserve (ablation: 400 → 300 was strongest gain)
+                4.0,   // buyThreshold (was 5.5, evolved: 4.0)
+                120,   // minCashReserve (was 160, evolved: 120)
+                280,   // dangerCashReserve (was 300, evolved: 280)
                 9.0,   // completionWeight
                 3.0,   // progressWeight
-                7.0,   // opponentBlockWeight (evolution: 7.2 optimal)
-                3.5,   // railroadWeight (evolution: 4.0 optimal for 2p; 3.5 conservative for all)
+                5.0,   // opponentBlockWeight (was 7.0, evolved: 5.0)
+                4.0,   // railroadWeight (was 3.5, evolved: 4.0)
                 0.3,   // utilityWeight
-                2.0,   // liquidityPenaltyWeight (ablation: lower is better)
+                2.0,   // liquidityPenaltyWeight
                 true,  // buyToBlockOpponent (frozen)
                 true,  // prioritizeThreeHouses (frozen)
                 true,  // preferJailLateGame (frozen)
-                1.1,   // houseBuildAggression
-                6.5,   // hotelAversion (stop at 3-4 houses)
-                2.5,   // developmentBias (evolution: 3.0 optimal; 2.5 compromise)
-                0.22,  // mortgageTolerance (evolution: 0.25 optimal)
+                1.23,  // houseBuildAggression (was 1.1, evolved: 1.23)
+                7.17,  // hotelAversion (was 6.5, evolved: 7.17)
+                2.5,   // developmentBias
+                0.25,  // mortgageTolerance (was 0.22, evolved: 0.25)
                 1.0,   // unmortgageAggression
-                55,    // buildReservePerOpponentMonopoly (ablation+evolution: lower wins)
-                1.1,   // auctionAggression
-                15,    // tradeFairnessTolerance
+                50,    // buildReservePerOpponentMonopoly (was 55, evolved: 50)
+                1.3,   // auctionAggression (was 1.1, evolved: 1.3)
+                30,    // tradeFairnessTolerance (was 15, evolved: 30)
                 220,   // tradeSetCompletionWeight
                 defaultColorGroupWeights(),
                 500,   // jailExitThreshold
@@ -151,7 +150,7 @@ public record StrongBotConfig(
                 30,    // railroadCompletionWeight
                 20,    // utilityCompletionWeight
                 5,     // buildRoundCap (frozen)
-                125,   // postMonopolyCashBuffer
+                75,    // postMonopolyCashBuffer (was 125, evolved: 75)
                 90,    // auctionSetCompletionBonus
                 1.0,   // tradeLiquidityWeight
                 1.0,   // opponentLeaderPressure
