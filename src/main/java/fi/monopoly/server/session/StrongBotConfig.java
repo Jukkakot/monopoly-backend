@@ -9,100 +9,92 @@ import java.util.Random;
 /**
  * Tunable weights for the STRONG bot player.
  *
- * <h3>Frozen vs tunable parameters</h3>
- * <p>Some parameters are set by well-established Monopoly theory and should not
- * be varied in evolutionary search:</p>
- * <ul>
- *   <li>{@code buyToBlockOpponent} = true — blocking near-monopolies is always correct</li>
- *   <li>{@code prioritizeThreeHouses} = true — 3 houses is the ROI sweet spot</li>
- *   <li>{@code preferJailLateGame} = true — jail is protection when board is developed</li>
- *   <li>{@code buildRoundCap} = 5 — max flexibility; hotelAversion handles the hotel decision</li>
- *   <li>{@code colorGroupWeights} — based on landing-probability research (see {@link #defaultColorGroupWeights()})</li>
- *   <li>{@code completionWeight} — set completion is the win condition, keep high</li>
- * </ul>
+ * <h3>Hardwired parameters</h3>
+ * <p>Two parameters are fixed by Monopoly theory and not exposed in the Builder:
+ * {@code buyToBlockOpponent = true} (blocking near-monopolies is always correct) and
+ * {@code prioritizeThreeHouses = true} (3 houses is the ROI sweet spot).
  *
- * <h3>Tunable parameters (used in {@link #mutate} / {@link #crossover})</h3>
- * <ol>
- *   <li>{@code buyThreshold} [4.0 – 9.0]</li>
- *   <li>{@code minCashReserve} [80 – 450]</li>
- *   <li>{@code dangerCashReserve} [200 – 700]</li>
- *   <li>{@code houseBuildAggression} [0.4 – 2.0]</li>
- *   <li>{@code hotelAversion} [1.5 – 10.0]</li>
- *   <li>{@code liquidityPenaltyWeight} [1.0 – 6.0]</li>
- *   <li>{@code opponentBlockWeight} [2.0 – 10.0]</li>
- *   <li>{@code railroadWeight} [1.5 – 5.5]</li>
- *   <li>{@code utilityWeight} [0.05 – 1.0]</li>
- *   <li>{@code auctionAggression} [0.5 – 1.5]</li>
- *   <li>{@code tradeFairnessTolerance} [-30 – 80]</li>
- *   <li>{@code buildReservePerOpponentMonopoly} [20 – 180]</li>
- * </ol>
+ * <h3>Variable parameters</h3>
+ * <p>{@code buildRoundCap} defaults to 5 but can be lowered (e.g. {@link #cautious()} uses 4
+ * to avoid hotels). {@code preferJailLateGame} is {@code true} for conservative presets and
+ * {@code false} when board pressure requires staying active (e.g. {@link #aggressive()},
+ * {@link #sixPlayer()}).
+ *
+ * <h3>Runtime preset selection</h3>
+ * <ul>
+ *   <li>≤2 players → {@link #aggressive()}</li>
+ *   <li>3 players  → {@link #sixPlayer()}</li>
+ *   <li>4–6 players → {@link #defaults()}</li>
+ * </ul>
+ * Each bot seat receives a ±10 % mutation via {@link #forSeat}.
+ * {@link #cautious()} is available as a diversity seed for evolutionary search.
  */
 public record StrongBotConfig(
-        /** Baseline purchase score threshold (late game). Higher = pickier buyer. Default 5.5 */
+        /** Baseline purchase score threshold — higher = pickier buyer. */
         double buyThreshold,
-        /** Minimum cash the bot keeps in normal conditions. Default 200 */
+        /** Minimum cash kept in normal conditions. */
         int minCashReserve,
-        /** Larger reserve when board is dangerous or late-game. Default 400 */
+        /** Larger reserve when board is dangerous or late-game. */
         int dangerCashReserve,
-        /** Score bonus for completing a full color group. Default 9.0 */
+        /** Score bonus for completing a full color group. */
         double completionWeight,
-        /** Score bonus for partial group progress. Default 3.0 */
+        /** Score bonus for partial group progress. */
         double progressWeight,
-        /** Score bonus for denying an opponent a near-complete set. Default 6.0 */
+        /** Score bonus for denying an opponent a near-complete set. */
         double opponentBlockWeight,
-        /** Flat score bonus for railroads (underrated). Default 3.5 */
+        /** Flat score bonus for railroads. */
         double railroadWeight,
-        /** Flat score bonus for utilities (weak investment). Default 0.3 */
+        /** Flat score bonus for utilities. */
         double utilityWeight,
-        /** Penalty multiplier for ending up below reserve after purchase. Default 3.0 */
+        /** Penalty multiplier for ending up below reserve after purchase. */
         double liquidityPenaltyWeight,
-        /** Whether blocking opponent near-monopolies is enabled. Frozen: true */
+        /** Always {@code true} — hardwired. Blocking near-monopolies is always correct. */
         boolean buyToBlockOpponent,
-        /** Prefer reaching 3 houses before going further. Frozen: true */
+        /** Always {@code true} — hardwired. 3 houses is the ROI sweet spot. */
         boolean prioritizeThreeHouses,
-        /** Prefer staying in jail late-game when board is dangerous. Frozen: true */
+        /** {@code true} = prefer staying jailed when board is dangerous (conservative). */
         boolean preferJailLateGame,
-        /** Multiplier for building score — higher = builds sooner. Default 1.0 */
+        /** Multiplier for building score — higher = builds sooner. */
         double houseBuildAggression,
-        /** Penalty for pushing into hotel territory (level 4→5). Default 5.5 */
+        /** Penalty for pushing into hotel territory (level 4→5). */
         double hotelAversion,
-        /** Score bonus for deepening already-owned monopolies. Default 2.0 */
+        /** Score bonus for deepening already-owned monopolies. */
         double developmentBias,
-        /** Fraction of excess reserve pressure the bot tolerates. Default 0.15 */
+        /** Fraction of excess reserve pressure the bot tolerates for mortgaging. */
         double mortgageTolerance,
-        /** Multiplier for unmortgage score — higher = reactivates sooner. Default 1.0 */
+        /** Multiplier for unmortgage score — higher = reactivates sooner. */
         double unmortgageAggression,
-        /** Extra cash reserve per threatening opponent monopoly. Default 80 */
+        /** Extra cash reserve per threatening opponent monopoly. */
         int buildReservePerOpponentMonopoly,
-        /** Multiplier for auction bid ceiling. Default 1.0 */
+        /** Multiplier for auction bid ceiling. */
         double auctionAggression,
-        /** Points of unfairness tolerated for strategic trade upside. Default 15 */
+        /** Points of unfairness tolerated for strategic trade upside. */
         int tradeFairnessTolerance,
-        /** Bonus for trades that complete or break a color monopoly. Default 220 */
+        /** Bonus for trades that complete or break a color monopoly. */
         int tradeSetCompletionWeight,
         /** Per-group value multipliers for buy/build/trade/auction. */
         Map<StreetType, Double> colorGroupWeights,
-        /** Danger score above which bot prefers staying jailed. Default 500 */
+        /** Danger score above which bot prefers staying jailed. */
         int jailExitThreshold,
-        /** Multiplier for willingness to liquidate assets near bankruptcy. Default 1.0 */
+        /** Multiplier for willingness to liquidate assets near bankruptcy. */
         double bankruptcyAversion,
-        /** Extra bonus for gaining railroad synergy (2nd/3rd/4th). Default 30 */
+        /** Extra bonus for gaining railroad synergy (2nd/3rd/4th railroad). */
         int railroadCompletionWeight,
-        /** Extra bonus for gaining second utility. Default 20 */
+        /** Extra bonus for gaining the second utility. */
         int utilityCompletionWeight,
-        /** Max building level bot will voluntarily push toward (1–5). Frozen: 5 */
+        /** Max building level bot will voluntarily push toward (1–5). Use 4 to avoid hotels. */
         int buildRoundCap,
-        /** Extra cash buffer once bot owns at least one monopoly. Default 125 */
+        /** Extra cash buffer once bot owns at least one monopoly. */
         int postMonopolyCashBuffer,
-        /** Extra auction bonus when deed would complete a set. Default 90 */
+        /** Extra auction bonus when deed would complete a color set. */
         int auctionSetCompletionBonus,
-        /** Multiplier for cash value inside trade evaluation. Default 1.0 */
+        /** Multiplier for cash value inside trade evaluation. */
         double tradeLiquidityWeight,
-        /** Multiplier for denial/pressure against the leading opponent. Default 1.0 */
+        /** Multiplier for denial/pressure against the leading opponent. */
         double opponentLeaderPressure,
-        /** Bias toward keeping jail card when board is dangerous. Default 1.0 */
+        /** Bias toward keeping jail card when board is dangerous. */
         double jailCardHoldBias,
-        /** Multiplier for how eagerly bot unmortgages high-quality mortgaged assets. Default 1.0 */
+        /** Multiplier for how eagerly bot unmortgages high-quality assets. */
         double mortgageRecoveryPriority
 ) {
     public StrongBotConfig {
@@ -117,202 +109,169 @@ public record StrongBotConfig(
     // Named presets
     // -------------------------------------------------------------------------
 
-    public static StrongBotConfig defaults() {
-        // Updated after latest evolution run (15 gens, 19800 games, 7 min with warm-start).
-        // This config wins 57.3% vs aggressive and 51.9% vs cautious in round-robin.
-        // Key tunings: lower hotel aversion, minimal liquidity penalty, less blocking,
-        // reduced cash reserves per opponent monopoly (fine-tuned from prior run).
-        return new StrongBotConfig(
-                4.0,   // buyThreshold
-                120,   // minCashReserve
-                280,   // dangerCashReserve
-                9.0,   // completionWeight
-                3.0,   // progressWeight
-                4.73,  // opponentBlockWeight (was 5.0, evolved: 4.73)
-                5.16,   // railroadWeight
-                0.28,  // utilityWeight (was 0.3, evolved: 0.28)
-                1.71,  // liquidityPenaltyWeight (was 2.0, evolved: 1.71)
-                true,  // buyToBlockOpponent (frozen)
-                true,  // prioritizeThreeHouses (frozen)
-                true,  // preferJailLateGame (frozen)
-                1.38,  // houseBuildAggression
-                6.53,  // hotelAversion (was 7.17, evolved: 6.53)
-                2.5,   // developmentBias
-                0.25,  // mortgageTolerance
-                1.0,   // unmortgageAggression
-                44,    // buildReservePerOpponentMonopoly (was 50, evolved: 44)
-                1.30,   // auctionAggression (was 1.1, evolved: 1.3)
-                30,    // tradeFairnessTolerance (was 15, evolved: 30)
-                220,   // tradeSetCompletionWeight
-                defaultColorGroupWeights(),
-                500,   // jailExitThreshold
-                1.0,   // bankruptcyAversion
-                30,    // railroadCompletionWeight
-                20,    // utilityCompletionWeight
-                5,     // buildRoundCap (frozen)
-                75,    // postMonopolyCashBuffer (was 125, evolved: 75)
-                90,    // auctionSetCompletionBonus
-                1.0,   // tradeLiquidityWeight
-                1.0,   // opponentLeaderPressure
-                1.0,   // jailCardHoldBias
-                1.0    // mortgageRecoveryPriority
-        );
-    }
-
     /**
-     * Optimal 2-player config found by evolutionary search (15 generations, 220 games/pair).
-     * Wins 62 % of games vs {@link #defaults()} and 38 % vs {@link #aggressive()} in head-to-head.
-     * Key differentiators: very low cash reserve, high railroad/blocking priority, more mortgage tolerance.
+     * Balanced config optimised for 4–6 players by evolutionary search
+     * (15 generations, 19 800 games). This is the baseline all other presets are built from.
      */
-    public static StrongBotConfig evolved2p() {
-        return new StrongBotConfig(
-                4.0,   // buyThreshold
-                120,   // minCashReserve
-                280,   // dangerCashReserve
-                9.0,   // completionWeight
-                3.0,   // progressWeight
-                4.73,  // opponentBlockWeight (was 5.0, evolved: 4.73)
-                5.16,   // railroadWeight
-                0.28,  // utilityWeight (was 0.3, evolved: 0.28)
-                1.71,  // liquidityPenaltyWeight (was 2.0, evolved: 1.71)
-                true,  // buyToBlockOpponent (frozen)
-                true,  // prioritizeThreeHouses (frozen)
-                true,  // preferJailLateGame (frozen)
-                1.38,  // houseBuildAggression
-                6.53,  // hotelAversion (was 7.17, evolved: 6.53)
-                2.5,   // developmentBias
-                0.25,  // mortgageTolerance
-                1.0,   // unmortgageAggression
-                44,    // buildReservePerOpponentMonopoly (was 50, evolved: 44)
-                1.30,   // auctionAggression (was 1.1, evolved: 1.3)
-                30,    // tradeFairnessTolerance (was 15, evolved: 30)
-                220,   // tradeSetCompletionWeight
-                defaultColorGroupWeights(),
-                500,   // jailExitThreshold
-                1.0,   // bankruptcyAversion
-                30,    // railroadCompletionWeight
-                20,    // utilityCompletionWeight
-                5,     // buildRoundCap (frozen)
-                75,    // postMonopolyCashBuffer (was 125, evolved: 75)
-                90,    // auctionSetCompletionBonus
-                1.0,   // tradeLiquidityWeight
-                1.0,   // opponentLeaderPressure
-                1.0,   // jailCardHoldBias
-                1.0    // mortgageRecoveryPriority
-        );
-    }
-
-    /** Aggressive bot: buys and builds earlier, accepts riskier cash positions. */
-    public static StrongBotConfig aggressive() {
-        return new StrongBotConfig(
-                4.0,   // buyThreshold — picks up more properties
-                120,   // minCashReserve
-                280,   // dangerCashReserve
-                9.0, 3.5, 5.0,
-                4.0,   // railroadWeight
-                0.3,   // utilityWeight
-                2.0,   // liquidityPenaltyWeight — less afraid of thin cash
-                true, true, false,
-                1.5,   // houseBuildAggression — builds sooner
-                3.0,   // hotelAversion — happier to push to hotels
-                3.0,   // developmentBias
-                0.25,  // mortgageTolerance
-                1.2,   // unmortgageAggression
-                50,    // buildReservePerOpponentMonopoly
-                1.3,   // auctionAggression
-                30,    // tradeFairnessTolerance — more lenient on trades
-                260,
-                defaultColorGroupWeights(),
-                700,   // jailExitThreshold — leaves jail more eagerly
-                1.3,   // bankruptcyAversion
-                50, 35, 5, 75, 120,
-                0.9,   // tradeLiquidityWeight
-                1.2,   // opponentLeaderPressure
-                0.7,   // jailCardHoldBias — spends card more freely
-                1.2    // mortgageRecoveryPriority
-        );
-    }
-
-    /** Cautious bot: hoards cash, avoids risky positions, waits for clean trades. */
-    public static StrongBotConfig cautious() {
-        return new StrongBotConfig(
-                7.5,   // buyThreshold — passes on mediocre buys
-                320,   // minCashReserve
-                520,   // dangerCashReserve
-                9.5, 2.5, 7.0,
-                3.5,   // railroadWeight
-                0.2,   // utilityWeight
-                4.5,   // liquidityPenaltyWeight — strongly penalises thin cash
-                true, true, true,
-                0.7,   // houseBuildAggression
-                7.0,   // hotelAversion
-                1.5,   // developmentBias
-                0.05,  // mortgageTolerance
-                0.8,   // unmortgageAggression
-                110,   // buildReservePerOpponentMonopoly
-                0.8,   // auctionAggression
-                0,     // tradeFairnessTolerance — demands fair trades
-                180,
-                defaultColorGroupWeights(),
-                350,   // jailExitThreshold — stays jailed when board is risky
-                0.8,   // bankruptcyAversion
-                20, 15, 4,
-                175,   // postMonopolyCashBuffer
-                60,    // auctionSetCompletionBonus
-                1.2,   // tradeLiquidityWeight
-                0.8,   // opponentLeaderPressure
-                2.0,   // jailCardHoldBias — hoards jail card
-                0.8    // mortgageRecoveryPriority
-        );
+    public static StrongBotConfig defaults() {
+        return new Builder()
+                .buyThreshold(4.0)
+                .minCashReserve(120)
+                .dangerCashReserve(280)
+                .completionWeight(9.0)
+                .progressWeight(3.0)
+                .opponentBlockWeight(4.73)
+                .railroadWeight(5.16)
+                .utilityWeight(0.28)
+                .liquidityPenaltyWeight(1.71)
+                .preferJailLateGame(true)
+                .houseBuildAggression(1.38)
+                .hotelAversion(6.53)
+                .developmentBias(2.5)
+                .mortgageTolerance(0.25)
+                .unmortgageAggression(1.0)
+                .buildReservePerOpponentMonopoly(44)
+                .auctionAggression(1.30)
+                .tradeFairnessTolerance(30)
+                .tradeSetCompletionWeight(220)
+                .jailExitThreshold(500)
+                .bankruptcyAversion(1.0)
+                .railroadCompletionWeight(30)
+                .utilityCompletionWeight(20)
+                .buildRoundCap(5)
+                .postMonopolyCashBuffer(75)
+                .auctionSetCompletionBonus(90)
+                .tradeLiquidityWeight(1.0)
+                .opponentLeaderPressure(1.0)
+                .jailCardHoldBias(1.0)
+                .mortgageRecoveryPriority(1.0)
+                .build();
     }
 
     /**
-     * Optimised for 6-player games: properties vanish fast, trading is essential,
-     * build pressure is needed to actually bankrupt opponents.
+     * Optimal for 2-player games (~65 % win rate vs {@link #defaults()}).
+     * Buys and builds earlier; accepts thinner cash positions; leaves jail eagerly.
+     */
+    public static StrongBotConfig aggressive() {
+        return new Builder()
+                .buyThreshold(4.0)
+                .minCashReserve(120)
+                .dangerCashReserve(280)
+                .completionWeight(9.0)
+                .progressWeight(3.5)
+                .opponentBlockWeight(5.0)
+                .railroadWeight(4.0)
+                .utilityWeight(0.3)
+                .liquidityPenaltyWeight(2.0)      // less afraid of thin cash
+                .preferJailLateGame(false)         // stay active to keep buying
+                .houseBuildAggression(1.5)         // builds sooner
+                .hotelAversion(3.0)               // willing to push to hotels
+                .developmentBias(3.0)
+                .mortgageTolerance(0.25)
+                .unmortgageAggression(1.2)
+                .buildReservePerOpponentMonopoly(50)
+                .auctionAggression(1.3)
+                .tradeFairnessTolerance(30)
+                .tradeSetCompletionWeight(260)
+                .jailExitThreshold(700)            // leaves jail eagerly
+                .bankruptcyAversion(1.3)
+                .railroadCompletionWeight(50)
+                .utilityCompletionWeight(35)
+                .buildRoundCap(5)
+                .postMonopolyCashBuffer(75)
+                .auctionSetCompletionBonus(120)
+                .tradeLiquidityWeight(0.9)
+                .opponentLeaderPressure(1.2)
+                .jailCardHoldBias(0.7)             // spends jail card freely
+                .mortgageRecoveryPriority(1.2)
+                .build();
+    }
+
+    /**
+     * Conservative bot: hoards cash, avoids risky positions, demands fair trades.
+     * Useful as a diversity seed in evolutionary search; not used in normal gameplay.
+     */
+    public static StrongBotConfig cautious() {
+        return new Builder()
+                .buyThreshold(7.5)                // passes on mediocre buys
+                .minCashReserve(320)
+                .dangerCashReserve(520)
+                .completionWeight(9.5)
+                .progressWeight(2.5)
+                .opponentBlockWeight(7.0)
+                .railroadWeight(3.5)
+                .utilityWeight(0.2)
+                .liquidityPenaltyWeight(4.5)       // strongly penalises thin cash
+                .preferJailLateGame(true)
+                .houseBuildAggression(0.7)
+                .hotelAversion(7.0)
+                .developmentBias(1.5)
+                .mortgageTolerance(0.05)
+                .unmortgageAggression(0.8)
+                .buildReservePerOpponentMonopoly(110)
+                .auctionAggression(0.8)
+                .tradeFairnessTolerance(0)         // demands fair trades
+                .tradeSetCompletionWeight(180)
+                .jailExitThreshold(350)            // stays jailed when board is risky
+                .bankruptcyAversion(0.8)
+                .railroadCompletionWeight(20)
+                .utilityCompletionWeight(15)
+                .buildRoundCap(4)                  // avoids hotels entirely
+                .postMonopolyCashBuffer(175)
+                .auctionSetCompletionBonus(60)
+                .tradeLiquidityWeight(1.2)
+                .opponentLeaderPressure(0.8)
+                .jailCardHoldBias(2.0)             // hoards jail card
+                .mortgageRecoveryPriority(0.8)
+                .build();
+    }
+
+    /**
+     * Optimised for 3-player games (also effective for 5–6 players).
+     * Properties vanish fast: grab almost everything, build aggressively, trade for monopolies.
      *
      * <p>Key differences vs {@link #defaults()}:
      * <ul>
-     *   <li>Much lower buy threshold — grab anything affordable immediately</li>
-     *   <li>Lower cash reserves — 6 players pass Go often, cash replenishes faster</li>
-     *   <li>Higher build aggression and lower hotel aversion — hotels are required
-     *       to generate enough rent to force bankruptcies</li>
-     *   <li>Higher trade fairness tolerance — completing a monopoly by trading
-     *       at a slight loss is still the winning move</li>
-     *   <li>Leave jail early — board scarcity means you must keep buying</li>
+     *   <li>Lower buy threshold — grab almost anything affordable immediately</li>
+     *   <li>Lower cash reserves — more players pass Go per round, cash replenishes faster</li>
+     *   <li>Higher build aggression and lower hotel aversion — hotels required to force bankruptcies</li>
+     *   <li>Higher trade fairness tolerance — completing a monopoly at a slight loss is still a win</li>
+     *   <li>Leave jail early — board scarcity means staying active matters</li>
      * </ul>
      */
     public static StrongBotConfig sixPlayer() {
-        return new StrongBotConfig(
-                3.5,   // buyThreshold — grab almost everything (board fills up fast)
-                110,   // minCashReserve — lower: 6 players = more Go income per round
-                200,   // dangerCashReserve
-                9.5,   // completionWeight
-                4.0,   // progressWeight
-                8.0,   // opponentBlockWeight — very competitive, block hard
-                3.5,   // railroadWeight
-                0.4,   // utilityWeight
-                1.5,   // liquidityPenaltyWeight — less afraid of thin cash
-                true,  // buyToBlockOpponent (frozen)
-                true,  // prioritizeThreeHouses — still hit 3 first before hotels
-                false, // preferJailLateGame — early game stay active to buy
-                1.5,   // houseBuildAggression — build fast to create rent pressure
-                3.5,   // hotelAversion — low: hotels needed to force bankruptcies
-                3.0,   // developmentBias
-                0.25,  // mortgageTolerance
-                1.3,   // unmortgageAggression
-                35,    // buildReservePerOpponentMonopoly — lower: less hoarding
-                1.1,   // auctionAggression
-                45,    // tradeFairnessTolerance — accept losing trades to complete monopoly
-                300,   // tradeSetCompletionWeight
-                defaultColorGroupWeights(),
-                350,   // jailExitThreshold — leave jail sooner (board scarcity)
-                1.1,   // bankruptcyAversion
-                60, 40, 5, 80, 110,
-                0.85,  // tradeLiquidityWeight — cash matters less than monopolies
-                1.4,   // opponentLeaderPressure
-                0.5,   // jailCardHoldBias — spend jail card freely
-                1.3    // mortgageRecoveryPriority
-        );
+        return new Builder()
+                .buyThreshold(3.5)                 // grab almost everything
+                .minCashReserve(110)               // lower: more players = more Go income per round
+                .dangerCashReserve(200)
+                .completionWeight(9.5)
+                .progressWeight(4.0)
+                .opponentBlockWeight(8.0)           // very competitive, block hard
+                .railroadWeight(3.5)
+                .utilityWeight(0.4)
+                .liquidityPenaltyWeight(1.5)        // less afraid of thin cash
+                .preferJailLateGame(false)          // board scarcity — must keep buying
+                .houseBuildAggression(1.5)          // build fast to create rent pressure
+                .hotelAversion(3.5)                // hotels needed to force bankruptcies
+                .developmentBias(3.0)
+                .mortgageTolerance(0.25)
+                .unmortgageAggression(1.3)
+                .buildReservePerOpponentMonopoly(35)
+                .auctionAggression(1.1)
+                .tradeFairnessTolerance(45)         // accept losing trades to complete monopoly
+                .tradeSetCompletionWeight(300)
+                .jailExitThreshold(350)             // leave jail sooner — board scarcity
+                .bankruptcyAversion(1.1)
+                .railroadCompletionWeight(60)
+                .utilityCompletionWeight(40)
+                .buildRoundCap(5)
+                .postMonopolyCashBuffer(80)
+                .auctionSetCompletionBonus(110)
+                .tradeLiquidityWeight(0.85)         // cash matters less than monopolies
+                .opponentLeaderPressure(1.4)
+                .jailCardHoldBias(0.5)              // spend jail card freely
+                .mortgageRecoveryPriority(1.3)
+                .build();
     }
 
     /**
@@ -320,15 +279,14 @@ public record StrongBotConfig(
      *
      * <p>The spaces reachable most often after leaving Jail (dice sum peaking at 7)
      * are positions 6–9 from Jail: Orange group. The second Jail exit cluster hits Red.
-     * Light Blue has the best rent/cost ratio early. Railroads give consistent passive income.
-     * Utilities are unpredictable and low-yield.</p>
+     * Light Blue has the best rent/cost ratio early. Railroads give consistent passive income.</p>
      */
-    private static Map<StreetType, Double> defaultColorGroupWeights() {
+    static Map<StreetType, Double> defaultColorGroupWeights() {
         EnumMap<StreetType, Double> w = new EnumMap<>(StreetType.class);
         w.put(StreetType.ORANGE,     1.35);  // statistically best group (near jail, dice peak)
         w.put(StreetType.RED,        1.25);  // 2nd best — also near jail, 2nd circuit
         w.put(StreetType.LIGHT_BLUE, 1.15);  // best early ROI — cheap houses, good rents
-        w.put(StreetType.RAILROAD,   1.20);  // consistent passive income, 4 = $200/stop
+        w.put(StreetType.RAILROAD,   1.20);  // consistent passive income, 4 = €200/stop
         w.put(StreetType.PURPLE,     1.05);  // decent, 3 properties
         w.put(StreetType.YELLOW,     1.00);  // solid mid-game
         w.put(StreetType.GREEN,      0.85);  // expensive houses, slow ROI
@@ -339,26 +297,14 @@ public record StrongBotConfig(
     }
 
     // -------------------------------------------------------------------------
-    // -------------------------------------------------------------------------
     // Player-count aware config selection
     // -------------------------------------------------------------------------
 
-    /**
-     * Returns the empirically best preset for the given number of players.
-     *
-     * <p>Based on sampled tournament results (300 games per player count):
-     * <ul>
-     *   <li>2 players: {@link #aggressive()} wins 58 %</li>
-     *   <li>3 players: {@link #sixPlayer()} wins 38 % (vs 33 % expected)</li>
-     *   <li>4–6 players: {@link #defaults()} wins ~26–28 %</li>
-     * </ul>
-     */
+    /** Returns the empirically best preset for the given number of players. */
     public static StrongBotConfig forPlayerCount(int playerCount) {
-        // 2-player: evolved2p (62%) vs aggressive (64.7%) — aggressive still wins,
-        // but evolved2p is the evolved-optimal balanced config; use aggressive for max challenge.
-        if (playerCount <= 2) return aggressive();
-        if (playerCount == 3) return sixPlayer();   // sixPlayer wins 38% vs 33% expected
-        return defaults();                          // defaults wins 4-6 player
+        if (playerCount <= 2) return aggressive();  // aggressive wins ~65% vs defaults in 2p
+        if (playerCount == 3) return sixPlayer();   // sixPlayer wins ~38% vs 33% expected in 3p
+        return defaults();                          // defaults wins 4–6 player
     }
 
     /**
@@ -367,7 +313,6 @@ public record StrongBotConfig(
      * <p>Seat 0 receives the optimal config for the player count. Other seats get
      * ±10 % mutations seeded by {@code seed} (e.g. {@code sessionId.hashCode() ^ seatIndex})
      * so each bot in the same game has a distinct but competitive playstyle.
-     * This prevents exploitable homogeneity without sacrificing bot quality.
      *
      * @param seatIndex        0-based index among bot seats in this session
      * @param totalPlayerCount total players (human + bot)
@@ -376,17 +321,20 @@ public record StrongBotConfig(
     public static StrongBotConfig forSeat(int seatIndex, int totalPlayerCount, long seed) {
         StrongBotConfig base = forPlayerCount(totalPlayerCount);
         if (seatIndex == 0) return base;
-        return base.mutate(new java.util.Random(seed), 0.10);
+        return base.mutate(new Random(seed), 0.10);
     }
 
+    // -------------------------------------------------------------------------
     // Evolutionary search: mutate and crossover
     // -------------------------------------------------------------------------
 
     /**
      * Returns a new config with one randomly chosen tunable parameter perturbed
      * by ±{@code strength} fraction (e.g. 0.2 = ±20 %).
-     * Frozen parameters ({@code buyToBlockOpponent}, {@code prioritizeThreeHouses},
-     * {@code preferJailLateGame}, {@code buildRoundCap}, {@code colorGroupWeights}) are never changed.
+     * The 12 tunable parameters are: buyThreshold, minCashReserve, dangerCashReserve,
+     * houseBuildAggression, hotelAversion, liquidityPenaltyWeight, opponentBlockWeight,
+     * railroadWeight, utilityWeight, auctionAggression, tradeFairnessTolerance,
+     * buildReservePerOpponentMonopoly.
      */
     public StrongBotConfig mutate(Random rng, double strength) {
         int param = rng.nextInt(12);
@@ -411,44 +359,29 @@ public record StrongBotConfig(
 
     /**
      * Creates a child config by randomly picking each tunable parameter from either
-     * {@code this} or {@code other}. Frozen parameters come from {@code this}.
+     * {@code this} or {@code other}. Non-crossed parameters come from {@code this}.
      */
     public StrongBotConfig crossover(StrongBotConfig other, Random rng) {
-        return new StrongBotConfig(
-                rng.nextBoolean() ? buyThreshold : other.buyThreshold,
-                rng.nextBoolean() ? minCashReserve : other.minCashReserve,
-                rng.nextBoolean() ? dangerCashReserve : other.dangerCashReserve,
-                completionWeight,  // frozen-ish high value
-                rng.nextBoolean() ? progressWeight : other.progressWeight,
-                rng.nextBoolean() ? opponentBlockWeight : other.opponentBlockWeight,
-                rng.nextBoolean() ? railroadWeight : other.railroadWeight,
-                rng.nextBoolean() ? utilityWeight : other.utilityWeight,
-                rng.nextBoolean() ? liquidityPenaltyWeight : other.liquidityPenaltyWeight,
-                true,  // buyToBlockOpponent — frozen
-                true,  // prioritizeThreeHouses — frozen
-                true,  // preferJailLateGame — frozen
-                rng.nextBoolean() ? houseBuildAggression : other.houseBuildAggression,
-                rng.nextBoolean() ? hotelAversion : other.hotelAversion,
-                rng.nextBoolean() ? developmentBias : other.developmentBias,
-                rng.nextBoolean() ? mortgageTolerance : other.mortgageTolerance,
-                rng.nextBoolean() ? unmortgageAggression : other.unmortgageAggression,
-                rng.nextBoolean() ? buildReservePerOpponentMonopoly : other.buildReservePerOpponentMonopoly,
-                rng.nextBoolean() ? auctionAggression : other.auctionAggression,
-                rng.nextBoolean() ? tradeFairnessTolerance : other.tradeFairnessTolerance,
-                tradeSetCompletionWeight,
-                colorGroupWeights,  // frozen — theory-based
-                jailExitThreshold,
-                bankruptcyAversion,
-                railroadCompletionWeight,
-                utilityCompletionWeight,
-                5,  // buildRoundCap — frozen
-                rng.nextBoolean() ? postMonopolyCashBuffer : other.postMonopolyCashBuffer,
-                rng.nextBoolean() ? auctionSetCompletionBonus : other.auctionSetCompletionBonus,
-                tradeLiquidityWeight,
-                opponentLeaderPressure,
-                jailCardHoldBias,
-                mortgageRecoveryPriority
-        );
+        return toBuilder()
+                .buyThreshold(rng.nextBoolean() ? buyThreshold : other.buyThreshold)
+                .minCashReserve(rng.nextBoolean() ? minCashReserve : other.minCashReserve)
+                .dangerCashReserve(rng.nextBoolean() ? dangerCashReserve : other.dangerCashReserve)
+                .progressWeight(rng.nextBoolean() ? progressWeight : other.progressWeight)
+                .opponentBlockWeight(rng.nextBoolean() ? opponentBlockWeight : other.opponentBlockWeight)
+                .railroadWeight(rng.nextBoolean() ? railroadWeight : other.railroadWeight)
+                .utilityWeight(rng.nextBoolean() ? utilityWeight : other.utilityWeight)
+                .liquidityPenaltyWeight(rng.nextBoolean() ? liquidityPenaltyWeight : other.liquidityPenaltyWeight)
+                .houseBuildAggression(rng.nextBoolean() ? houseBuildAggression : other.houseBuildAggression)
+                .hotelAversion(rng.nextBoolean() ? hotelAversion : other.hotelAversion)
+                .developmentBias(rng.nextBoolean() ? developmentBias : other.developmentBias)
+                .mortgageTolerance(rng.nextBoolean() ? mortgageTolerance : other.mortgageTolerance)
+                .unmortgageAggression(rng.nextBoolean() ? unmortgageAggression : other.unmortgageAggression)
+                .buildReservePerOpponentMonopoly(rng.nextBoolean() ? buildReservePerOpponentMonopoly : other.buildReservePerOpponentMonopoly)
+                .auctionAggression(rng.nextBoolean() ? auctionAggression : other.auctionAggression)
+                .tradeFairnessTolerance(rng.nextBoolean() ? tradeFairnessTolerance : other.tradeFairnessTolerance)
+                .postMonopolyCashBuffer(rng.nextBoolean() ? postMonopolyCashBuffer : other.postMonopolyCashBuffer)
+                .auctionSetCompletionBonus(rng.nextBoolean() ? auctionSetCompletionBonus : other.auctionSetCompletionBonus)
+                .build();
     }
 
     private static double clamp(double v, double lo, double hi) {
@@ -460,17 +393,16 @@ public record StrongBotConfig(
     }
 
     // -------------------------------------------------------------------------
-    // Builder for named-parameter construction
+    // Builder
     // -------------------------------------------------------------------------
 
     /**
      * Create a builder starting from {@link #defaults()}.
-     * Allows fluent overrides of specific parameters without manual list copying.
+     * Useful for creating a config that overrides only specific parameters:
      * <pre>
      *   var config = StrongBotConfig.fromDefaults()
      *     .hotelAversion(6.0)
      *     .liquidityPenaltyWeight(1.8)
-     *     .buildReservePerOpponentMonopoly(40)
      *     .build();
      * </pre>
      */
@@ -493,8 +425,6 @@ public record StrongBotConfig(
         private double railroadWeight;
         private double utilityWeight;
         private double liquidityPenaltyWeight;
-        private boolean buyToBlockOpponent;
-        private boolean prioritizeThreeHouses;
         private boolean preferJailLateGame;
         private double houseBuildAggression;
         private double hotelAversion;
@@ -518,40 +448,43 @@ public record StrongBotConfig(
         private double jailCardHoldBias;
         private double mortgageRecoveryPriority;
 
+        /** No-arg constructor: initialises {@code colorGroupWeights} to the theory-based defaults. */
+        public Builder() {
+            this.colorGroupWeights = defaultColorGroupWeights();
+        }
+
         private Builder(StrongBotConfig src) {
-            this.buyThreshold = src.buyThreshold();
-            this.minCashReserve = src.minCashReserve();
-            this.dangerCashReserve = src.dangerCashReserve();
-            this.completionWeight = src.completionWeight();
-            this.progressWeight = src.progressWeight();
-            this.opponentBlockWeight = src.opponentBlockWeight();
-            this.railroadWeight = src.railroadWeight();
-            this.utilityWeight = src.utilityWeight();
-            this.liquidityPenaltyWeight = src.liquidityPenaltyWeight();
-            this.buyToBlockOpponent = src.buyToBlockOpponent();
-            this.prioritizeThreeHouses = src.prioritizeThreeHouses();
-            this.preferJailLateGame = src.preferJailLateGame();
-            this.houseBuildAggression = src.houseBuildAggression();
-            this.hotelAversion = src.hotelAversion();
-            this.developmentBias = src.developmentBias();
-            this.mortgageTolerance = src.mortgageTolerance();
-            this.unmortgageAggression = src.unmortgageAggression();
+            this.buyThreshold                    = src.buyThreshold();
+            this.minCashReserve                  = src.minCashReserve();
+            this.dangerCashReserve               = src.dangerCashReserve();
+            this.completionWeight                = src.completionWeight();
+            this.progressWeight                  = src.progressWeight();
+            this.opponentBlockWeight             = src.opponentBlockWeight();
+            this.railroadWeight                  = src.railroadWeight();
+            this.utilityWeight                   = src.utilityWeight();
+            this.liquidityPenaltyWeight          = src.liquidityPenaltyWeight();
+            this.preferJailLateGame              = src.preferJailLateGame();
+            this.houseBuildAggression            = src.houseBuildAggression();
+            this.hotelAversion                   = src.hotelAversion();
+            this.developmentBias                 = src.developmentBias();
+            this.mortgageTolerance               = src.mortgageTolerance();
+            this.unmortgageAggression            = src.unmortgageAggression();
             this.buildReservePerOpponentMonopoly = src.buildReservePerOpponentMonopoly();
-            this.auctionAggression = src.auctionAggression();
-            this.tradeFairnessTolerance = src.tradeFairnessTolerance();
-            this.tradeSetCompletionWeight = src.tradeSetCompletionWeight();
-            this.colorGroupWeights = src.colorGroupWeights();
-            this.jailExitThreshold = src.jailExitThreshold();
-            this.bankruptcyAversion = src.bankruptcyAversion();
-            this.railroadCompletionWeight = src.railroadCompletionWeight();
-            this.utilityCompletionWeight = src.utilityCompletionWeight();
-            this.buildRoundCap = src.buildRoundCap();
-            this.postMonopolyCashBuffer = src.postMonopolyCashBuffer();
-            this.auctionSetCompletionBonus = src.auctionSetCompletionBonus();
-            this.tradeLiquidityWeight = src.tradeLiquidityWeight();
-            this.opponentLeaderPressure = src.opponentLeaderPressure();
-            this.jailCardHoldBias = src.jailCardHoldBias();
-            this.mortgageRecoveryPriority = src.mortgageRecoveryPriority();
+            this.auctionAggression               = src.auctionAggression();
+            this.tradeFairnessTolerance          = src.tradeFairnessTolerance();
+            this.tradeSetCompletionWeight        = src.tradeSetCompletionWeight();
+            this.colorGroupWeights               = src.colorGroupWeights();
+            this.jailExitThreshold               = src.jailExitThreshold();
+            this.bankruptcyAversion              = src.bankruptcyAversion();
+            this.railroadCompletionWeight        = src.railroadCompletionWeight();
+            this.utilityCompletionWeight         = src.utilityCompletionWeight();
+            this.buildRoundCap                   = src.buildRoundCap();
+            this.postMonopolyCashBuffer          = src.postMonopolyCashBuffer();
+            this.auctionSetCompletionBonus       = src.auctionSetCompletionBonus();
+            this.tradeLiquidityWeight            = src.tradeLiquidityWeight();
+            this.opponentLeaderPressure          = src.opponentLeaderPressure();
+            this.jailCardHoldBias                = src.jailCardHoldBias();
+            this.mortgageRecoveryPriority        = src.mortgageRecoveryPriority();
         }
 
         public Builder buyThreshold(double v)                      { this.buyThreshold = v; return this; }
@@ -563,8 +496,6 @@ public record StrongBotConfig(
         public Builder railroadWeight(double v)                    { this.railroadWeight = v; return this; }
         public Builder utilityWeight(double v)                     { this.utilityWeight = v; return this; }
         public Builder liquidityPenaltyWeight(double v)            { this.liquidityPenaltyWeight = v; return this; }
-        public Builder buyToBlockOpponent(boolean v)               { this.buyToBlockOpponent = v; return this; }
-        public Builder prioritizeThreeHouses(boolean v)            { this.prioritizeThreeHouses = v; return this; }
         public Builder preferJailLateGame(boolean v)               { this.preferJailLateGame = v; return this; }
         public Builder houseBuildAggression(double v)              { this.houseBuildAggression = v; return this; }
         public Builder hotelAversion(double v)                     { this.hotelAversion = v; return this; }
@@ -593,7 +524,9 @@ public record StrongBotConfig(
                     buyThreshold, minCashReserve, dangerCashReserve,
                     completionWeight, progressWeight, opponentBlockWeight,
                     railroadWeight, utilityWeight, liquidityPenaltyWeight,
-                    buyToBlockOpponent, prioritizeThreeHouses, preferJailLateGame,
+                    true,  // buyToBlockOpponent — always true
+                    true,  // prioritizeThreeHouses — always true
+                    preferJailLateGame,
                     houseBuildAggression, hotelAversion, developmentBias,
                     mortgageTolerance, unmortgageAggression, buildReservePerOpponentMonopoly,
                     auctionAggression, tradeFairnessTolerance, tradeSetCompletionWeight,

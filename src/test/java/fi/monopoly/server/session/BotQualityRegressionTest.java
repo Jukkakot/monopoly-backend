@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Expected ordering from empirical benchmarks:
  * <ul>
- *   <li>2-player: aggressive > evolved2p > defaults > cautious</li>
+ *   <li>2-player: aggressive > defaults > cautious</li>
  *   <li>4-player: defaults ≈ sixPlayer > aggressive > cautious</li>
  * </ul>
  *
@@ -48,22 +48,6 @@ class BotQualityRegressionTest {
         assertTrue(aggrWin > defaultWin - LENIENCY,
                 String.format("aggressive (%.1f%%) should beat defaults (%.1f%%) in 2-player",
                         aggrWin * 100, defaultWin * 100));
-    }
-
-    @Test
-    @Timeout(value = 60, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void evolved2p_beats_defaults_in_2player() {
-        List<BotTournament.Standing> s = BotTournament.roundRobin(List.of(
-                new BotTournament.Entry("evolved2p", StrongBotConfig.evolved2p()),
-                new BotTournament.Entry("defaults",  StrongBotConfig.defaults())
-        ), GAMES, SEED + 1);
-
-        double evolvedWin = winRate(s, "evolved2p");
-        double defaultWin = winRate(s, "defaults");
-
-        assertTrue(evolvedWin > defaultWin - LENIENCY,
-                String.format("evolved2p (%.1f%%) should beat defaults (%.1f%%) in 2-player",
-                        evolvedWin * 100, defaultWin * 100));
     }
 
     @Test
