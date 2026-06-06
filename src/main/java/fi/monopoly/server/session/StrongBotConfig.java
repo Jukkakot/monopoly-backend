@@ -129,19 +129,19 @@ public record StrongBotConfig(
                 9.0,   // completionWeight
                 3.0,   // progressWeight
                 4.73,  // opponentBlockWeight (was 5.0, evolved: 4.73)
-                4.0,   // railroadWeight
+                5.16,   // railroadWeight
                 0.28,  // utilityWeight (was 0.3, evolved: 0.28)
                 1.71,  // liquidityPenaltyWeight (was 2.0, evolved: 1.71)
                 true,  // buyToBlockOpponent (frozen)
                 true,  // prioritizeThreeHouses (frozen)
                 true,  // preferJailLateGame (frozen)
-                1.23,  // houseBuildAggression
+                1.38,  // houseBuildAggression
                 6.53,  // hotelAversion (was 7.17, evolved: 6.53)
                 2.5,   // developmentBias
                 0.25,  // mortgageTolerance
                 1.0,   // unmortgageAggression
                 44,    // buildReservePerOpponentMonopoly (was 50, evolved: 44)
-                1.3,   // auctionAggression (was 1.1, evolved: 1.3)
+                1.30,   // auctionAggression (was 1.1, evolved: 1.3)
                 30,    // tradeFairnessTolerance (was 15, evolved: 30)
                 220,   // tradeSetCompletionWeight
                 defaultColorGroupWeights(),
@@ -166,26 +166,26 @@ public record StrongBotConfig(
      */
     public static StrongBotConfig evolved2p() {
         return new StrongBotConfig(
-                5.5,   // buyThreshold — same as defaults (NOT aggressive early buying)
-                120,   // minCashReserve — low: spend cash on properties
-                325,   // dangerCashReserve — slightly higher than defaults when board is developed
+                4.0,   // buyThreshold
+                120,   // minCashReserve
+                280,   // dangerCashReserve
                 9.0,   // completionWeight
                 3.0,   // progressWeight
-                7.2,   // opponentBlockWeight — strong blocking
-                4.0,   // railroadWeight — railroads highly valued (53% higher than defaults)
-                0.29,  // utilityWeight
-                1.86,  // liquidityPenaltyWeight — much less afraid of thin cash
+                4.73,  // opponentBlockWeight (was 5.0, evolved: 4.73)
+                5.16,   // railroadWeight
+                0.28,  // utilityWeight (was 0.3, evolved: 0.28)
+                1.71,  // liquidityPenaltyWeight (was 2.0, evolved: 1.71)
                 true,  // buyToBlockOpponent (frozen)
                 true,  // prioritizeThreeHouses (frozen)
                 true,  // preferJailLateGame (frozen)
-                0.94,  // houseBuildAggression — slightly conservative building
-                6.21,  // hotelAversion
-                3.0,   // developmentBias — strongly prioritise monopoly development
-                0.25,  // mortgageTolerance — willing to accept lower effective reserves
+                1.38,  // houseBuildAggression
+                6.53,  // hotelAversion (was 7.17, evolved: 6.53)
+                2.5,   // developmentBias
+                0.25,  // mortgageTolerance
                 1.0,   // unmortgageAggression
-                50,    // buildReservePerOpponentMonopoly
-                0.89,  // auctionAggression — less aggressive at auctions
-                15,    // tradeFairnessTolerance
+                44,    // buildReservePerOpponentMonopoly (was 50, evolved: 44)
+                1.30,   // auctionAggression (was 1.1, evolved: 1.3)
+                30,    // tradeFairnessTolerance (was 15, evolved: 30)
                 220,   // tradeSetCompletionWeight
                 defaultColorGroupWeights(),
                 500,   // jailExitThreshold
@@ -193,7 +193,7 @@ public record StrongBotConfig(
                 30,    // railroadCompletionWeight
                 20,    // utilityCompletionWeight
                 5,     // buildRoundCap (frozen)
-                125,   // postMonopolyCashBuffer
+                75,    // postMonopolyCashBuffer (was 125, evolved: 75)
                 90,    // auctionSetCompletionBonus
                 1.0,   // tradeLiquidityWeight
                 1.0,   // opponentLeaderPressure
@@ -460,10 +460,28 @@ public record StrongBotConfig(
     }
 
     // -------------------------------------------------------------------------
-    // Builder helper for single-field overrides
+    // Builder for named-parameter construction
     // -------------------------------------------------------------------------
 
-    public Builder toBuilder() { return new Builder(this); }
+    /**
+     * Create a builder starting from {@link #defaults()}.
+     * Allows fluent overrides of specific parameters without manual list copying.
+     * <pre>
+     *   var config = StrongBotConfig.fromDefaults()
+     *     .hotelAversion(6.0)
+     *     .liquidityPenaltyWeight(1.8)
+     *     .buildReservePerOpponentMonopoly(40)
+     *     .build();
+     * </pre>
+     */
+    public static Builder fromDefaults() {
+        return new Builder(defaults());
+    }
+
+    /** Convert this config to a builder for modification. */
+    public Builder toBuilder() {
+        return new Builder(this);
+    }
 
     public static final class Builder {
         private double buyThreshold;
@@ -545,6 +563,9 @@ public record StrongBotConfig(
         public Builder railroadWeight(double v)                    { this.railroadWeight = v; return this; }
         public Builder utilityWeight(double v)                     { this.utilityWeight = v; return this; }
         public Builder liquidityPenaltyWeight(double v)            { this.liquidityPenaltyWeight = v; return this; }
+        public Builder buyToBlockOpponent(boolean v)               { this.buyToBlockOpponent = v; return this; }
+        public Builder prioritizeThreeHouses(boolean v)            { this.prioritizeThreeHouses = v; return this; }
+        public Builder preferJailLateGame(boolean v)               { this.preferJailLateGame = v; return this; }
         public Builder houseBuildAggression(double v)              { this.houseBuildAggression = v; return this; }
         public Builder hotelAversion(double v)                     { this.hotelAversion = v; return this; }
         public Builder developmentBias(double v)                   { this.developmentBias = v; return this; }
@@ -553,8 +574,19 @@ public record StrongBotConfig(
         public Builder buildReservePerOpponentMonopoly(int v)      { this.buildReservePerOpponentMonopoly = v; return this; }
         public Builder auctionAggression(double v)                 { this.auctionAggression = v; return this; }
         public Builder tradeFairnessTolerance(int v)               { this.tradeFairnessTolerance = v; return this; }
-        public Builder buildRoundCap(int v)                        { this.buildRoundCap = v; return this; }
+        public Builder tradeSetCompletionWeight(int v)             { this.tradeSetCompletionWeight = v; return this; }
         public Builder colorGroupWeights(Map<StreetType, Double> v){ this.colorGroupWeights = v; return this; }
+        public Builder jailExitThreshold(int v)                    { this.jailExitThreshold = v; return this; }
+        public Builder bankruptcyAversion(double v)                { this.bankruptcyAversion = v; return this; }
+        public Builder railroadCompletionWeight(int v)             { this.railroadCompletionWeight = v; return this; }
+        public Builder utilityCompletionWeight(int v)              { this.utilityCompletionWeight = v; return this; }
+        public Builder buildRoundCap(int v)                        { this.buildRoundCap = v; return this; }
+        public Builder postMonopolyCashBuffer(int v)               { this.postMonopolyCashBuffer = v; return this; }
+        public Builder auctionSetCompletionBonus(int v)            { this.auctionSetCompletionBonus = v; return this; }
+        public Builder tradeLiquidityWeight(double v)              { this.tradeLiquidityWeight = v; return this; }
+        public Builder opponentLeaderPressure(double v)            { this.opponentLeaderPressure = v; return this; }
+        public Builder jailCardHoldBias(double v)                  { this.jailCardHoldBias = v; return this; }
+        public Builder mortgageRecoveryPriority(double v)          { this.mortgageRecoveryPriority = v; return this; }
 
         public StrongBotConfig build() {
             return new StrongBotConfig(
