@@ -755,10 +755,13 @@ public final class SessionRegistry {
     private static Map<String, BotDifficulty> buildDifficultyMap(
             SessionState state, List<BotDifficulty> difficulties) {
         Map<String, BotDifficulty> map = new HashMap<>();
-        List<SeatState> seats = state.seats();
-        for (int i = 0; i < seats.size(); i++) {
-            if (i < difficulties.size() && difficulties.get(i) != null) {
-                map.put(seats.get(i).playerId(), difficulties.get(i));
+        // Use the difficulty already stored on each seat (set by the factory from the original
+        // request index), rather than re-indexing by shuffled seat order which causes bots to
+        // silently receive the wrong difficulty after turn-order randomisation.
+        for (SeatState seat : state.seats()) {
+            BotDifficulty d = seat.botDifficulty();
+            if (d != null) {
+                map.put(seat.playerId(), d);
             }
         }
         return map;
