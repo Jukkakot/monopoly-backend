@@ -35,9 +35,20 @@ public final class BotTournament {
 
     private static final int MAX_STEPS = 20_000;
     private static final int MAX_CONSECUTIVE_REJECTS = 10;
+    private static final int ANOMALY_MIN_STEPS = 50;
+    private static final int ANOMALY_MAX_STEPS = 25_000;
     private static final String[] COLOR_PALETTE = {
             "#E63946","#2A9D8F","#E9C46A","#264653","#F4A261","#8338EC"
     };
+
+    // Sanity-check stats across all games in a tournament
+    public record GameStats(
+            long totalGames,
+            long avgSteps,
+            long stallCount,
+            long anomalyCount,
+            long nonBankruptcyCount
+    ) {}
 
     public record Entry(String name, StrongBotConfig config) {}
 
@@ -271,31 +282,64 @@ public final class BotTournament {
     public static Entry evolve(int populationSize, int generations, int gamesPerGen,
                                int playerCount, List<Entry> baseConfigs,
                                long seedBase, boolean verbose) {
+        return evolve(populationSize, generations, gamesPerGen, playerCount, baseConfigs, seedBase, verbose, true);
+    }
+
+    /**
+     * Evolutionary search with optional warm-start (start from good initial population).
+     *
+     * @param warmStart if true, seed population with mutations of known-good configs instead of random
+     */
+    public static Entry evolve(int populationSize, int generations, int gamesPerGen,
+                               int playerCount, List<Entry> baseConfigs,
+                               long seedBase, boolean verbose, boolean warmStart) {
         Random rng = new Random(seedBase);
         List<Entry> population = new ArrayList<>(baseConfigs);
+        
         // Ensure standard presets are included
         if (population.stream().noneMatch(e -> "defaults".equals(e.name())))
             population.add(new Entry("defaults", StrongBotConfig.defaults()));
         if (population.stream().noneMatch(e -> "aggressive".equals(e.name())))
             population.add(new Entry("aggressive", StrongBotConfig.aggressive()));
-        // Fill remainder with mutations of the first base config
+        
+        // Warm-start: fill remainder with mutations of known-good (defaults) instead of full-random
         StrongBotConfig seedConfig = baseConfigs.isEmpty()
                 ? StrongBotConfig.defaults() : baseConfigs.get(0).config();
+        
+        if (warmStart) {
+            // Better warm-start: use defaults as seed (more likely to find improvements faster)
+            seedConfig = StrongBotConfig.defaults();
+        }
+        
         while (population.size() < populationSize) {
             StrongBotConfig base = seedConfig;
-            int mutations = 3 + rng.nextInt(4);
+            int mutations = warmStart ? 2 + rng.nextInt(3) : 3 + rng.nextInt(4);  // Fewer mutations for warm-start
             for (int m = 0; m < mutations; m++) base = base.mutate(rng, 0.30);
-            population.add(new Entry("rnd-" + population.size(), base));
+            population.add(new Entry((warmStart ? "warm-" : "rnd-") + population.size(), base));
         }
 
         Entry bestEver = population.get(0);
         double bestWinRate = 0;
+        long totalGamesRun = 0;
+        long totalSteps = 0;
 
         for (int gen = 0; gen < generations; gen++) {
             long genSeed = seedBase + (long) gen * 100_000;
             List<Standing> standings = playerCount == 2
                     ? roundRobin(population, gamesPerGen, genSeed)
                     : sampledTournament(population, gamesPerGen, playerCount, genSeed);
+
+            // Sanity check: detect anomalies in this generation
+            int pair_count = population.size() * (population.size() - 1) / 2;
+            long gen_games = playerCount == 2 ? pair_count * gamesPerGen : gamesPerGen;
+            GameStats stats = detectAnomalies(standings, gen_games);
+            if (verbose) {
+                if (stats.stallCount() > 0) System.out.printf("  ⚠️  %d stalls detected!%n", stats.stallCount());
+                if (stats.anomalyCount() > 0) System.out.printf("  ⚠️  %d anomalies (step count out of range)%n", stats.anomalyCount());
+                if (stats.nonBankruptcyCount() > 0) System.out.printf("  ⚠️  %d games ended by tiebreaker (not bankruptcy)%n", stats.nonBankruptcyCount());
+            }
+            totalGamesRun += gen_games;
+            totalSteps += standings.stream().mapToLong(Standing::totalSteps).sum();
 
             if (verbose) {
                 System.out.printf("=== Generation %d (playerCount=%d) ===%n", gen + 1, playerCount);
@@ -325,7 +369,11 @@ public final class BotTournament {
             population = nextGen;
         }
 
-        if (verbose) System.out.printf("%nBest: %s  win=%.1f%%%n", bestEver.name(), bestWinRate * 100);
+        if (verbose) {
+            System.out.printf("%nBest: %s  win=%.1f%%%n", bestEver.name(), bestWinRate * 100);
+            System.out.printf("Stats: %d total games, avg %.0f steps/game%n", 
+                    totalGamesRun, totalGamesRun > 0 ? (double) totalSteps / totalGamesRun : 0);
+        }
         return bestEver;
     }
 
@@ -845,6 +893,44 @@ public final class BotTournament {
     private static CommandResult reject(String reason, SessionState state) {
         return new CommandResult(false, state, List.of(),
                 List.of(new CommandRejection(reason, null)), List.of());
+    }
+
+    // -------------------------------------------------------------------------
+    // Sanity checking & diagnostics
+    // -------------------------------------------------------------------------
+
+    /**
+     * Analyzes standings to detect game anomalies: stalls, unusual step counts,
+     * non-bankruptcy endings. Returns diagnostic stats.
+     *
+     * Note: This is an approximation based on aggregated statistics, not per-game analysis.
+     */
+    private static GameStats detectAnomalies(List<Standing> standings, long expectedGames) {
+        long stallCount = standings.stream()
+                .filter(s -> s.draws() > 0)  // Draws likely indicate stalls (rare in normal games)
+                .mapToInt(Standing::draws).sum();
+        
+        long avgSteps = standings.stream().mapToLong(Standing::totalSteps).sum() 
+                / Math.max(1, standings.stream().mapToInt(Standing::games).sum());
+        long anomalyCount = 0;
+        for (Standing s : standings) {
+            long totalAvg = s.totalSteps() / Math.max(1, s.games());
+            if (totalAvg < ANOMALY_MIN_STEPS || totalAvg > ANOMALY_MAX_STEPS) {
+                anomalyCount += s.games();
+            }
+        }
+
+        // Non-bankruptcy: hard to detect from standings alone, so estimate
+        // Normal games always end in bankruptcy (winner = 0 or 1, never -1)
+        long nonBankruptcyCount = stallCount;  // Approximation
+        
+        return new GameStats(
+                standings.stream().mapToInt(Standing::games).sum(),
+                avgSteps,
+                stallCount,
+                anomalyCount,
+                nonBankruptcyCount
+        );
     }
 
     // -------------------------------------------------------------------------
