@@ -5,7 +5,6 @@ import fi.monopoly.application.result.CommandResult;
 import fi.monopoly.client.session.ClientSessionListener;
 import fi.monopoly.client.session.ClientSessionUpdates;
 import fi.monopoly.client.session.SessionCommandPort;
-import fi.monopoly.domain.session.BotDifficulty;
 import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.domain.session.SessionState;
 import fi.monopoly.server.transport.SessionHttpServer;
@@ -60,17 +59,9 @@ public final class EmbeddedSessionServer {
      * Bot seats will have a {@link PureDomainBotDriver} attached automatically.
      */
     public String create(List<String> playerNames, List<String> colors, List<SeatKind> seatKinds) {
-        return create(playerNames, colors, seatKinds, List.of());
-    }
-
-    /**
-     * Creates a session with explicit seat kinds and per-seat bot difficulties.
-     */
-    public String create(List<String> playerNames, List<String> colors, List<SeatKind> seatKinds,
-                         List<BotDifficulty> difficulties) {
-        var result = registry.create(playerNames, colors, seatKinds, difficulties);
-        log.info("Created session {} with players {} seatKinds={} difficulties={}",
-                result.sessionId().substring(0, 8), playerNames, seatKinds, difficulties);
+        var result = registry.create(playerNames, colors, seatKinds);
+        log.info("Created session {} with players {} seatKinds={}",
+                result.sessionId().substring(0, 8), playerNames, seatKinds);
         return result.sessionId();
     }
 

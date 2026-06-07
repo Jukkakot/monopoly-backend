@@ -296,20 +296,14 @@ public final class SessionHttpServer {
                 return;
             }
             List<String> seatKindStrings = stringList(request, "seatKinds");
-            List<String> difficultyStrings = stringList(request, "difficulties");
 
             List<fi.monopoly.domain.session.SeatKind> seatKinds = seatKindStrings.stream()
                     .map(s -> {
                         try { return fi.monopoly.domain.session.SeatKind.valueOf(s.toUpperCase()); }
                         catch (IllegalArgumentException e) { return fi.monopoly.domain.session.SeatKind.HUMAN; }
                     }).toList();
-            List<fi.monopoly.domain.session.BotDifficulty> difficulties = difficultyStrings.stream()
-                    .map(s -> {
-                        try { return fi.monopoly.domain.session.BotDifficulty.valueOf(s.toUpperCase()); }
-                        catch (IllegalArgumentException e) { return fi.monopoly.domain.session.BotDifficulty.STRONG; }
-                    }).toList();
 
-            var result = registry.create(names, colors, seatKinds, difficulties);
+            var result = registry.create(names, colors, seatKinds);
             Map<String, Object> resp = new java.util.LinkedHashMap<>();
             resp.put("sessionId", result.sessionId());
             if (result.hostToken() != null) resp.put("hostToken", result.hostToken());

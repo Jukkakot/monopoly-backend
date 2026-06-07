@@ -73,7 +73,7 @@ class PureDomainBotDriverTest {
                 null, debt, List.of(property));
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -86,119 +86,35 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
-    // NORMAL mode: buys affordable property
+    // Bot buys affordable property
     // -------------------------------------------------------------------------
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotBuysAffordableProperty() throws InterruptedException {
+    void botBuysPropertyThatCompletesColorGroup() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
+        // Bot already owns B2; buying B1 completes the BROWN group → always buys regardless of score
         var payload = new PropertyPurchaseDecisionPayload("B1", "Bulevardi", 60);
         var decision = new PendingDecision("dec-1", DecisionType.PROPERTY_PURCHASE, BOT_PLAYER, List.of(), null, payload);
 
+        PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", BOT_PLAYER, false, 0, 0);
         SessionState state = buildState(
                 new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_DECISION, false, false),
-                decision, null, List.of());
+                decision, null, List.of(b2));
         state = state.toBuilder()
-                .players(List.of(new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 200, 1, false, false, false, 0, 0, List.of())))
+                .players(List.of(new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 600, 1, false, false, false, 0, 0, List.of("B2"))))
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
 
         assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof BuyPropertyCommand),
-                "NORMAL bot should buy affordable property, got: " + recorder.commands);
-    }
-
-    // -------------------------------------------------------------------------
-    // EASY mode: sometimes declines even when affordable
-    // -------------------------------------------------------------------------
-
-    @Test
-    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void easyBotDeclinesAtLeastSomePurchasesOverManyTrials() throws InterruptedException {
-        int buys = 0;
-        int declines = 0;
-        int trials = 20;
-
-        for (int i = 0; i < trials; i++) {
-            OneShotRecorder recorder = new OneShotRecorder();
-            SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
-
-            var payload = new PropertyPurchaseDecisionPayload("B1", "Bulevardi", 60);
-            var decision = new PendingDecision("dec-" + i, DecisionType.PROPERTY_PURCHASE, BOT_PLAYER, List.of(), null, payload);
-
-            SessionState state = buildState(
-                    new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_DECISION, false, false),
-                    decision, null, List.of());
-            state = state.toBuilder()
-                    .players(List.of(new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 1, false, false, false, 0, 0, List.of())))
-                    .build();
-            recorder.initState(state);
-
-            PureDomainBotDriver d = PureDomainBotDriver.createAndRegisterIfNeeded(
-                    publisher, state, Map.of(BOT_PLAYER, BotDifficulty.EASY));
-            d.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
-            recorder.firstCommand.await(3, TimeUnit.SECONDS);
-            d.stop();
-
-            buys += (int) recorder.commands.stream().filter(c -> c instanceof BuyPropertyCommand).count();
-            declines += (int) recorder.commands.stream().filter(c -> c instanceof DeclinePropertyCommand).count();
-        }
-
-        assertTrue(declines > 0, "EASY bot should decline at least some affordable purchases over " + trials + " trials");
-        assertTrue(buys > 0, "EASY bot should still buy some affordable purchases over " + trials + " trials");
-    }
-
-    // -------------------------------------------------------------------------
-    // EASY mode: passes some auction bids even when affordable
-    // -------------------------------------------------------------------------
-
-    @Test
-    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void easyBotPassesSomeAuctionBidsOverManyTrials() throws InterruptedException {
-        int bids = 0;
-        int passes = 0;
-        int trials = 20;
-
-        for (int i = 0; i < trials; i++) {
-            OneShotRecorder recorder = new OneShotRecorder();
-            SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
-
-            AuctionState auction = new AuctionState(
-                    "auction-" + i, "B1", "other-player",
-                    BOT_PLAYER, null,
-                    10, 10,
-                    Set.of(), List.of(BOT_PLAYER),
-                    AuctionStatus.ACTIVE,
-                    0, null
-            );
-            SessionState state = buildState(
-                    new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false),
-                    null, null, List.of());
-            state = state.toBuilder()
-                    .auctionState(auction)
-                    .players(List.of(new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 1, false, false, false, 0, 0, List.of())))
-                    .build();
-            recorder.initState(state);
-
-            PureDomainBotDriver d = PureDomainBotDriver.createAndRegisterIfNeeded(
-                    publisher, state, Map.of(BOT_PLAYER, BotDifficulty.EASY));
-            d.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
-            recorder.firstCommand.await(3, TimeUnit.SECONDS);
-            d.stop();
-
-            bids += (int) recorder.commands.stream().filter(c -> c instanceof PlaceAuctionBidCommand).count();
-            passes += (int) recorder.commands.stream().filter(c -> c instanceof PassAuctionCommand).count();
-        }
-
-        assertTrue(passes > 0, "EASY bot should pass at least some affordable bids over " + trials + " trials");
-        assertTrue(bids > 0, "EASY bot should still bid some affordable auctions over " + trials + " trials");
+                "Bot should buy property that completes color group, got: " + recorder.commands);
     }
 
     // -------------------------------------------------------------------------
@@ -238,7 +154,7 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().auctionState(auction).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
@@ -278,7 +194,7 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().auctionState(auction).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
@@ -287,12 +203,12 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
-    // NORMAL mode: unmortgages when owns full group
+    // Bot unmortgages when owns full group
     // -------------------------------------------------------------------------
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotUnmortgagesWhenOwnsFullGroupAndHasCash() throws InterruptedException {
+    void botUnmortgagesWhenOwnsFullGroupAndHasCash() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
@@ -309,18 +225,18 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
 
         assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof ToggleMortgageCommand t && "B1".equals(t.propertyId())),
-                "NORMAL bot should unmortgage B1 when it owns full BROWN group and has cash, got: " + recorder.commands);
+                "Bot should unmortgage B1 when it owns full BROWN group and has cash, got: " + recorder.commands);
     }
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotDoesNotUnmortgageWithInsufficientReserve() throws InterruptedException {
+    void botDoesNotUnmortgageWithInsufficientReserve() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
@@ -336,7 +252,7 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -348,12 +264,12 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
-    // NORMAL mode: builds house when complete color group owned
+    // Bot builds house when complete color group owned
     // -------------------------------------------------------------------------
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotBuildsHouseWhenCompleteColorGroupOwned() throws InterruptedException {
+    void botBuildsHouseWhenCompleteColorGroupOwned() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
@@ -370,20 +286,20 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
 
         assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof BuyBuildingRoundCommand),
-                "NORMAL bot with complete color group should dispatch BuyBuildingRoundCommand, got: " + recorder.commands);
+                "Bot with complete color group should dispatch BuyBuildingRoundCommand, got: " + recorder.commands);
         assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof EndTurnCommand),
                 "Bot should not end turn when it can build, got: " + recorder.commands);
     }
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotEndsWhenInsufficientCashToBuild() throws InterruptedException {
+    void botEndsWhenInsufficientCashToBuild() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
@@ -399,7 +315,7 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -434,7 +350,7 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().auctionState(auction).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -467,7 +383,7 @@ class PureDomainBotDriverTest {
                 null, debt, List.of(b1, b2));
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -486,7 +402,7 @@ class PureDomainBotDriverTest {
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotAcceptsFavorableTradeOffer() throws InterruptedException {
+    void botAcceptsFavorableTradeOffer() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
@@ -505,22 +421,22 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().tradeState(trade).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
 
         assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand a && "trade-1".equals(a.tradeId())),
-                "NORMAL bot should accept when value received >= value given, got: " + recorder.commands);
+                "Bot should accept when value received >= value given, got: " + recorder.commands);
     }
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void normalBotDeclinesUnfavorableTradeOffer() throws InterruptedException {
+    void botRejectsUnfavorableTradeOffer() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
-        // Bot receives 60€, gives 100€ → unfavorable → decline
+        // Bot receives 60€, gives 100€ → unfavorable → counter or decline (not accept)
         TradeOfferState offer = new TradeOfferState(
                 "player-human", BOT_PLAYER,
                 new TradeSelectionState(60, List.of(), 0),
@@ -535,45 +451,17 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().tradeState(trade).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.NORMAL));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
 
-        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof DeclineTradeCommand d && "trade-1".equals(d.tradeId())),
-                "NORMAL bot should decline when value received < value given, got: " + recorder.commands);
-    }
-
-    @Test
-    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void easyBotAlwaysDeclinesTrade() throws InterruptedException {
-        OneShotRecorder recorder = new OneShotRecorder();
-        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
-
-        // Even a favorable offer (receives 500€, gives nothing) is declined by EASY bot
-        TradeOfferState offer = new TradeOfferState(
-                "player-human", BOT_PLAYER,
-                new TradeSelectionState(500, List.of(), 0),
-                new TradeSelectionState(0, List.of(), 0));
-        TradeState trade = new TradeState(
-                "trade-1", "player-human", BOT_PLAYER, TradeStatus.SUBMITTED,
-                offer, "player-human", true, BOT_PLAYER, "player-human", List.of());
-
-        SessionState state = buildState(
-                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
-                null, null, List.of());
-        state = state.toBuilder().tradeState(trade).build();
-        recorder.initState(state);
-
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.EASY));
-        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
-
-        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
-
-        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof DeclineTradeCommand d && "trade-1".equals(d.tradeId())),
-                "EASY bot should always decline trades, got: " + recorder.commands);
         assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
-                "EASY bot should never accept trades, got: " + recorder.commands);
+                "Bot should not accept when value received < value given (outside fairness tolerance), got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().anyMatch(c ->
+                        (c instanceof DeclineTradeCommand d && "trade-1".equals(d.tradeId()))
+                        || c instanceof CounterTradeCommand),
+                "Bot should counter or decline unfavorable trade, got: " + recorder.commands);
     }
 
     // -------------------------------------------------------------------------
@@ -611,7 +499,7 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().tradeState(trade).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
@@ -640,7 +528,7 @@ class PureDomainBotDriverTest {
                 List.of(b1, b2));
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -672,7 +560,7 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().tradeState(trade).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -708,7 +596,7 @@ class PureDomainBotDriverTest {
         state = state.toBuilder().tradeState(trade).build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -760,7 +648,7 @@ class PureDomainBotDriverTest {
 
         SessionCommandPublisher publisher = new SessionCommandPublisher(port);
         driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, baseState,
-                Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+                Map.of());
 
         // Inject trade-pending snapshot (driver won't act — human decides, not bot)
         driver.onSnapshotChanged(ClientSessionSnapshot.from(stateWithTrade, true));
@@ -813,7 +701,7 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
@@ -853,7 +741,7 @@ class PureDomainBotDriverTest {
                 .build();
         recorder.initState(state);
 
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");

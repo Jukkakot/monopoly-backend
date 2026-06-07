@@ -10,7 +10,6 @@ import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.application.session.auction.AuctionCommandHandler;
 import fi.monopoly.application.session.auction.DomainAuctionGateway;
-import fi.monopoly.domain.session.BotDifficulty;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -224,7 +223,7 @@ class AuctionFlowTest {
         };
 
         PureDomainBotDriver driver = PureDomainBotDriver.createAndRegisterIfNeeded(
-                new SessionCommandPublisher(port), state, Map.of(BOT, BotDifficulty.STRONG));
+                new SessionCommandPublisher(port), state, Map.of());
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
         assertTrue(latch.await(3, TimeUnit.SECONDS), "Bot should decide within 3s");
         driver.stop();

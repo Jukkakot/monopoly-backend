@@ -10,32 +10,22 @@ public record SeatState(
         String controllerProfileId,
         String tokenColorHex,
         boolean joined,
-        BotDifficulty botDifficulty,
         boolean ready
 ) {
-    /** Backward-compatible constructor — all existing sessions are fully joined, no difficulty stored. */
+    /** Backward-compatible constructor — all existing sessions are fully joined. */
     public SeatState(String seatId, int seatIndex, String playerId,
                      SeatKind seatKind, ControlMode controlMode,
                      String displayName, String controllerProfileId, String tokenColorHex) {
         this(seatId, seatIndex, playerId, seatKind, controlMode,
-             displayName, controllerProfileId, tokenColorHex, true, null, false);
+             displayName, controllerProfileId, tokenColorHex, true, false);
     }
 
-    /** Backward-compatible constructor — explicit joined flag, no difficulty stored. */
+    /** Backward-compatible constructor — explicit joined flag. */
     public SeatState(String seatId, int seatIndex, String playerId,
                      SeatKind seatKind, ControlMode controlMode,
                      String displayName, String controllerProfileId, String tokenColorHex,
                      boolean joined) {
         this(seatId, seatIndex, playerId, seatKind, controlMode,
-             displayName, controllerProfileId, tokenColorHex, joined, null, false);
-    }
-
-    /** Backward-compatible constructor — explicit joined flag and difficulty, no ready. */
-    public SeatState(String seatId, int seatIndex, String playerId,
-                     SeatKind seatKind, ControlMode controlMode,
-                     String displayName, String controllerProfileId, String tokenColorHex,
-                     boolean joined, BotDifficulty botDifficulty) {
-        this(seatId, seatIndex, playerId, seatKind, controlMode,
-             displayName, controllerProfileId, tokenColorHex, joined, botDifficulty, false);
+             displayName, controllerProfileId, tokenColorHex, joined, false);
     }
 }

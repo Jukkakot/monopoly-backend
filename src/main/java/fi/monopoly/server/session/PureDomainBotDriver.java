@@ -58,8 +58,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final SessionCommandPublisher publisher;
     private final String sessionId;
     private final Set<String> botPlayerIds;
-    private final Map<String, BotDifficulty> difficulties;
-    /** Per-player STRONG bot configs. Falls back to StrongBotConfig.defaults() if absent. */
+    /** Per-player bot configs. Falls back to StrongBotConfig.defaults() if absent. */
     private final Map<String, StrongBotConfig> configs;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
@@ -85,12 +84,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             SessionCommandPublisher publisher,
             String sessionId,
             Set<String> botPlayerIds,
-            Map<String, BotDifficulty> difficulties,
             Map<String, StrongBotConfig> configs) {
         this.publisher = publisher;
         this.sessionId = sessionId;
         this.botPlayerIds = botPlayerIds;
-        this.difficulties = difficulties;
         this.configs = Map.copyOf(configs);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("bot-driver-" + sessionId.substring(0, 8), 0).factory());
@@ -118,32 +115,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     /**
      * Creates and registers a {@link PureDomainBotDriver} for any BOT seats in the given state.
      * Returns {@code null} if the session has no bot seats.
-     *
-     * @param difficulties per-player difficulty; defaults to NORMAL for any player not in the map
      */
     static PureDomainBotDriver createAndRegisterIfNeeded(
             SessionCommandPublisher publisher,
             SessionState initialState,
-            Map<String, BotDifficulty> difficulties) {
-        return createAndRegisterIfNeeded(publisher, initialState, difficulties, Map.of());
-    }
-
-    static PureDomainBotDriver createAndRegisterIfNeeded(
-            SessionCommandPublisher publisher,
-            SessionState initialState,
-            Map<String, BotDifficulty> difficulties,
             Map<String, StrongBotConfig> configs) {
         Set<String> botIds = collectBotPlayerIds(initialState);
         if (botIds.isEmpty()) {
             return null;
         }
         PureDomainBotDriver driver = new PureDomainBotDriver(
-                publisher, initialState.sessionId(), botIds, Map.copyOf(difficulties), configs);
+                publisher, initialState.sessionId(), botIds, configs);
         publisher.addListener(driver);
-        log.info("Bot driver registered for session {} — bots: {} difficulties: {}",
-                initialState.sessionId().substring(0, 8), botIds,
-                botIds.stream().collect(java.util.stream.Collectors.toMap(
-                        id -> id, id -> difficulties.getOrDefault(id, BotDifficulty.STRONG))));
+        log.info("Bot driver registered for session {} — bots: {}",
+                initialState.sessionId().substring(0, 8), botIds);
         // Trigger initial check after a short grace period. Viewer-gating now handles the
         // "wait for frontend" concern — the bot pauses immediately if viewerCount == 0, so
         // this delay only needs to survive the session-creation HTTP round-trip (~200ms).
@@ -162,7 +147,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     static PureDomainBotDriver createAndRegisterIfNeeded(
             SessionCommandPublisher publisher, SessionState initialState) {
-        return createAndRegisterIfNeeded(publisher, initialState, Map.of(), Map.of());
+        return createAndRegisterIfNeeded(publisher, initialState, Map.of());
     }
 
     public void stop() {
@@ -400,10 +385,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             case WAITING_FOR_ROLL -> publisher.handle(new RollDiceCommand(sessionId, activeId));
             case WAITING_FOR_CARD_ACK -> publisher.handle(new AcknowledgeCardCommand(sessionId, activeId));
             case WAITING_FOR_END_TURN -> {
-                if (!isEasy(activeId) && tryUnmortgageGreedy(state, activeId)) return;
-                if (!isEasy(activeId) && tryBuildGreedy(state, activeId)) return;
-                if (isStrong(activeId) && state.tradeState() == null
-                        && tryInitiateStrategicTrade(state, activeId)) return;
+                if (tryUnmortgageGreedy(state, activeId)) return;
+                if (tryBuildGreedy(state, activeId)) return;
+                if (state.tradeState() == null && tryInitiateStrategicTrade(state, activeId)) return;
                 publisher.handle(new EndTurnCommand(sessionId, activeId));
             }
             case WAITING_FOR_DECISION -> handleDecision(state, activeId);
@@ -431,29 +415,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (decision.payload() instanceof PropertyPurchaseDecisionPayload purchase) {
             PlayerSnapshot player = findPlayer(state, activeId);
             int cash = player != null ? player.cash() : 0;
-            boolean canAfford = cash >= purchase.price();
-            // EASY mode: skip 40% of affordable purchases
-            if (canAfford && isEasy(activeId) && ThreadLocalRandom.current().nextDouble() < 0.40) {
-                publisher.handle(new DeclinePropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
-                return;
-            }
-            if (isStrong(activeId)) {
-                handleDecisionStrong(state, activeId, decision, purchase, cash);
-                return;
-            }
-            // NORMAL / remaining EASY: simple afford-or-mortgage
-            if (canAfford) {
-                publisher.handle(new BuyPropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
-            } else if (!isEasy(activeId)) {
-                PropertyStateSnapshot toMortgage = findMortgageCandidateForPurchase(state, activeId, purchase.price() - cash);
-                if (toMortgage != null) {
-                    publisher.handle(new ToggleMortgageCommand(sessionId, activeId, toMortgage.propertyId()));
-                } else {
-                    publisher.handle(new DeclinePropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
-                }
-            } else {
-                publisher.handle(new DeclinePropertyCommand(sessionId, activeId, decision.decisionId(), purchase.propertyId()));
-            }
+            handleDecisionStrong(state, activeId, decision, purchase, cash);
         } else {
             publisher.handle(new EndTurnCommand(sessionId, activeId));
         }
@@ -606,11 +568,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeState trade = state.tradeState();
         String tradeId = trade.tradeId();
 
-        if (isEasy(botId)) {
-            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
-            return;
-        }
-
         // Determine perspective: the currentOffer always expresses things from the proposer's view.
         // If botId == offer.recipientPlayerId → bot receives offeredToRecipient, gives requestedFromRecipient.
         // Otherwise (bot is the proposer, e.g. deciding on a counter) → sides are reversed.
@@ -622,16 +579,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false);
 
-        // STRONG bot uses tradeFairnessTolerance: accepts if deficit <= tolerance
-        int fairnessTolerance = isStrong(botId) ? configFor(botId).tradeFairnessTolerance() : 0;
+        // Accept if deficit is within the configured fairness tolerance
+        int fairnessTolerance = configFor(botId).tradeFairnessTolerance();
         if (valueReceived >= valueGiven - fairnessTolerance) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
             return;
         }
 
-        // STRONG bot: prefer countering over declining — always counter the first time,
+        // Prefer countering over declining — always counter the first time,
         // and again if the follow-up is at least 25% reasonable (avoids infinite loops).
-        if (isStrong(botId) && valueGiven > 0) {
+        if (valueGiven > 0) {
             long counterCount = trade.history().stream()
                     .filter(e -> "COUNTERED".equals(e.actionType())).count();
             boolean offerIsReasonable = counterCount == 0 || valueReceived >= valueGiven * 0.25;
@@ -975,21 +932,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int cash = bidder != null ? bidder.cash() : 0;
         int minBid = auction.minimumNextBid();
 
-        // EASY mode: pass 50% of the time even when affordable
-        if (isEasy(bidderId)) {
-            boolean wouldBid = cash >= minBid && minBid > 0;
-            if (wouldBid && ThreadLocalRandom.current().nextDouble() < 0.50) {
-                publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
-            } else if (wouldBid) {
-                publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), minBid));
-            } else {
-                publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
-            }
-            return;
-        }
-
-        // STRONG bot: bid up to a config-based ceiling based on property value and set completion
-        if (isStrong(bidderId) && minBid > 0) {
+        // Bid up to a config-based ceiling based on property value and set completion
+        if (minBid > 0) {
             StrongBotConfig cfg = configFor(bidderId);
             // Auction reserve is capped at dangerCashReserve — the full dynamic reserve (which
             // can exceed 500 late game) is for purchase decisions, not competitive bidding.
@@ -1027,13 +971,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             } else {
                 publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
             }
-            return;
-        }
-
-        // NORMAL bot: bid if affordable
-        boolean wouldBid = cash >= minBid && minBid > 0;
-        if (wouldBid) {
-            publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), minBid));
         } else {
             publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
         }
@@ -1045,7 +982,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     /**
      * Computes a human-like delay before the bot acts, based on what the current state demands.
-     * Harder bots react slightly faster; easier bots are more hesitant.
      * A ±20 % random jitter is applied on top.
      */
     private long computeDelay(SessionState state) {
@@ -1058,15 +994,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             long firstTurnExtraMs = Long.getLong("monopoly.bot.first.turn.extra.delay.ms", 2500L);
             base += firstTurnExtraMs;
         }
-        String actorId = resolveActorId(state);
-        BotDifficulty diff = actorId != null
-                ? difficulties.getOrDefault(actorId, BotDifficulty.STRONG)
-                : BotDifficulty.NORMAL;
-        double diffMult = switch (diff) {
-            case EASY   -> 1.25;   // hesitant, slower
-            case NORMAL -> 1.0;
-            case STRONG -> 0.80;   // more decisive
-        };
+        // Fixed multiplier: 0.80 (decisive / responsive feel)
+        double diffMult = 0.80;
         long floor = speed < 0.15 ? 30L : 200L;  // fast mode: no artificial floor
         long scaled = Math.max(floor, (long) (base * diffMult * speed));
         long jitter = (long) (scaled * 0.20);
@@ -1133,21 +1062,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Fallback reserve for EASY/NORMAL bots (STRONG bots use dynamicReserve()). */
-    private static final int MIN_CASH_RESERVE = 200;
-
-    /** Returns the StrongBotConfig for a STRONG bot; defaults() for others. */
+    /** Returns the bot config for the given player; falls back to defaults() if absent. */
     private StrongBotConfig configFor(String playerId) {
-        if (!isStrong(playerId)) return StrongBotConfig.defaults();
         return configs.getOrDefault(playerId, StrongBotConfig.defaults());
     }
 
     /**
-     * Dynamic cash reserve for STRONG bots that scales with board danger and opponent monopolies.
-     * EASY/NORMAL fall back to the flat MIN_CASH_RESERVE.
+     * Dynamic cash reserve that scales with board danger and opponent monopolies.
      */
     private int dynamicReserve(SessionState state, String playerId) {
-        if (!isStrong(playerId)) return MIN_CASH_RESERVE;
         return StrongBotStrategy.dynamicReserve(state, playerId, configFor(playerId));
     }
 
@@ -1224,14 +1147,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 .mapToInt(PureDomainBotDriver::buildingLevel)
                 .max().orElse(0);
         return level - 1 >= maxRest - 1;
-    }
-
-    private boolean isEasy(String playerId) {
-        return difficulties.getOrDefault(playerId, BotDifficulty.STRONG) == BotDifficulty.EASY;
-    }
-
-    private boolean isStrong(String playerId) {
-        return difficulties.getOrDefault(playerId, BotDifficulty.STRONG) == BotDifficulty.STRONG;
     }
 
     private static Set<String> collectBotPlayerIds(SessionState state) {

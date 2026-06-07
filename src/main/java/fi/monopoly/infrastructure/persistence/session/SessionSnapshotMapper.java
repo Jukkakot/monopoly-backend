@@ -72,8 +72,7 @@ public final class SessionSnapshotMapper {
                 seatState.controlMode(),
                 seatState.displayName(),
                 seatState.controllerProfileId(),
-                seatState.tokenColorHex(),
-                seatState.botDifficulty()
+                seatState.tokenColorHex()
         );
     }
 
@@ -86,9 +85,7 @@ public final class SessionSnapshotMapper {
                 seatSnapshot.controlMode(),
                 seatSnapshot.displayName(),
                 seatSnapshot.controllerProfileId(),
-                seatSnapshot.tokenColorHex(),
-                true,
-                seatSnapshot.botDifficulty()
+                seatSnapshot.tokenColorHex()
         );
     }
 

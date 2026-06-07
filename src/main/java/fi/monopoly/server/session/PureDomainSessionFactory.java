@@ -96,30 +96,17 @@ public final class PureDomainSessionFactory {
      * @param seatKinds per-player seat kinds; if shorter than playerNames the remaining seats default to {@link SeatKind#HUMAN}
      */
     public static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors, List<SeatKind> seatKinds) {
-        return initialGameState(sessionId, playerNames, colors, seatKinds, List.of(), new Random());
-    }
-
-    /**
-     * Creates an initial game state with explicit seat kinds and per-seat bot difficulties.
-     */
-    public static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors,
-                                                List<SeatKind> seatKinds, List<BotDifficulty> difficulties) {
-        return initialGameState(sessionId, playerNames, colors, seatKinds, difficulties, new Random());
+        return initialGameState(sessionId, playerNames, colors, seatKinds, new Random());
     }
 
     /** Package-private variant used in tests to pass a seeded {@link Random}. */
     static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors, Random rng) {
-        return initialGameState(sessionId, playerNames, colors, List.of(), List.of(), rng);
+        return initialGameState(sessionId, playerNames, colors, List.of(), rng);
     }
 
     /** Full variant with seat kinds and seeded RNG — used by tests and overloads above. */
-    static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors, List<SeatKind> seatKinds, Random rng) {
-        return initialGameState(sessionId, playerNames, colors, seatKinds, List.of(), rng);
-    }
-
-    /** Full variant with seat kinds, difficulties, and seeded RNG. */
     static SessionState initialGameState(String sessionId, List<String> playerNames, List<String> colors,
-                                         List<SeatKind> seatKinds, List<BotDifficulty> difficulties, Random rng) {
+                                         List<SeatKind> seatKinds, Random rng) {
         if (playerNames.isEmpty()) throw new IllegalArgumentException("At least one player is required");
 
         List<PropertyStateSnapshot> properties = SpotType.SPOT_TYPES.stream()
@@ -142,9 +129,7 @@ public final class PureDomainSessionFactory {
             String seatId = "seat-" + seatIndex;
             SeatKind kind = originalIndex < seatKinds.size() ? seatKinds.get(originalIndex) : SeatKind.HUMAN;
             String profile = kind == SeatKind.BOT ? "BOT" : "HUMAN";
-            BotDifficulty difficulty = (kind == SeatKind.BOT && originalIndex < difficulties.size())
-                    ? difficulties.get(originalIndex) : null;
-            seats.add(new SeatState(seatId, seatIndex, playerId, kind, ControlMode.MANUAL, name, profile, color, true, difficulty));
+            seats.add(new SeatState(seatId, seatIndex, playerId, kind, ControlMode.MANUAL, name, profile, color, true));
             players.add(new PlayerSnapshot(playerId, seatId, name, 1500, 0, false, false, false, 0, 0, List.of()));
         }
 
@@ -192,7 +177,7 @@ public final class PureDomainSessionFactory {
     public static SessionState lobbyWithHost(String sessionId, String hostPlayerId, String hostName, String hostColor) {
         String seatId = "seat-0";
         SeatState hostSeat = new SeatState(seatId, 0, hostPlayerId, SeatKind.HUMAN, ControlMode.MANUAL,
-                hostName, "HUMAN", hostColor, true, null, false);
+                hostName, "HUMAN", hostColor, true, false);
         PlayerSnapshot hostPlayer = new PlayerSnapshot(hostPlayerId, seatId, hostName,
                 1500, 0, false, false, false, 0, 0, List.of());
         List<PropertyStateSnapshot> properties = SpotType.SPOT_TYPES.stream()
@@ -233,7 +218,7 @@ public final class PureDomainSessionFactory {
                     "seat-" + seatIndex, seatIndex,
                     lobby.playerId(), lobby.seatKind(), lobby.controlMode(),
                     lobby.displayName(), lobby.controllerProfileId(),
-                    lobby.tokenColorHex(), true, lobby.botDifficulty(), false);
+                    lobby.tokenColorHex(), true, false);
             seats.add(gameSeat);
             players.add(new PlayerSnapshot(lobby.playerId(), "seat-" + seatIndex,
                     lobby.displayName(), 1500, 0, false, false, false, 0, 0, List.of()));

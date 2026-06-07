@@ -89,26 +89,20 @@ public final class SessionRegistry {
     }
 
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds) {
-        return create(names, colors, seatKinds, List.of());
-    }
-
-    public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds,
-                               List<BotDifficulty> difficulties) {
         checkCapacity();
         validateNoDuplicateNames(names);
         validateNoDuplicateColors(colors);
         String sessionId = SessionIdGenerator.generate();
         boolean allBots = !seatKinds.isEmpty() && seatKinds.stream().allMatch(k -> k == SeatKind.BOT);
         String hostToken = allBots ? null : UUID.randomUUID().toString();
-        SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds, difficulties);
+        SessionState initialState = PureDomainSessionFactory.initialGameState(sessionId, names, colors, seatKinds);
         InMemorySessionState baseStore = new InMemorySessionState(initialState);
         SessionApplicationService service = PureDomainSessionFactory.create(sessionId, baseStore);
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
         baseStore.setOnChange(publisher::publishSnapshot);
-        Map<String, BotDifficulty> difficultyMap = buildDifficultyMap(initialState, difficulties);
         Map<String, StrongBotConfig> botConfigs = buildBotConfigs(initialState, sessionId);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
-                publisher, initialState, difficultyMap, botConfigs);
+                publisher, initialState, botConfigs);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
         sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, new ConcurrentHashMap<>()));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
@@ -186,7 +180,7 @@ public final class SessionRegistry {
                     SeatState updated = new SeatState(colorBot.seatId(), colorBot.seatIndex(),
                             colorBot.playerId(), colorBot.seatKind(), colorBot.controlMode(),
                             colorBot.displayName(), colorBot.controllerProfileId(),
-                            newBotColor, colorBot.joined(), colorBot.botDifficulty(), colorBot.ready());
+                            newBotColor, colorBot.joined(), colorBot.ready());
                     workingSeats = workingSeats.stream()
                             .map(s -> s.seatId().equals(colorBot.seatId()) ? updated : s)
                             .collect(Collectors.toList());
@@ -205,7 +199,7 @@ public final class SessionRegistry {
                 SeatState updated = new SeatState(nameBot.seatId(), nameBot.seatIndex(),
                         nameBot.playerId(), nameBot.seatKind(), nameBot.controlMode(),
                         newBotName, nameBot.controllerProfileId(),
-                        nameBot.tokenColorHex(), nameBot.joined(), nameBot.botDifficulty(), nameBot.ready());
+                        nameBot.tokenColorHex(), nameBot.joined(), nameBot.ready());
                 workingSeats = workingSeats.stream()
                         .map(s -> s.seatId().equals(nameBot.seatId()) ? updated : s)
                         .collect(Collectors.toList());
@@ -216,7 +210,7 @@ public final class SessionRegistry {
             SessionState tempForColor = state.toBuilder().seats(workingSeats).build();
             String effectiveColor = resolveColor(color, tempForColor, seatIndex);
             SeatState newSeat = new SeatState(seatId, seatIndex, newPlayerId, SeatKind.HUMAN,
-                    ControlMode.MANUAL, name, "HUMAN", effectiveColor, true, null, false);
+                    ControlMode.MANUAL, name, "HUMAN", effectiveColor, true, false);
             added[0] = newSeat;
 
             workingSeats.add(newSeat);
@@ -266,7 +260,7 @@ public final class SessionRegistry {
             String seatId = "seat-" + UUID.randomUUID();
             String color = resolveColor(null, state, seatIndex);
             SeatState botSeat = new SeatState(seatId, seatIndex, botPlayerId, SeatKind.BOT,
-                    ControlMode.AUTOPLAY, botName, "BOT", color, true, BotDifficulty.STRONG, true);
+                    ControlMode.AUTOPLAY, botName, "BOT", color, true, true);
             added[0] = botSeat;
 
             List<SeatState> newSeats = new ArrayList<>(state.seats());
@@ -334,7 +328,7 @@ public final class SessionRegistry {
             changed[0] = true;
             SeatState updated = new SeatState(seat.seatId(), seat.seatIndex(), seat.playerId(),
                     seat.seatKind(), seat.controlMode(), seat.displayName(), seat.controllerProfileId(),
-                    seat.tokenColorHex(), seat.joined(), seat.botDifficulty(), ready);
+                    seat.tokenColorHex(), seat.joined(), ready);
             List<SeatState> newSeats = state.seats().stream()
                     .map(s -> s.playerId().equals(playerId) ? updated : s)
                     .toList();
@@ -559,13 +553,9 @@ public final class SessionRegistry {
         SessionState gameState = PureDomainSessionFactory.initialGameStateFromSeats(sessionId, lobbySeats, hostPlayerId);
         entry.baseStore().update(ignored -> gameState);
 
-        Map<String, BotDifficulty> diffMap = new HashMap<>();
-        gameState.seats().stream()
-                .filter(s -> s.seatKind() == SeatKind.BOT)
-                .forEach(s -> diffMap.put(s.playerId(), BotDifficulty.STRONG));
         Map<String, StrongBotConfig> botConfigs = buildBotConfigs(gameState, sessionId);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
-                entry.publisher(), gameState, diffMap, botConfigs);
+                entry.publisher(), gameState, botConfigs);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
 
         List<String> humanNames = gameState.seats().stream()
@@ -750,21 +740,6 @@ public final class SessionRegistry {
             log.info("load: cpu={} sessions={}/{}", cpuStr, count, MAX_SESSIONS);
         }
         GlobalMetrics.recordLoad(count, cpu);
-    }
-
-    private static Map<String, BotDifficulty> buildDifficultyMap(
-            SessionState state, List<BotDifficulty> difficulties) {
-        Map<String, BotDifficulty> map = new HashMap<>();
-        // Use the difficulty already stored on each seat (set by the factory from the original
-        // request index), rather than re-indexing by shuffled seat order which causes bots to
-        // silently receive the wrong difficulty after turn-order randomisation.
-        for (SeatState seat : state.seats()) {
-            BotDifficulty d = seat.botDifficulty();
-            if (d != null) {
-                map.put(seat.playerId(), d);
-            }
-        }
-        return map;
     }
 
     /**
