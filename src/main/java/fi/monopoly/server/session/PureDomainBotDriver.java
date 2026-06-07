@@ -659,7 +659,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         int valueGiven = evaluateSelectionContextual(state, botId, myGiving, false);
         int currentMoneyReceived = myReceiving.moneyAmount();
-        int nonMoneyReceived = evaluateSelectionValue(myReceiving) - currentMoneyReceived;
+        int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
         // Target: bot wants ~5% profit over what it gives
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * 1.05) - nonMoneyReceived);
@@ -924,10 +924,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     private static int evaluateSelectionValue(TradeSelectionState selection) {
+        return evaluateSelectionValue(selection, null);
+    }
+
+    /** Returns the total estimated value of a trade selection.
+     *  Mortgaged properties are valued at half face price (their mortgage value),
+     *  since the recipient must spend ~55% of face price to unmortgage them. */
+    private static int evaluateSelectionValue(TradeSelectionState selection, SessionState state) {
         int value = selection.moneyAmount();
         value += selection.jailCardCount() * 50;
         for (String propId : selection.propertyIds()) {
-            value += SpotType.valueOf(propId).getIntegerProperty("price");
+            int facePrice = SpotType.valueOf(propId).getIntegerProperty("price");
+            boolean mortgaged = state != null && state.properties().stream()
+                    .anyMatch(p -> propId.equals(p.propertyId()) && p.mortgaged());
+            value += mortgaged ? facePrice / 2 : facePrice;
         }
         // Group completion bonus: a complete color monopoly is worth 50% more than the sum of prices
         for (StreetType group : StreetType.values()) {
@@ -940,7 +950,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (inSelection == groupSize) {
                 int groupValue = selection.propertyIds().stream()
                         .filter(id -> SpotType.valueOf(id).streetType == group)
-                        .mapToInt(id -> SpotType.valueOf(id).getIntegerProperty("price"))
+                        .mapToInt(id -> {
+                            int fp = SpotType.valueOf(id).getIntegerProperty("price");
+                            boolean m = state != null && state.properties().stream()
+                                    .anyMatch(p -> id.equals(p.propertyId()) && p.mortgaged());
+                            return m ? fp / 2 : fp;
+                        })
                         .sum();
                 value += groupValue / 2;
             }
@@ -957,11 +972,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                                              TradeSelectionState selection, boolean receiving) {
         StrongBotConfig cfg = configFor(botId);
 
-        // Base value: cash weighted by liquidity preference, then property prices
+        // Base value: cash weighted by liquidity preference, then property prices.
+        // Mortgaged properties are worth only their mortgage value (face/2) since the
+        // recipient must spend ~55% of face price to unmortgage before earning any rent.
         int value = (int)(selection.moneyAmount() * cfg.tradeLiquidityWeight());
         value += selection.jailCardCount() * 50;
         for (String propId : selection.propertyIds()) {
-            value += SpotType.valueOf(propId).getIntegerProperty("price");
+            int facePrice = SpotType.valueOf(propId).getIntegerProperty("price");
+            boolean mortgaged = state.properties().stream()
+                    .anyMatch(p -> propId.equals(p.propertyId()) && p.mortgaged());
+            value += mortgaged ? facePrice / 2 : facePrice;
         }
 
         for (StreetType group : StreetType.values()) {
