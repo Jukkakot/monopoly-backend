@@ -778,6 +778,126 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Trade: bot offers own property when cash-poor (property-for-property)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void strongBotOffersOwnPropertyInTradeWhenCashPoor() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns U1 (utility — lowest mortgage priority=1, always expendable); human owns B2
+        PropertyStateSnapshot u1 = new PropertyStateSnapshot("U1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", HUMAN_PLAYER, false, 0, 0);
+
+        // Trade in editing: B2 already requested, give side empty
+        TradeState trade = new TradeState(
+                "trade-1", BOT_PLAYER, HUMAN_PLAYER, TradeStatus.EDITING,
+                new TradeOfferState(
+                        BOT_PLAYER, HUMAN_PLAYER,
+                        new TradeSelectionState(0, List.of(), 0),
+                        new TradeSelectionState(0, List.of("B2"), 0)),
+                BOT_PLAYER, true, null, BOT_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(u1, b2));
+        // Bot cash = 100, reserve ≈ 150 → available = 0 < price(B2)=60 → triggers prop offer
+        state = state.toBuilder()
+                .tradeState(trade)
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 100, 1, false, false, false, 0, 0, List.of("U1")),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 1, false, false, false, 0, 0, List.of("B2"))
+                ))
+                .build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c ->
+                        c instanceof EditTradeOfferCommand e
+                                && "trade-1".equals(e.tradeId())
+                                && e.patch().propertyIdsToAdd().contains("U1")),
+                "STRONG bot should offer own property U1 when cash is insufficient; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
+    // Auction: budget-aware — bid minimum when competitors are cash-poor
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void strongBotBidsMinimumWhenCompetitorsAreCashPoor() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Human is eligible but has only 5 cash (< 2 * minBid=10) — can't compete
+        AuctionState auction = new AuctionState(
+                "auction-1", "B1", HUMAN_PLAYER,
+                BOT_PLAYER, null,
+                0, 10,
+                Set.of(), List.of(BOT_PLAYER, HUMAN_PLAYER),
+                AuctionStatus.ACTIVE, 0, null
+        );
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false);
+        SessionState state = buildTwoPlayerState(turn, List.of());
+        state = state.toBuilder()
+                .auctionState(auction)
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 1, false, false, false, 0, 0, List.of()),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 5, 1, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of(BOT_PLAYER, BotDifficulty.STRONG));
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c ->
+                        c instanceof PlaceAuctionBidCommand b && b.amount() == 10),
+                "STRONG bot should bid exactly minBid when competitors are cash-poor; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
+    // Debt: position-aware mortgage priority protects high-danger properties
+    // -------------------------------------------------------------------------
+
+    @Test
+    void debtMortgagePriorityIncreasedWhenOpponentNearProperty() {
+        // B1 is at SPOT_TYPES index 1; opponent at boardIndex=0 → distance=1 (within danger range)
+        PropertyStateSnapshot b1 = new PropertyStateSnapshot("B1", BOT_PLAYER, false, 0, 0);
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.RESOLVING_DEBT, false, false),
+                List.of(b1));
+        // Opponent at board position 0 (GO) — exactly 1 step before B1
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 1, false, false, false, 0, 0, List.of("B1")),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+
+        int priorityWithDanger = StrongBotStrategy.debtMortgagePriority(state, BOT_PLAYER, b1);
+
+        // Move opponent far away (boardIndex=10 → distance=(1-10+40)%40=31 > 7 → no danger)
+        SessionState stateFar = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 1, false, false, false, 0, 0, List.of("B1")),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 10, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+
+        int priorityWithoutDanger = StrongBotStrategy.debtMortgagePriority(stateFar, BOT_PLAYER, b1);
+
+        assertTrue(priorityWithDanger > priorityWithoutDanger,
+                "Priority with danger (" + priorityWithDanger + ") should exceed priority without danger (" + priorityWithoutDanger + ")");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

@@ -357,18 +357,22 @@ final class StrongBotStrategy {
         SpotType st = spotType(prop.propertyId());
         StreetType group = st.streetType;
 
-        if (group.placeType == PlaceType.UTILITY) return 1;
-
-        if (group.placeType == PlaceType.RAILROAD) {
-            return ownedInSet(state, playerId, group) <= 1 ? 2 : 4;
+        int base;
+        if (group.placeType == PlaceType.UTILITY) {
+            base = 1;
+        } else if (group.placeType == PlaceType.RAILROAD) {
+            base = ownedInSet(state, playerId, group) <= 1 ? 2 : 4;
+        } else {
+            int owned = ownedInSet(state, playerId, group);
+            int gs    = setSize(group);
+            if (owned == gs)         base = 9; // full monopoly — last resort
+            else if (owned == gs - 1) base = 6; // near-monopoly — keep if at all possible
+            else if (owned == 1)      base = 3; // isolated — OK to sacrifice
+            else                      base = 5; // partial group
         }
 
-        int owned = ownedInSet(state, playerId, group);
-        int gs    = setSize(group);
-        if (owned == gs)         return 9; // full monopoly — last resort
-        if (owned == gs - 1)     return 6; // near-monopoly — keep if at all possible
-        if (owned == 1)          return 3; // isolated — OK to sacrifice
-        return 5;                          // partial group
+        // Opponent likely to land here soon — protect it from liquidation
+        return Math.min(9, base + opponentLandingDanger(state, playerId, prop));
     }
 
     /**
@@ -377,8 +381,9 @@ final class StrongBotStrategy {
      *
      * Computed as rent-loss-per-sell-value — the lower this ratio, the less
      * it hurts to sell that building compared to the cash it frees up.
+     * A bonus is added when an opponent is likely to land on the property soon.
      */
-    static double debtBuildingSellScore(PropertyStateSnapshot prop) {
+    static double debtBuildingSellScore(SessionState state, String playerId, PropertyStateSnapshot prop) {
         String rentsStr = spotType(prop.propertyId()).getStringProperty("rents");
         if (rentsStr == null || rentsStr.isBlank()) return 0;
         String[] rents = rentsStr.split(",");
@@ -389,7 +394,25 @@ final class StrongBotStrategy {
             int rentPrev = level > 0 ? Integer.parseInt(rents[level - 1].trim()) : 0;
             int rentLoss = rentCur - rentPrev;
             int sellValue = spotType(prop.propertyId()).getIntegerProperty("housePrice") / 2;
-            return sellValue > 0 ? (double) rentLoss / sellValue : 0;
+            double baseScore = sellValue > 0 ? (double) rentLoss / sellValue : 0;
+            // Protect buildings on properties opponents are likely to land on
+            return baseScore + opponentLandingDanger(state, playerId, prop) * 0.5;
         } catch (Exception e) { return 0; }
+    }
+
+    /**
+     * Returns 1 if any active opponent is within 7 board steps of this property
+     * (i.e. could land on it on their next average dice roll), 0 otherwise.
+     */
+    static int opponentLandingDanger(SessionState state, String playerId, PropertyStateSnapshot prop) {
+        int propBoardIndex = SpotType.SPOT_TYPES.indexOf(SpotType.valueOf(prop.propertyId()));
+        if (propBoardIndex < 0) return 0;
+        boolean danger = state.players().stream()
+                .filter(p -> !p.playerId().equals(playerId) && !p.bankrupt() && !p.eliminated())
+                .anyMatch(p -> {
+                    int dist = (propBoardIndex - p.boardIndex() + 40) % 40;
+                    return dist >= 1 && dist <= 7;
+                });
+        return danger ? 1 : 0;
     }
 }

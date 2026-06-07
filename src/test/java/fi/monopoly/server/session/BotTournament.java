@@ -630,7 +630,7 @@ public final class BotTournament {
             PropertyStateSnapshot best = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
                     .filter(p -> evenSellEligible(state, p))
-                    .min(Comparator.comparingDouble(StrongBotStrategy::debtBuildingSellScore)
+                    .min(Comparator.comparingDouble((PropertyStateSnapshot p) -> StrongBotStrategy.debtBuildingSellScore(state, debtorId, p))
                             .thenComparingInt(p -> -buildingLevel(p)))
                     .orElse(null);
             if (best != null) return service.handle(new SellBuildingForDebtCommand(
