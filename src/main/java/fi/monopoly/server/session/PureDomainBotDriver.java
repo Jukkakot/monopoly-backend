@@ -73,6 +73,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private volatile boolean isFirstTurn = true;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
             = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Consecutive EditTradeOffer attempts per tradeId — safety net against infinite edit loops. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> counterEditAttempts
+            = new java.util.concurrent.ConcurrentHashMap<>();
+    // Generic stuck-detection: if the bot keeps dispatching in the same situation repeatedly,
+    // something is wrong. Volatile is safe — dispatcher runs on a single-thread executor.
+    private volatile String lastDispatchFingerprint = "";
+    private volatile int consecutiveDispatchCount = 0;
     /**
      * Last money amount the bot offered per (partnerId -> propertyId) that was declined.
      * Next offer for the same property+partner must strictly exceed this amount.
@@ -252,6 +259,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // handleDecline() never writes a "DECLINED" history entry, so we detect via decisionRequiredFromPlayerId.
         TradeState prevTrade = lastObservedTrade;
         lastObservedTrade = state.tradeState();
+        // Clear the edit-loop counter when the trade resolves (tradeId changes or trade disappears)
+        if (prevTrade != null) {
+            String prevId = prevTrade.tradeId();
+            TradeState cur = state.tradeState();
+            if (cur == null || !prevId.equals(cur.tradeId())) {
+                counterEditAttempts.remove(prevId);
+            }
+        }
         if (prevTrade != null && state.tradeState() == null
                 && botPlayerIds.contains(prevTrade.openedByPlayerId())
                 && prevTrade.decisionRequiredFromPlayerId() != null) {
@@ -353,7 +368,32 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return state.turn().activePlayerId();
     }
 
+    /** Fingerprint of the current game situation — used to detect stuck/looping bot behaviour. */
+    private String situationFingerprint(SessionState state) {
+        String phase = state.turn() != null ? state.turn().phase().name() : "NONE";
+        String tradeId = state.tradeState() != null ? state.tradeState().tradeId() : "-";
+        String tradeStatus = state.tradeState() != null ? state.tradeState().status().name() : "-";
+        String auctionStatus = state.auctionState() != null ? state.auctionState().status().name() : "-";
+        String actor = resolveActorId(state);
+        return phase + "|" + (actor != null ? actor.substring(Math.max(0, actor.length() - 4)) : "?")
+                + "|" + tradeId.substring(Math.max(0, tradeId.length() - 8))
+                + "|" + tradeStatus + "|" + auctionStatus;
+    }
+
     private void dispatchGreedy(SessionState state) {
+        // Generic stuck detection: warn if the same situation triggers dispatch repeatedly.
+        String fp = situationFingerprint(state);
+        if (fp.equals(lastDispatchFingerprint)) {
+            consecutiveDispatchCount++;
+            if (consecutiveDispatchCount == 10) {
+                log.warn("Bot stuck-detector: same situation dispatched {} times — session={} fingerprint={}",
+                        consecutiveDispatchCount, sessionId.substring(0, 8), fp);
+            }
+        } else {
+            lastDispatchFingerprint = fp;
+            consecutiveDispatchCount = 1;
+        }
+
         // Trade actions may involve a player other than the active turn player — handle first.
         if (state.tradeState() != null) {
             TradeState trade = state.tradeState();
@@ -671,6 +711,17 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (actualMoney == currentMoneyReceived) {
             // Other party's cash caps us at what's already set — submit the best we can get
             publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
+            return;
+        }
+
+        // Safety net: if the bot has tried to edit this counter too many times, something is
+        // wrong with the convergence — cancel rather than loop indefinitely.
+        int attempts = counterEditAttempts.merge(tradeId, 1, Integer::sum);
+        if (attempts > 8) {
+            log.warn("Bot {} counter-edit loop detected for trade {} ({} attempts) — cancelling",
+                    botId.substring(0, 8), tradeId.substring(0, 12), attempts);
+            counterEditAttempts.remove(tradeId);
+            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
         }
 
