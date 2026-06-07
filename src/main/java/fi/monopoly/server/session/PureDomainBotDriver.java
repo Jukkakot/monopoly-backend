@@ -1071,7 +1071,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         long botDelayMs = Long.getLong("monopoly.bot.think.delay.ms", DEFAULT_BOT_DELAY_MS);
         if (botDelayMs == 0) return 0;  // instant mode (tests / system property = 0)
         double speed = speedMultiplier;
-        if (speed == 0.0) return MIN_FAST_DELAY_MS;
+        boolean isTradeOrAuction = state.tradeState() != null || state.auctionState() != null;
+        if (speed == 0.0) return isTradeOrAuction ? 350L : MIN_FAST_DELAY_MS;
         long base = computeBaseDelay(state);
         if (isFirstTurn) {
             long firstTurnExtraMs = Long.getLong("monopoly.bot.first.turn.extra.delay.ms", 2500L);
@@ -1095,6 +1096,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (trade.status() == TradeStatus.EDITING) {
                 return 1200;  // filling in individual offer steps
             }
+            if (trade.status() == TradeStatus.COUNTERED) {
+                return 900;   // filling in counter-offer steps
+            }
         }
 
         // Debt: stress level depends on available options
@@ -1115,7 +1119,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (state.auctionState() != null) {
             AuctionState auction = state.auctionState();
             if (auction.status() == AuctionStatus.WON_PENDING_RESOLUTION) {
-                return 650;   // winner confirming pickup — quick
+                return 1500;  // winner confirming pickup
             }
             return 1450;      // deciding whether to bid
         }
