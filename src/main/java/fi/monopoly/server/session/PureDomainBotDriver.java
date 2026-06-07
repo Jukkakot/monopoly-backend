@@ -624,6 +624,34 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Target: bot wants ~5% profit over what it gives
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * 1.05) - nonMoneyReceived);
 
+        // editOfferedSide: side the bot RECEIVES; editGiveSide: side the bot GIVES
+        boolean editOfferedSide = botIsRecipient;
+        boolean editGiveSide    = !editOfferedSide;
+
+        // Single-side money rule: never submit an offer with money on both sides — it is confusing.
+        // If the given side already carries cash AND we'd also put money on the received side,
+        // resolve the conflict first (in a separate command step) before continuing.
+        int givenMoney = myGiving.moneyAmount();
+        if (givenMoney > 0 && (targetMoneyReceived > 0 || currentMoneyReceived > 0)) {
+            if (!myGiving.propertyIds().isEmpty()) {
+                // Given side = property + cash: drop the cash; the property is the trade-in.
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, editGiveSide, 0, List.of(), List.of(), null)));
+            } else {
+                // Given side = pure cash: this is cash-for-properties. Counter by reducing the
+                // payment to a fair rate (~95 % of the received property value) instead of
+                // adding cash to the other side.
+                int fairGiveMoney = Math.max(0, (int) (nonMoneyReceived * 0.95));
+                if (fairGiveMoney < 10) {
+                    publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
+                } else {
+                    publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                            new TradeEditPatch(null, editGiveSide, fairGiveMoney, List.of(), List.of(), null)));
+                }
+            }
+            return;
+        }
+
         if (currentMoneyReceived >= targetMoneyReceived) {
             // Already fair — submit as-is
             publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
@@ -641,8 +669,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // Edit the money on the side the bot RECEIVES (offeredToRecipient if bot is recipient, else requestedFromRecipient)
-        boolean editOfferedSide = botIsRecipient;
+        // Edit the money on the side the bot RECEIVES
         publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
                 new TradeEditPatch(null, editOfferedSide, actualMoney, List.of(), List.of(), null)));
     }
