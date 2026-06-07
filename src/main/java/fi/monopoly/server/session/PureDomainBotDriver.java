@@ -668,6 +668,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
         }
+        if (actualMoney == currentMoneyReceived) {
+            // Other party's cash caps us at what's already set — submit the best we can get
+            publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
+            return;
+        }
 
         // Edit the money on the side the bot RECEIVES
         publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
