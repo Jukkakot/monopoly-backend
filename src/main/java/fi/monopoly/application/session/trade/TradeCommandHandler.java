@@ -6,6 +6,7 @@ import fi.monopoly.application.result.CommandResult;
 import fi.monopoly.application.result.DomainEvent;
 import fi.monopoly.domain.session.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+@Slf4j
 @RequiredArgsConstructor
 public final class TradeCommandHandler {
     private final String sessionId;
@@ -86,6 +88,7 @@ public final class TradeCommandHandler {
                 List.of(new TradeHistoryEntry(command.actorPlayerId(), "OPENED", "Trade opened"))
         );
         tradeStateSetter.accept(tradeState);
+        log.info("Trade opened: {} → {}", command.actorPlayerId(), command.recipientPlayerId());
         return accepted(List.of(new DomainEvent("TradeOpened", command.actorPlayerId(), command.recipientPlayerId())));
     }
 
@@ -146,6 +149,7 @@ public final class TradeCommandHandler {
                 appendHistory(state, new TradeHistoryEntry(command.actorPlayerId(), "SUBMITTED", "Trade submitted"))
         );
         tradeStateSetter.accept(updated);
+        log.info("Trade submitted by {} → awaiting response from {}", command.actorPlayerId(), responderId);
         return accepted(List.of(new DomainEvent("TradeOfferSubmitted", command.actorPlayerId(), responderId)));
     }
 
@@ -176,6 +180,7 @@ public final class TradeCommandHandler {
         }
         gateway.logTradeAccepted(state.initiatorPlayerId(), state.recipientPlayerId(), state.currentOffer());
         tradeStateSetter.accept(null);
+        log.info("Trade accepted by {}: {} ↔ {}", command.actorPlayerId(), state.initiatorPlayerId(), state.recipientPlayerId());
         return accepted(List.of(new DomainEvent("TradeAccepted", command.actorPlayerId(), state.tradeId())));
     }
 
@@ -186,6 +191,7 @@ public final class TradeCommandHandler {
         }
         gateway.logTradeDeclined(state.initiatorPlayerId(), state.recipientPlayerId());
         tradeStateSetter.accept(null);
+        log.info("Trade declined by {}: {} ↔ {}", command.actorPlayerId(), state.initiatorPlayerId(), state.recipientPlayerId());
         return accepted(List.of(new DomainEvent("TradeDeclined", command.actorPlayerId(), state.tradeId())));
     }
 
@@ -213,6 +219,7 @@ public final class TradeCommandHandler {
                 appendHistory(state, new TradeHistoryEntry(command.actorPlayerId(), "COUNTERED", "Trade countered"))
         );
         tradeStateSetter.accept(updated);
+        log.info("Trade countered by {}: {} ↔ {}", command.actorPlayerId(), state.initiatorPlayerId(), state.recipientPlayerId());
         return accepted(List.of(new DomainEvent("TradeCountered", command.actorPlayerId(), counterEditor)));
     }
 
@@ -226,6 +233,7 @@ public final class TradeCommandHandler {
         }
         gateway.logTradeCancelled(state.initiatorPlayerId(), state.recipientPlayerId());
         tradeStateSetter.accept(null);
+        log.info("Trade cancelled by {}: {} ↔ {}", command.actorPlayerId(), state.initiatorPlayerId(), state.recipientPlayerId());
         return accepted(List.of(new DomainEvent("TradeCancelled", command.actorPlayerId(), state.tradeId())));
     }
 

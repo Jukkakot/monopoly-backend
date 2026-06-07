@@ -94,6 +94,25 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         this.configs = Map.copyOf(configs);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("bot-driver-" + sessionId.substring(0, 8), 0).factory());
+        // Watchdog: fires every 5 s to catch cases where the bot missed an action due to
+        // lag-gating, rapid-fire snapshots, or scheduler/executor edge cases.  Only active
+        // when viewer gating is enabled (i.e. a real game, not a unit-test simulation).
+        this.scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (!viewerGatingEnabled || viewerCount.get() == 0) return;
+                if (pendingAction.get()) return;
+                SessionState s = publisher.currentState();
+                if (s == null || s.status() == SessionStatus.GAME_OVER
+                        || s.status() == SessionStatus.LOBBY) return;
+                if (!needsBotAction(s)) return;
+                ClientSessionSnapshot snap = publisher.currentSnapshot();
+                long lag = snap != null ? snap.version() - latestClientVersion.get() : 0;
+                log.info("Bot watchdog: retriggering for session {} (lag {})", sessionId.substring(0, 8), lag);
+                retrigger();
+            } catch (Exception e) {
+                log.warn("Bot watchdog threw", e);
+            }
+        }, 5, 5, TimeUnit.SECONDS);
     }
 
     /**
@@ -397,6 +416,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private void handleDecision(SessionState state, String activeId) {
         PendingDecision decision = state.pendingDecision();
         if (decision == null) {
+            // WAITING_FOR_DECISION is set by OverlaySessionStateStore whenever tradeState OR
+            // pendingDecision is non-null.  If only tradeState is active, the trade conditions
+            // in dispatchGreedy() should have already returned — but as a safety guard, don't
+            // send EndTurnCommand while a trade is open: it would be rejected and leave the bot
+            // stuck waiting for a state change that never comes.
+            if (state.tradeState() != null) {
+                log.warn("Bot in WAITING_FOR_DECISION with active trade but no pending decision — trade actor is not a bot, waiting");
+                return;
+            }
             publisher.handle(new EndTurnCommand(sessionId, activeId));
             return;
         }
@@ -551,7 +579,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
                     .filter(p -> evenSellEligible(state, p))
                     .min(java.util.Comparator
-                            .comparingDouble(StrongBotStrategy::debtBuildingSellScore)
+                            .comparingDouble((PropertyStateSnapshot p) -> StrongBotStrategy.debtBuildingSellScore(state, debtorId, p))
                             .thenComparingInt(p -> -buildingLevel(p)));
             if (buildingProp.isPresent()) {
                 publisher.handle(new SellBuildingForDebtCommand(sessionId, debtorId, debt.debtId(), buildingProp.get().propertyId(), 1));
@@ -694,25 +722,44 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // Step 2: offer money (full price of the target property, capped by available cash)
-        if (myGive.moneyAmount() == 0) {
-            String targetPropId = myRequest.propertyIds().get(0);
-            String partnerId = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
-            int price = SpotType.valueOf(targetPropId).getIntegerProperty("price");
-            PlayerSnapshot bot = findPlayer(state, botId);
-            int available = bot != null ? Math.max(0, bot.cash() - dynamicReserve(state, botId)) : 0;
-            int offerAmount = Math.min(price, available);
-            // Must strictly beat the last declined offer for this partner+property
-            int prevDeclined = lastDeclinedOfferAmount
-                    .getOrDefault(partnerId, new java.util.concurrent.ConcurrentHashMap<>())
-                    .getOrDefault(targetPropId, 0);
-            if (offerAmount < 10 || offerAmount <= prevDeclined) {
-                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+        String targetPropId0 = myRequest.propertyIds().get(0);
+        String partnerId0 = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
+        int targetPrice = SpotType.valueOf(targetPropId0).getIntegerProperty("price");
+        PlayerSnapshot botSnap = findPlayer(state, botId);
+        int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
+
+        // Step 2a: offer an own expendable property when cash can't cover the target price
+        if (myGive.propertyIds().isEmpty() && available0 < targetPrice) {
+            String expendable = findExpendableOwnProperty(state, botId);
+            if (expendable != null) {
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, giveSide, null, List.of(expendable), List.of(), null)));
                 return;
             }
-            publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                    new TradeEditPatch(null, giveSide, offerAmount, List.of(), List.of(), null)));
-            return;
+        }
+
+        // Step 2: offer money (target price minus own-property value already given, capped by cash)
+        if (myGive.moneyAmount() == 0) {
+            int ownPropValue = myGive.propertyIds().stream()
+                    .mapToInt(id -> SpotType.valueOf(id).getIntegerProperty("price"))
+                    .sum();
+            int cashNeeded = Math.max(0, targetPrice - ownPropValue);
+            if (cashNeeded > 0) {
+                int offerAmount = Math.min(cashNeeded, available0);
+                // Must strictly beat the last declined offer when no own property sweetens the deal
+                boolean hasOwnProp = !myGive.propertyIds().isEmpty();
+                int prevDeclined = lastDeclinedOfferAmount
+                        .getOrDefault(partnerId0, new java.util.concurrent.ConcurrentHashMap<>())
+                        .getOrDefault(targetPropId0, 0);
+                if (offerAmount < 10 || (!hasOwnProp && offerAmount <= prevDeclined)) {
+                    publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+                    return;
+                }
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, giveSide, offerAmount, List.of(), List.of(), null)));
+                return;
+            }
+            // cashNeeded == 0: own property covers full price, fall through to submit
         }
 
         // Step 3: offer is ready — submit it
@@ -819,6 +866,21 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         return null;
+    }
+
+    /**
+     * Finds the least strategically valuable own property to offer in a trade when cash is short.
+     * Candidates must be unbuilt, unmortgaged, and have low debt-mortgage priority (≤ 3).
+     */
+    private String findExpendableOwnProperty(SessionState state, String botId) {
+        return state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                        && p.houseCount() == 0 && p.hotelCount() == 0)
+                .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
+                .min(java.util.Comparator.comparingInt(
+                        p -> StrongBotStrategy.debtMortgagePriority(state, botId, p)))
+                .map(PropertyStateSnapshot::propertyId)
+                .orElse(null);
     }
 
     private static int evaluateSelectionValue(TradeSelectionState selection) {
@@ -940,6 +1002,21 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 ceiling += cfg.auctionSetCompletionBonus();
             }
             int maxBid = Math.min(ceiling, cash - reserve);
+
+            // Budget-aware: if no remaining bidder can realistically outbid, just bid minimum
+            java.util.Set<String> activeBidders = new java.util.HashSet<>(auction.eligiblePlayerIds());
+            activeBidders.removeAll(auction.passedPlayerIds());
+            activeBidders.remove(bidderId);
+            boolean noEffectiveCompetition = activeBidders.isEmpty() || activeBidders.stream()
+                    .allMatch(id -> {
+                        PlayerSnapshot p = findPlayer(state, id);
+                        return p == null || p.cash() < 2 * minBid;
+                    });
+            if (noEffectiveCompetition && maxBid >= minBid) {
+                publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), minBid));
+                return;
+            }
+
             if (maxBid >= minBid) {
                 // Jump ~⅓ of remaining headroom toward ceiling with ±40 % random jitter
                 int headroom = maxBid - minBid;
