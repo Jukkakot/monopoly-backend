@@ -625,6 +625,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Otherwise (bot is the proposer, e.g. deciding on a counter) → sides are reversed.
         TradeOfferState offer = trade.currentOffer();
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
+
+        // Don't help the board leader or a player one property away from completing a strong monopoly
+        String tradePartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
+        if (StrongBotStrategy.isLeadingThreat(state, tradePartnerId)) {
+            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
+
         TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
 
@@ -829,6 +837,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            // Don't help the board leader or a player one property away from a strong monopoly
+            if (StrongBotStrategy.isLeadingThreat(state, other.playerId())) continue;
             // Skip partners who have repeatedly declined bot-initiated offers
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             // Verify handleTradeEditing would actually find a target and afford an offer
@@ -1060,6 +1070,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (propId != null && wouldCompleteSet(state, bidderId, propId)) {
                 ceiling += cfg.auctionSetCompletionBonus();
             }
+            // Bid more aggressively to block an opponent who is one property away from a monopoly
+            if (propId != null) {
+                StreetType aGroup = StrongBotStrategy.spotType(propId).streetType;
+                if (aGroup.placeType == PlaceType.STREET) {
+                    int aSize = StrongBotStrategy.setSize(aGroup);
+                    boolean wouldBlockOpponent = aSize > 1 && state.players().stream()
+                            .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
+                            .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1);
+                    if (wouldBlockOpponent) {
+                        ceiling += cfg.auctionSetCompletionBonus();
+                    }
+                }
+            }
             int maxBid = Math.min(ceiling, cash - reserve);
 
             // Budget-aware: if no remaining bidder can realistically outbid, just bid minimum
@@ -1084,7 +1107,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 int bid = Math.min(maxBid, minBid + Math.max(10, extra));
                 publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), bid));
             } else {
-                publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
+                // Bid at least the mortgage value — any winning bid below it is free value for the opponent
+                int mortgageValue = propId != null ? facePrice / 2 : 0;
+                if (minBid <= mortgageValue && cash >= minBid) {
+                    publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), minBid));
+                } else {
+                    publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));
+                }
             }
         } else {
             publisher.handle(new PassAuctionCommand(sessionId, bidderId, auction.auctionId()));

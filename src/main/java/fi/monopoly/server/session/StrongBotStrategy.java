@@ -187,6 +187,8 @@ final class StrongBotStrategy {
         if (group.placeType == PlaceType.RAILROAD) score += 2.0;
         if (group.placeType == PlaceType.UTILITY)  score -= 1.0;
         if (unownedCount(state) > 10) score -= 2.0;
+        // Unmortgaging when an opponent is approaching pays off sooner — prioritise it
+        score += opponentLandingDanger(state, prop.ownerPlayerId(), prop) * 3.0;
         score *= cfg.unmortgageAggression();
         score *= cfg.mortgageRecoveryPriority();
         score *= cfg.colorGroupWeight(group);
@@ -414,5 +416,47 @@ final class StrongBotStrategy {
                     return dist >= 1 && dist <= 7;
                 });
         return danger ? 1 : 0;
+    }
+
+    /**
+     * Estimates a player's net worth: cash + sum of owned property face prices.
+     * Does not include building value (conservative estimate — buildings are illiquid).
+     */
+    static int estimateNetWorth(SessionState state, String playerId) {
+        PlayerSnapshot p = findPlayer(state, playerId);
+        int cash = p != null ? p.cash() : 0;
+        return cash + state.properties().stream()
+                .filter(prop -> playerId.equals(prop.ownerPlayerId()))
+                .mapToInt(prop -> SpotType.valueOf(prop.propertyId()).getIntegerProperty("price"))
+                .sum();
+    }
+
+    /**
+     * Returns true if the player owns n−1 of any color group that has 3+ properties.
+     * Two-property groups (Brown, Dark Blue) are excluded because their monopoly threat
+     * is low enough that blocking trades is too restrictive.
+     */
+    static boolean isNearMonopoly(SessionState state, String playerId) {
+        for (StreetType g : StreetType.values()) {
+            if (g.placeType != PlaceType.STREET) continue;
+            Integer gs = SpotType.getNumberOfSpots(g);
+            if (gs == null || gs < 3) continue;
+            if (ownedInSet(state, playerId, g) == gs - 1) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if this player is a "leading threat" — they are one property away
+     * from a strong monopoly (3-property group), or they already have the highest
+     * net worth among all active players.  Used to gate trade decisions so the bot
+     * does not inadvertently hand the leader a decisive advantage.
+     */
+    static boolean isLeadingThreat(SessionState state, String playerId) {
+        if (isNearMonopoly(state, playerId)) return true;
+        int playerWorth = estimateNetWorth(state, playerId);
+        return state.players().stream()
+                .filter(p -> !p.playerId().equals(playerId) && !p.bankrupt() && !p.eliminated())
+                .allMatch(p -> estimateNetWorth(state, p.playerId()) < playerWorth);
     }
 }
