@@ -336,7 +336,7 @@ class BotEvolutionTest {
     @Disabled("Long (~10 min, 20 gens) — run manually; kill early to use partial results")
     void evolveLargeGame() {
         int pop = 16, gens = 20, gamesPerGen = 300;
-        int playerCount = 4;   // change to 5 or 6 if you want to tune those player counts
+        int playerCount = 4;   // change to 3 for 3-player tuning
         long seed = 88888L;
 
         System.out.printf("Evolving %d-player config: pop=%d gens=%d games/gen=%d%n",

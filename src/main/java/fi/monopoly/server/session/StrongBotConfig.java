@@ -354,35 +354,34 @@ public record StrongBotConfig(
      */
     public static StrongBotConfig aggressive() {
         return new Builder()
-                .buyThreshold                          (4)
-                .minCashReserve                        (120)
-                .dangerCashReserve                     (307)  // was 280,000 (+9,6%)
-                .completionWeight                      (9)
-                .progressWeight                        (3)
-                .opponentBlockWeight                   (5.4182)  // was 4,730 (+14,5%)
-                .railroadWeight                        (5.1600)
-                .utilityWeight                         (0.2800)
-                .liquidityPenaltyWeight                (1.7490)
-                .opponentLeaderPressure                (1)
-                .railroadCompletionWeight              (30)
-                .utilityCompletionWeight               (20)
-                .houseBuildAggression                  (1.5435)  // was 1,380 (+11,8%)
-                .hotelAversion                         (6.0559)  // was 6,530 (-7,3%)
-                .developmentBias                       (2.5000)
-                .buildRoundCap                         (5)
-                .buildReservePerOpponentMonopoly       (44)
-                .postMonopolyCashBuffer                (75)
-                .mortgageTolerance                     (0.2500)
-                .unmortgageAggression                  (1)
-                .mortgageRecoveryPriority              (1)
-                .auctionAggression                     (1.3000)
-                .auctionSetCompletionBonus             (90)
-                .tradeFairnessTolerance                (30)
-                .tradeSetCompletionWeight              (220)
-                .tradeLiquidityWeight                  (1)
-                .preferJailLateGame                    (true)
+                .buyThreshold(4)
+                .minCashReserve(100)               // slightly lower — spend on buildings not reserves
+                .dangerCashReserve(307)
+                .completionWeight(9)
+                .progressWeight(3)
+                .opponentBlockWeight(5.4182)
+                .railroadWeight(5.16)
+                .utilityWeight(0.28)
+                .liquidityPenaltyWeight(1.6)       // slightly lower — don't fear thin cash
+                .opponentLeaderPressure(1)
+                .railroadCompletionWeight(30)
+                .utilityCompletionWeight(20)
+                .houseBuildAggression(1.85)        // was 1.54 — build faster (key signal from humanlike test)
+                .hotelAversion(3.5)                // was 6.06 — build hotels more freely
+                .developmentBias(2.5)
+                .buildRoundCap(5)
+                .buildReservePerOpponentMonopoly(44)
+                .postMonopolyCashBuffer(75)
+                .mortgageTolerance(0.25)
+                .unmortgageAggression(1)
+                .mortgageRecoveryPriority(1)
+                .auctionAggression(1.3)
+                .auctionSetCompletionBonus(90)
+                .tradeFairnessTolerance(30)
+                .tradeSetCompletionWeight(220)
+                .tradeLiquidityWeight(1)
+                .preferJailLateGame(true)
                 .build();
-
     }
 
     /**
@@ -489,38 +488,67 @@ public record StrongBotConfig(
      *   <li>Leave jail early — board scarcity means staying active matters</li>
      * </ul>
      */
+    /**
+     * Optimised for 3-player games by evolutionary search (20 generations, 6000 games).
+     *
+     * <p>Key differences vs the previous sixPlayer preset:
+     * <ul>
+     *   <li>Lower opponentBlockWeight (8→4.5): aggressive blocking hurts in 3p —
+     *       blocking often means buying suboptimal properties you don't need</li>
+     *   <li>Higher hotelAversion (3.5→6.3): hotels tie up cash in 3p where games run
+     *       longer and surviving rent hits matters more than max rent pressure</li>
+     *   <li>Lower progressWeight (4→2): don't chase a single group too hard</li>
+     *   <li>Lower tradeFairnessTolerance (45→22): demand fairer trades with fewer partners</li>
+     *   <li>Higher railroadWeight (3.5→4.5): railroads provide steady income in long 3p games</li>
+     *   <li>Lower railroad/utility completion weights: completing these is less decisive</li>
+     * </ul>
+     */
+    /**
+     * Optimised for 3-player games (also effective for 5–6 players).
+     * Properties vanish fast: grab almost everything, build aggressively, trade for monopolies.
+     *
+     * <p>Key differences vs {@link #defaults()}:
+     * <ul>
+     *   <li>Lower buy threshold — grab almost anything affordable immediately</li>
+     *   <li>Lower cash reserves — more players pass Go per round, cash replenishes faster</li>
+     *   <li>High build aggression and moderate hotel aversion — pressure opponents fast</li>
+     *   <li>Lower opponentBlockWeight — in 3p, blocking often means buying suboptimal properties</li>
+     *   <li>Higher trade fairness tolerance — completing a monopoly at a slight loss is still a win</li>
+     *   <li>Leave jail early — board scarcity means staying active matters</li>
+     * </ul>
+     */
     public static StrongBotConfig sixPlayer() {
         return new Builder()
                 .buyThreshold(3.5)                 // grab almost everything
-                .minCashReserve(110)               // lower: more players = more Go income per round
+                .minCashReserve(80)                // low: more players = more Go income per round
                 .dangerCashReserve(200)
                 .completionWeight(9.5)
-                .progressWeight(4.0)
-                .opponentBlockWeight(8.0)           // very competitive, block hard
-                .railroadWeight(3.5)
-                .utilityWeight(0.4)
-                .liquidityPenaltyWeight(1.5)        // less afraid of thin cash
-                .preferJailLateGame(false)          // board scarcity — must keep buying
-                .houseBuildAggression(1.5)          // build fast to create rent pressure
-                .hotelAversion(3.5)                // hotels needed to force bankruptcies
-                .developmentBias(3.0)
+                .progressWeight(3.0)
+                .opponentBlockWeight(5.0)          // was 8.0 — ablation confirmed blocking hurts in 3p
+                .railroadWeight(4.0)
+                .utilityWeight(0.35)
+                .liquidityPenaltyWeight(1.5)
+                .preferJailLateGame(false)
+                .houseBuildAggression(1.8)         // high — build fast to create rent pressure
+                .hotelAversion(3.5)                // hotels needed to force bankruptcies in 3p
+                .developmentBias(2.8)
                 .mortgageTolerance(0.25)
-                .unmortgageAggression(1.3)
+                .unmortgageAggression(1.2)
                 .buildReservePerOpponentMonopoly(35)
                 .auctionAggression(1.1)
-                .tradeFairnessTolerance(45)         // accept losing trades to complete monopoly
-                .tradeSetCompletionWeight(300)
-                .jailExitThreshold(350)             // leave jail sooner — board scarcity
+                .tradeFairnessTolerance(40)        // accept slightly losing trades to complete monopoly
+                .tradeSetCompletionWeight(280)
+                .jailExitThreshold(350)
                 .bankruptcyAversion(1.1)
-                .railroadCompletionWeight(60)
-                .utilityCompletionWeight(40)
+                .railroadCompletionWeight(50)
+                .utilityCompletionWeight(35)
                 .buildRoundCap(5)
-                .postMonopolyCashBuffer(80)
-                .auctionSetCompletionBonus(110)
-                .tradeLiquidityWeight(0.85)         // cash matters less than monopolies
-                .opponentLeaderPressure(1.4)
-                .jailCardHoldBias(0.5)              // spend jail card freely
-                .mortgageRecoveryPriority(1.3)
+                .postMonopolyCashBuffer(75)
+                .auctionSetCompletionBonus(100)
+                .tradeLiquidityWeight(0.9)
+                .opponentLeaderPressure(1.2)
+                .jailCardHoldBias(0.5)
+                .mortgageRecoveryPriority(1.2)
                 .build();
     }
 
