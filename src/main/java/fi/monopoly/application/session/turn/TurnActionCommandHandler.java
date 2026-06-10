@@ -121,10 +121,11 @@ public final class TurnActionCommandHandler {
     }
 
     private CommandResult handleToggleMortgage(ToggleMortgageCommand command) {
-        if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
+        TurnPhase phase = currentStateSupplier.get().turn().phase();
+        // During auction any player may mortgage their own properties to raise bidding funds
+        if (phase != TurnPhase.WAITING_FOR_AUCTION && !isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can change mortgages");
         }
-        TurnPhase phase = currentStateSupplier.get().turn().phase();
         if (isTurnActionBlocked(phase)) {
             return rejected("MORTGAGE_TOGGLE_FAILED", "Mortgage cannot be changed in the current phase");
         }
@@ -254,7 +255,6 @@ public final class TurnActionCommandHandler {
 
     private boolean isTurnActionBlocked(TurnPhase phase) {
         return phase == TurnPhase.WAITING_FOR_CARD_ACK
-                || phase == TurnPhase.WAITING_FOR_AUCTION
                 || phase == TurnPhase.RESOLVING_DEBT
                 || phase == TurnPhase.GAME_OVER;
     }
