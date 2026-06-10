@@ -640,7 +640,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             }
             int rent = calculateRent(current, landedSpot, property, ownerId, diceTotal);
             applyRentOrDebt(current, playerId, ownerId, rent, isDoubles, consecutiveDoubles,
-                    landedSpot.getStringProperty("name"));
+                    landedSpot.name());
             return;
         }
 
