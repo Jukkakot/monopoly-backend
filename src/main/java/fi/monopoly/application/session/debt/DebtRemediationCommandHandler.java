@@ -90,9 +90,6 @@ public final class DebtRemediationCommandHandler {
                 if (!validBase(cmd.sessionId(), cmd.actorPlayerId(), cmd.debtId(), debt)) {
                     yield rejected("INVALID_DEBT_ACTION", "Debt action does not match the active debt");
                 }
-                if (!debt.bankruptcyRisk()) {
-                    yield rejected("BANKRUPTCY_NOT_ALLOWED", "Debt can still be covered by available assets");
-                }
                 activeDebtUpdater.accept(null);
                 turnContinuationUpdater.accept(null);
                 gateway.declareBankruptcy();
@@ -200,9 +197,7 @@ public final class DebtRemediationCommandHandler {
                 DebtAction.SELL_BUILDING,
                 DebtAction.SELL_BUILDING_ROUNDS_ACROSS_SET
         ));
-        if (bankruptcyRisk) {
-            actions.add(DebtAction.DECLARE_BANKRUPTCY);
-        }
+        actions.add(DebtAction.DECLARE_BANKRUPTCY);
         return actions;
     }
 

@@ -1127,8 +1127,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
         List<DebtAction> actions = new ArrayList<>(List.of(
                 DebtAction.PAY_DEBT_NOW, DebtAction.MORTGAGE_PROPERTY,
-                DebtAction.SELL_BUILDING, DebtAction.SELL_BUILDING_ROUNDS_ACROSS_SET));
-        if (bankruptcyRisk) actions.add(DebtAction.DECLARE_BANKRUPTCY);
+                DebtAction.SELL_BUILDING, DebtAction.SELL_BUILDING_ROUNDS_ACROSS_SET,
+                DebtAction.DECLARE_BANKRUPTCY));
 
         DebtStateModel debt = new DebtStateModel(
                 "debt:" + debtorId + ":" + System.currentTimeMillis(),
