@@ -24,6 +24,23 @@ import java.util.*;
  *   The 3-player bot uses {@link StrongBotConfig#sixPlayer()} (see {@code forPlayerCount(3)}).
  *   All tunable parameters and what they do are documented in {@link StrongBotConfig}.
  *
+ * ABOUT BOT-VS-BOT TRAINING AND HUMAN OPPONENTS
+ *   Evolution runs bot-vs-bot games, which risks the bot learning to exploit patterns
+ *   that other bots share but humans don't (e.g. systematic blocking, precise cash
+ *   management). To guard against this:
+ *   - {@link StrongBotConfig#humanlike()} is included in all evolution seed populations
+ *     so the evolved bot must beat human-like play too.
+ *   - The final verification step always includes a humanlike bracket.
+ *   - If the evolved bot beats humanlike bots by a large margin, it's robust.
+ *     If it barely beats them, the strategy code itself needs improvement (see LIMITATIONS).
+ *
+ * ABOUT TOO MANY PARAMETERS
+ *   There are 25+ parameters but only ~6 typically move the needle significantly.
+ *   Workflow: run ablation first to identify the high-signal parameters, then use
+ *   {@link StrongBotConfig#focusedMutate} (tuning only buyThreshold, minCashReserve,
+ *   houseBuildAggression, hotelAversion, liquidityPenaltyWeight, opponentBlockWeight)
+ *   for faster convergence. The focused evolution tests below use this approach.
+ *
  * -------------------------------------------------------------------------
  * STEP 1 — find out which parameters matter most  (~4 min)
  * -------------------------------------------------------------------------
@@ -43,13 +60,13 @@ import java.util.*;
  *   Ignore any result with |Δ| < 10 pp — it's statistical noise.
  *
  * -------------------------------------------------------------------------
- * STEP 2 — let evolution find a better config automatically  (~8 min)
+ * STEP 2 — let evolution find a better config automatically  (~8–10 min)
  * -------------------------------------------------------------------------
- *   2-player (improves aggressive preset):
+ *   2-player (improves aggressive preset, trains against humanlike too):
  *   mvn test -Dtest=BotEvolutionTest#evolveSmallGame -pl . -Dsurefire.failIfNoSpecifiedTests=false
  *
- *   3-player (improves sixPlayer preset):
- *   mvn test -Dtest=BotEvolutionTest#evolveLargeGame -pl . -Dsurefire.failIfNoSpecifiedTests=false
+ *   3-player (improves sixPlayer preset, trains against humanlike too):
+ *   mvn test -Dtest=BotEvolutionTest#evolve3Player -pl . -Dsurefire.failIfNoSpecifiedTests=false
  *
  *   You can kill the process early (Ctrl+C) — it prints the best config found so far
  *   at the end of each generation. Each generation takes ~25–30 s on a modern laptop.
@@ -83,13 +100,14 @@ import java.util.*;
  *   Params with ▲/▼ changed more than 5 % — those are the meaningful changes.
  *
  * -------------------------------------------------------------------------
- * STEP 4 — verify the new preset actually wins  (~90 s)
+ * STEP 4 — verify the new preset actually wins — including vs humanlike  (~90 s)
  * -------------------------------------------------------------------------
  *   mvn test -Dtest=BotEvolutionTest#quickBenchmark -pl . -Dsurefire.failIfNoSpecifiedTests=false
  *
- *   This compares all presets across 2/3/4/6-player brackets.
+ *   This compares all presets across 2/3/4/6-player brackets, including a humanlike bracket.
  *   The new preset should rank higher than the old one in its target bracket.
- *   If it doesn't, the evolution overfit to its random seeds — discard and re-run with
+ *   Check the humanlike brackets: if your preset wins ≥60% vs humanlike, it's robust.
+ *   If it doesn't, the evolution overfit to bot-specific patterns — discard and re-run with
  *   a different seed (change the {@code seed} variable in the test method).
  *
  * =========================================================================
@@ -153,7 +171,8 @@ class BotEvolutionTest {
                 new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
                 new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
                 new BotTournament.Entry("cautious",   StrongBotConfig.cautious()),
-                new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer())
+                new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer()),
+                new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())
         );
 
         // Each bracket is printed as soon as its games finish
@@ -165,6 +184,20 @@ class BotEvolutionTest {
                 BotTournament.sampledTournament(configs, 400, 4, 34567L));
         printBracket("6-player sampled (400 games)",
                 BotTournament.sampledTournament(configs, 400, 6, 45678L));
+
+        // Sanity check: all strong presets should beat humanlike clearly (≥60%).
+        // If a preset barely beats humanlike, it's overfit to bot-specific play patterns.
+        System.out.println("\n[Human-robustness check: each preset 1-on-1 vs humanlike, 200 games]");
+        List<BotTournament.Entry> humanCheck = List.of(
+                new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
+                new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())
+        );
+        printBracket("2p aggressive vs humanlike", BotTournament.roundRobin(humanCheck, 200, 99999L));
+        List<BotTournament.Entry> humanCheck3 = List.of(
+                new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer()),
+                new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())
+        );
+        printBracket("3p sixPlayer vs humanlike", BotTournament.sampledTournament(humanCheck3, 200, 3, 88888L));
     }
 
     // =========================================================================
@@ -259,26 +292,31 @@ class BotEvolutionTest {
         long seed = 77777L;
 
         System.out.printf("Evolving 2-player config: pop=%d gens=%d games/pair=%d%n", pop, gens, games);
+        System.out.println("humanlike is included in the seed population — evolved config must beat it too.");
         System.out.println("Each generation prints immediately — kill early to use partial results.\n");
 
+        // humanlike is included so the evolved config can't specialise only against other strong bots
         BotTournament.Entry best = BotTournament.evolve(pop, gens, games, 2,
                 List.of(new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
                         new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
-                        new BotTournament.Entry("cautious",   StrongBotConfig.cautious())),
+                        new BotTournament.Entry("cautious",   StrongBotConfig.cautious()),
+                        new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())),
                 seed, true);
 
         System.out.println("\n" + "=".repeat(70));
         System.out.println("BEST 2-PLAYER CONFIG: " + best.name());
         printDiff(best.config(), StrongBotConfig.defaults(), "defaults");
 
-        // Final verification against known presets (100 games/pair)
+        // Verification: strong presets + humanlike robustness check
         System.out.println("\nVerification (100 games/pair):");
         printBracket("2-player verification", BotTournament.roundRobin(List.of(
                 new BotTournament.Entry("best",       best.config()),
                 new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
                 new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
-                new BotTournament.Entry("cautious",   StrongBotConfig.cautious())
+                new BotTournament.Entry("cautious",   StrongBotConfig.cautious()),
+                new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())
         ), 100, seed + 999_999L));
+        System.out.println("  → best should win ≥60% vs humanlike; lower means overfitting to bot patterns.");
     }
 
     // =========================================================================
@@ -305,17 +343,19 @@ class BotEvolutionTest {
                 playerCount, pop, gens, gamesPerGen);
         System.out.println("Each generation prints immediately — kill early to use partial results.\n");
 
+        // humanlike included so evolved config must beat human-like play, not just strong bots
         BotTournament.Entry best = BotTournament.evolve(pop, gens, gamesPerGen, playerCount,
                 List.of(new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer()),
                         new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
-                        new BotTournament.Entry("defaults",   StrongBotConfig.defaults())),
+                        new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
+                        new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())),
                 seed, true);
 
         System.out.println("\n" + "=".repeat(70));
         System.out.printf("BEST %d-PLAYER CONFIG: %s%n", playerCount, best.name());
         printDiff(best.config(), StrongBotConfig.sixPlayer(), "sixPlayer");
 
-        // Final verification (300 sampled games)
+        // Final verification (300 sampled games) + humanlike robustness check
         System.out.println("\nVerification (300 games):");
         printBracket(playerCount + "-player verification",
                 BotTournament.sampledTournament(List.of(
@@ -323,8 +363,10 @@ class BotEvolutionTest {
                         new BotTournament.Entry("sixPlayer",  StrongBotConfig.sixPlayer()),
                         new BotTournament.Entry("aggressive", StrongBotConfig.aggressive()),
                         new BotTournament.Entry("defaults",   StrongBotConfig.defaults()),
-                        new BotTournament.Entry("cautious",   StrongBotConfig.cautious())
+                        new BotTournament.Entry("cautious",   StrongBotConfig.cautious()),
+                        new BotTournament.Entry("humanlike",  StrongBotConfig.humanlike())
                 ), 300, playerCount, seed + 999_999L));
+        System.out.println("  → best should win ≥60% vs humanlike; lower means overfitting to bot patterns.");
     }
 
     // =========================================================================

@@ -425,6 +425,58 @@ public record StrongBotConfig(
     }
 
     /**
+     * Models a typical non-expert human player.
+     *
+     * <p>Key differences vs {@link #defaults()}:
+     * <ul>
+     *   <li>Buys almost everything affordable — poor selectivity</li>
+     *   <li>Low cash reserves — doesn't carefully manage liquidity</li>
+     *   <li>Builds houses eagerly, loves hotels (low hotel aversion)</li>
+     *   <li>Rarely blocks opponents (low opponentBlockWeight)</li>
+     *   <li>Underbids at auctions (auctionAggression 0.85)</li>
+     *   <li>Stingy on trades (low tradeFairnessTolerance)</li>
+     *   <li>Prefers railroads and utilities more than optimal</li>
+     * </ul>
+     *
+     * <p>Use this as a seed / validation target in {@link BotEvolutionTest} to ensure the
+     * evolved bot doesn't just exploit bot-specific patterns that humans don't have.
+     */
+    public static StrongBotConfig humanlike() {
+        return new Builder()
+                .buyThreshold(4.0)
+                .minCashReserve(80)
+                .dangerCashReserve(200)
+                .completionWeight(9.0)
+                .progressWeight(2.0)
+                .opponentBlockWeight(2.0)              // rarely blocks strategically
+                .railroadWeight(4.5)                   // humans like railroads
+                .utilityWeight(0.7)                    // buys utilities when landing
+                .liquidityPenaltyWeight(1.0)           // doesn't penalize thin cash
+                .preferJailLateGame(false)
+                .houseBuildAggression(1.9)             // builds aggressively with monopoly
+                .hotelAversion(2.0)                    // loves hotels
+                .developmentBias(2.0)
+                .mortgageTolerance(0.10)               // reluctant to mortgage
+                .unmortgageAggression(0.7)             // slow to unmortgage
+                .buildReservePerOpponentMonopoly(30)
+                .auctionAggression(0.85)               // underbids at auctions
+                .tradeFairnessTolerance(10)            // fairly stingy in trades
+                .tradeSetCompletionWeight(150)
+                .jailExitThreshold(300)
+                .bankruptcyAversion(1.0)
+                .railroadCompletionWeight(40)          // wants all railroads
+                .utilityCompletionWeight(30)           // wants both utilities
+                .buildRoundCap(5)
+                .postMonopolyCashBuffer(50)
+                .auctionSetCompletionBonus(60)
+                .tradeLiquidityWeight(1.0)
+                .opponentLeaderPressure(0.7)           // doesn't target the leader
+                .jailCardHoldBias(1.5)                 // holds jail cards
+                .mortgageRecoveryPriority(1.0)
+                .build();
+    }
+
+    /**
      * Optimised for 3-player games (also effective for 5–6 players).
      * Properties vanish fast: grab almost everything, build aggressively, trade for monopolies.
      *
@@ -551,6 +603,31 @@ public record StrongBotConfig(
             case 9  -> b.auctionAggression(clamp(auctionAggression * d, 0.5, 1.5)).build();
             case 10 -> b.tradeFairnessTolerance(clampInt((int)(tradeFairnessTolerance * d), -30, 80)).build();
             case 11 -> b.buildReservePerOpponentMonopoly(clampInt((int)(buildReservePerOpponentMonopoly * d), 20, 180)).build();
+            default -> this;
+        };
+    }
+
+    /**
+     * Like {@link #mutate} but restricted to the 6 parameters that typically show the
+     * highest impact in ablation studies: buyThreshold, minCashReserve, houseBuildAggression,
+     * hotelAversion, liquidityPenaltyWeight, and opponentBlockWeight.
+     *
+     * <p>Use this in evolution when you want a tighter search space — faster convergence
+     * with fewer wasted generations on low-signal parameters like utilityWeight or
+     * tradeFairnessTolerance. Run {@link BotEvolutionTest#ablationStudy()} first to
+     * confirm these are still the high-signal params for your target player count.
+     */
+    public StrongBotConfig focusedMutate(Random rng, double strength) {
+        int param = rng.nextInt(6);
+        double d = 1.0 + (rng.nextDouble() * 2 - 1) * strength;
+        Builder b = toBuilder();
+        return switch (param) {
+            case 0 -> b.buyThreshold(clamp(buyThreshold * d, 4.0, 9.0)).build();
+            case 1 -> b.minCashReserve(clampInt((int)(minCashReserve * d), 80, 450)).build();
+            case 2 -> b.houseBuildAggression(clamp(houseBuildAggression * d, 0.4, 2.0)).build();
+            case 3 -> b.hotelAversion(clamp(hotelAversion * d, 1.5, 10.0)).build();
+            case 4 -> b.liquidityPenaltyWeight(clamp(liquidityPenaltyWeight * d, 1.0, 6.0)).build();
+            case 5 -> b.opponentBlockWeight(clamp(opponentBlockWeight * d, 2.0, 10.0)).build();
             default -> this;
         };
     }
