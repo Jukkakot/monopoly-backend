@@ -31,7 +31,8 @@ public record SessionState(
         List<GameEventEntry> eventLog,
         long nextEventId,
         PendingCardEffect pendingCardEffect,
-        @JsonIgnore List<String> bankruptcyAuctionQueue
+        @JsonIgnore List<String> bankruptcyAuctionQueue,
+        @JsonIgnore List<PendingGroupDebt> pendingGroupDebts
 ) {
     public SessionState {
         seats = List.copyOf(seats);
@@ -42,6 +43,8 @@ public record SessionState(
         if (eventLog != null) eventLog = List.copyOf(eventLog); else eventLog = List.of();
         if (bankruptcyAuctionQueue != null) bankruptcyAuctionQueue = List.copyOf(bankruptcyAuctionQueue);
         else bankruptcyAuctionQueue = List.of();
+        if (pendingGroupDebts != null) pendingGroupDebts = List.copyOf(pendingGroupDebts);
+        else pendingGroupDebts = List.of();
     }
 
     /** Backward-compat: no turnContinuationState, no card decks, no eventLog. */
@@ -61,7 +64,7 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                null, winnerPlayerId, null, null, null, null, null, null, null, 0L, null, null);
+                null, winnerPlayerId, null, null, null, null, null, null, null, 0L, null, null, null);
     }
 
     /** Backward-compat: with turnContinuationState, no card decks, no eventLog. */
@@ -82,6 +85,6 @@ public record SessionState(
     ) {
         this(sessionId, version, status, seats, players, properties, turn,
                 pendingDecision, auctionState, activeDebt, tradeState,
-                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, null, 0L, null, null);
+                turnContinuationState, winnerPlayerId, null, null, null, null, null, null, null, 0L, null, null, null);
     }
 }

@@ -214,7 +214,8 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
             String creditorId = debt.creditorPlayerId();
             int amount = debt.amountRemaining();
             TurnContinuationState continuation = state.turnContinuationState();
-            log.debug("payDebtNow debtor={} creditor={} amount={}", debtorId, creditorId, amount);
+            List<PendingGroupDebt> pendingGroup = state.pendingGroupDebts();
+            log.debug("payDebtNow debtor={} creditor={} amount={} pendingGroup={}", debtorId, creditorId, amount, pendingGroup.size());
 
             List<PlayerSnapshot> updatedPlayers = state.players().stream()
                     .map(p -> {
@@ -224,18 +225,18 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                     })
                     .toList();
 
-            SessionState next = state.toBuilder()
-                    .players(updatedPlayers)
-                    .activeDebt(null)
-                    .turnContinuationState(null)
-                    .turn(resolveTurn(state, updatedPlayers, continuation))
-                    .build();
+            SessionState base = state.toBuilder().players(updatedPlayers).build();
+            SessionState next = pendingGroup.isEmpty()
+                    ? base.toBuilder().activeDebt(null).turnContinuationState(null)
+                            .turn(resolveTurn(state, updatedPlayers, continuation)).build()
+                    : openNextGroupDebt(base, pendingGroup);
+
             if (creditorId != null) {
                 return appendEvents(next,
                         ev("PAID_RENT", List.of(debtorId, creditorId),
                                 Map.of("amount", String.valueOf(amount))));
             }
-            String reason = debt != null && debt.reason() != null ? debt.reason() : "maksu";
+            String reason = debt.reason() != null ? debt.reason() : "maksu";
             String finReason = "Tax".equals(reason) ? "vero"
                     : reason.startsWith("Card") ? "kortti" : "velka";
             return appendEvents(next, evMoney(debtorId, "", amount, finReason));
@@ -298,21 +299,34 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                     .toList();
             String winner = stillActive.size() == 1 ? stillActive.get(0).playerId() : null;
 
-            // Advance to the next active player's turn
-            String nextPlayer = nextActivePlayerId(updatedPlayers, state.seats(), debtorId);
-            TurnState nextTurn = nextPlayer != null
-                    ? new TurnState(nextPlayer, TurnPhase.WAITING_FOR_ROLL, true, false, 0)
-                    : new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0, state.turn().lastDice());
-
-            SessionState.SessionStateBuilder builder = state.toBuilder()
-                    .properties(updatedProps)
-                    .players(updatedPlayers)
-                    .activeDebt(null)
-                    .turnContinuationState(null)
-                    .turn(nextTurn)
-                    .bankruptcyAuctionQueue(bankruptcyAuctionQueue);
+            List<PendingGroupDebt> pendingGroup = state.pendingGroupDebts();
+            SessionState.SessionStateBuilder builder;
             if (winner != null) {
-                builder.winnerPlayerId(winner).status(SessionStatus.GAME_OVER);
+                // Game over — clear all pending debts
+                builder = state.toBuilder()
+                        .properties(updatedProps).players(updatedPlayers)
+                        .activeDebt(null).turnContinuationState(null).pendingGroupDebts(List.of())
+                        .turn(new TurnState(winner, TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                        .bankruptcyAuctionQueue(bankruptcyAuctionQueue)
+                        .winnerPlayerId(winner).status(SessionStatus.GAME_OVER);
+            } else if (!pendingGroup.isEmpty()) {
+                // More group debtors pending — open next one
+                SessionState withUpdated = state.toBuilder().properties(updatedProps).players(updatedPlayers).build();
+                builder = openNextGroupDebt(withUpdated, pendingGroup).toBuilder()
+                        .bankruptcyAuctionQueue(bankruptcyAuctionQueue);
+            } else {
+                // Normal: advance turn (using continuation to find original actor for card-holder case)
+                TurnContinuationState continuation = state.turnContinuationState();
+                String resumeFrom = continuation != null && continuation.activePlayerId() != null
+                        ? continuation.activePlayerId() : debtorId;
+                String nextPlayer = nextActivePlayerId(updatedPlayers, state.seats(), resumeFrom);
+                TurnState nextTurn = nextPlayer != null
+                        ? new TurnState(nextPlayer, TurnPhase.WAITING_FOR_ROLL, true, false, 0)
+                        : new TurnState(state.turn().activePlayerId(), TurnPhase.WAITING_FOR_END_TURN, false, true, 0, state.turn().lastDice());
+                builder = state.toBuilder()
+                        .properties(updatedProps).players(updatedPlayers)
+                        .activeDebt(null).turnContinuationState(null).pendingGroupDebts(List.of())
+                        .turn(nextTurn).bankruptcyAuctionQueue(bankruptcyAuctionQueue);
             }
             return appendEvents(builder.build(), ev("WENT_BANKRUPT", debtorId));
         });
@@ -324,7 +338,11 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
 
     private TurnState resolveTurn(SessionState state, List<PlayerSnapshot> updatedPlayers,
                                    TurnContinuationState continuation) {
-        String activeId = state.turn().activePlayerId();
+        // For cross-player group debts, continuation.activePlayerId is the original card holder (not the debtor).
+        // Fall back to the current turn's activePlayerId for normal same-player debts.
+        String activeId = (continuation != null && continuation.activePlayerId() != null)
+                ? continuation.activePlayerId()
+                : state.turn().activePlayerId();
         int[] lastDice = state.turn().lastDice();
         if (continuation == null) {
             return new TurnState(activeId, TurnPhase.WAITING_FOR_END_TURN, false, true, 0, lastDice);
@@ -363,6 +381,49 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
         }
         if (idx < 0) return active.get(0).playerId();
         return active.get((idx + 1) % active.size()).playerId();
+    }
+
+    // -------------------------------------------------------------------------
+    // Private: group debt helpers
+    // -------------------------------------------------------------------------
+
+    private static SessionState openNextGroupDebt(SessionState state, List<PendingGroupDebt> pending) {
+        PendingGroupDebt next = pending.get(0);
+        List<PendingGroupDebt> remaining = pending.size() > 1 ? pending.subList(1, pending.size()) : List.of();
+        int liquidation = estimatedLiquidationValue(state, next.debtorPlayerId());
+        int cash = state.players().stream()
+                .filter(p -> next.debtorPlayerId().equals(p.playerId()))
+                .mapToInt(PlayerSnapshot::cash).findFirst().orElse(0);
+        DebtStateModel debt = new DebtStateModel(
+                "debt:group:" + next.debtorPlayerId() + ":" + System.currentTimeMillis(),
+                next.debtorPlayerId(), DebtCreditorType.PLAYER, next.creditorPlayerId(),
+                next.amount(), "Card payment", false, cash, liquidation,
+                new ArrayList<>(List.of(DebtAction.PAY_DEBT_NOW, DebtAction.MORTGAGE_PROPERTY,
+                        DebtAction.SELL_BUILDING, DebtAction.SELL_BUILDING_ROUNDS_ACROSS_SET,
+                        DebtAction.DECLARE_BANKRUPTCY)));
+        return state.toBuilder()
+                .activeDebt(debt)
+                .pendingGroupDebts(remaining)
+                .turn(new TurnState(next.debtorPlayerId(), TurnPhase.RESOLVING_DEBT, false, false,
+                        state.turn().consecutiveDoubles(), state.turn().lastDice()))
+                .build();
+    }
+
+    private static int estimatedLiquidationValue(SessionState state, String playerId) {
+        int total = 0;
+        for (PropertyStateSnapshot prop : state.properties()) {
+            if (!playerId.equals(prop.ownerPlayerId())) continue;
+            if (!prop.mortgaged()) {
+                try { total += SpotType.valueOf(prop.propertyId()).getIntegerProperty("price") / 2; }
+                catch (IllegalArgumentException ignored) {}
+            }
+            int buildings = prop.houseCount() + prop.hotelCount();
+            if (buildings > 0) {
+                try { total += buildings * SpotType.valueOf(prop.propertyId()).getIntegerProperty("housePrice") / 2; }
+                catch (IllegalArgumentException ignored) {}
+            }
+        }
+        return total;
     }
 
     // -------------------------------------------------------------------------

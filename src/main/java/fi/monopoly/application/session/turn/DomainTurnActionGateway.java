@@ -1009,43 +1009,78 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             });
         } else {
             // amountPerPlayer > 0: others pay active player
-            // Clamp each payer's deduction to their available cash (P3 will add proper per-player debt)
+            // Separate payers who can afford from those who need debt resolution
+            List<String> canPayIds = others.stream()
+                    .filter(p -> p.cash() >= amountPerPlayer)
+                    .map(PlayerSnapshot::playerId)
+                    .toList();
+            List<String> owesDebtIds = others.stream()
+                    .filter(p -> p.cash() < amountPerPlayer)
+                    .map(PlayerSnapshot::playerId)
+                    .toList();
+            final int totalFromCanPay = amountPerPlayer * canPayIds.size();
+
+            // Build the pending group debt queue (first becomes active debt, rest are queued)
+            List<PendingGroupDebt> pendingQueue = owesDebtIds.stream()
+                    .map(did -> new PendingGroupDebt(did, playerId, amountPerPlayer, isDoubles, consecutiveDoubles))
+                    .toList();
+
             store.update(s -> {
-                List<int[]> payments = new ArrayList<>();  // [actualPay] per other player (same order as stream)
-                s.players().stream()
-                        .filter(p -> !playerId.equals(p.playerId()) && !p.eliminated())
-                        .forEach(p -> payments.add(new int[]{ Math.min(p.cash(), amountPerPlayer) }));
-                int totalReceived = payments.stream().mapToInt(arr -> arr[0]).sum();
-                int[] payIdx = {0};
+                // Collect from those who can pay immediately
+                GameEventEntry[] flows = canPayIds.stream()
+                        .map(cid -> evMoney(cid, playerId, amountPerPlayer, "kortti"))
+                        .toArray(GameEventEntry[]::new);
                 List<PlayerSnapshot> updated = s.players().stream()
                         .map(p -> {
-                            if (playerId.equals(p.playerId())) {
-                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() + totalReceived,
+                            if (playerId.equals(p.playerId()))
+                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() + totalFromCanPay,
                                         p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
                                         p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
-                            }
-                            if (!p.eliminated()) {
-                                int pay = Math.min(p.cash(), amountPerPlayer);
-                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() - pay,
+                            if (canPayIds.contains(p.playerId()))
+                                return new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash() - amountPerPlayer,
                                         p.boardIndex(), p.bankrupt(), p.eliminated(), p.inJail(),
                                         p.jailRoundsRemaining(), p.getOutOfJailCards(), p.ownedPropertyIds());
-                            }
                             return p;
                         })
                         .toList();
-                // Emit MONEY_FLOW per payer
-                List<GameEventEntry> flows = new ArrayList<>();
-                int idx = 0;
-                for (PlayerSnapshot p : s.players()) {
-                    if (!playerId.equals(p.playerId()) && !p.eliminated()) {
-                        int pay = idx < payments.size() ? payments.get(idx++)[0] : 0;
-                        if (pay > 0) flows.add(evMoney(p.playerId(), playerId, pay, "kortti"));
-                    }
+
+                if (pendingQueue.isEmpty()) {
+                    // All paid — advance turn
+                    return appendEvents(s.toBuilder()
+                            .players(updated)
+                            .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
+                            .build(), flows);
                 }
+
+                // Open debt for first debtor, queue the rest
+                PendingGroupDebt first = pendingQueue.get(0);
+                List<PendingGroupDebt> remaining = pendingQueue.size() > 1
+                        ? pendingQueue.subList(1, pendingQueue.size()) : List.of();
+                SessionState intermediate = s.toBuilder().players(updated).build();
+                int firstLiquidation = estimateLiquidation(intermediate, first.debtorPlayerId());
+                PlayerSnapshot firstDebtor = findPlayer(intermediate, first.debtorPlayerId());
+                int firstCash = firstDebtor != null ? firstDebtor.cash() : 0;
+
+                DebtStateModel debt = new DebtStateModel(
+                        "debt:group:" + first.debtorPlayerId() + ":" + System.currentTimeMillis(),
+                        first.debtorPlayerId(), DebtCreditorType.PLAYER, playerId,
+                        amountPerPlayer, "Card payment", false, firstCash, firstLiquidation,
+                        new ArrayList<>(List.of(DebtAction.PAY_DEBT_NOW, DebtAction.MORTGAGE_PROPERTY,
+                                DebtAction.SELL_BUILDING, DebtAction.SELL_BUILDING_ROUNDS_ACROSS_SET,
+                                DebtAction.DECLARE_BANKRUPTCY)));
+                TurnContinuationState continuation = new TurnContinuationState(
+                        "cont:group:" + playerId + ":afterGroupDebt",
+                        playerId,  // card holder resumes after all debts
+                        TurnContinuationType.RESUME_AFTER_DEBT,
+                        isDoubles ? TurnContinuationAction.APPLY_TURN_FOLLOW_UP : TurnContinuationAction.END_TURN_WITH_SWITCH,
+                        null, "Card payment");
                 return appendEvents(s.toBuilder()
                         .players(updated)
-                        .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
-                        .build(), flows.toArray(GameEventEntry[]::new));
+                        .activeDebt(debt)
+                        .pendingGroupDebts(remaining)
+                        .turnContinuationState(continuation)
+                        .turn(new TurnState(first.debtorPlayerId(), TurnPhase.RESOLVING_DEBT, false, false, consecutiveDoubles, s.turn().lastDice()))
+                        .build(), flows);
             });
         }
     }
