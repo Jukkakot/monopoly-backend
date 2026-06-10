@@ -532,16 +532,9 @@ components:
           description: |
             Seat kinds per player. Missing entries default to `HUMAN`.
             A `BOT` seat gets a `PureDomainBotDriver` attached automatically.
+            All bots play at the same (strong) level; the strategy preset is
+            selected automatically based on player count.
           example: [HUMAN, BOT]
-        difficulties:
-          type: array
-          items:
-            type: string
-            enum: [NORMAL, STRONG]
-          description: |
-            Bot difficulty per seat. Only meaningful for `BOT` seats.
-            Missing entries default to `NORMAL`.
-          example: [NORMAL, STRONG]
 
     CreateSessionResponse:
       type: object

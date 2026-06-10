@@ -9,7 +9,7 @@ info:
     ## Session lifecycle
 
     ### Immediate start (existing behaviour)
-    1. `POST /sessions` with `names`, `colors`, `seatKinds`, `difficulties`.
+    1. `POST /sessions` with `names`, `colors`, `seatKinds`.
     2. Open `GET /sessions/{id}/events` for SSE updates.
     3. Submit actions via `POST /sessions/{id}/command`.
 
@@ -776,7 +776,7 @@ components:
       type: object
       description: |
         Two modes of operation:
-        - **Immediate start** (default): provide `names` (required), `colors`, `seatKinds`, `difficulties`.
+        - **Immediate start** (default): provide `names` (required), `colors`, `seatKinds`.
         - **Lobby mode**: set `lobbyMode: true`, provide `seatCount` and `colors`. Players join later via `POST /sessions/{id}/join`.
       properties:
         names:
@@ -804,21 +804,15 @@ components:
             enum: [HUMAN, BOT]
           description: |
             Seat kinds per player (immediate-start only). Missing entries default to `HUMAN`.
+            All bots play at the same (strong) level; the strategy preset is selected
+            automatically based on player count.
           example: [HUMAN, BOT]
-        difficulties:
-          type: array
-          items:
-            type: string
-            enum: [EASY, NORMAL, STRONG]
-          description: |
-            Bot difficulty per seat. Missing entries default to `NORMAL`.
-          example: [NORMAL, STRONG]
         lobbyMode:
           type: boolean
           default: false
           description: |
             When `true`, creates a lobby session in `LOBBY` state.
-            `names`, `seatKinds`, and `difficulties` are ignored; use `seatCount` instead.
+            `names` and `seatKinds` are ignored; use `seatCount` instead.
         seatCount:
           type: integer
           minimum: 2

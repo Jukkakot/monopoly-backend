@@ -32,13 +32,13 @@ Clients (desktop or web) connect over HTTP and receive real-time state updates v
 # Build fat JAR
 mvn clean package -DskipTests
 
-# Start the server (port 8080 by default)
-java -jar target/MonopolyBackend-*.jar
+# Start the server (port 10000 by default; use PORT=8080 to match the client's default)
+PORT=8080 java -jar target/monopoly-backend.jar
 
 # Create a 2-player session (one human, one bot)
 curl -s -X POST http://localhost:8080/sessions \
   -H "Content-Type: application/json" \
-  -d '{"names":["Jukka","Botti"],"colors":["#E63946","#2A9D8F"],"seatKinds":["HUMAN","BOT"],"difficulties":["NORMAL","NORMAL"]}' \
+  -d '{"names":["Jukka","Botti"],"colors":["#E63946","#2A9D8F"],"seatKinds":["HUMAN","BOT"]}' \
   | jq .
 # → {"sessionId":"<uuid>"}
 
@@ -66,7 +66,7 @@ mvn test
 # Build deployable fat JAR (skipping tests)
 mvn clean package -DskipTests
 
-# Output: target/MonopolyBackend-<version>-jar-with-dependencies.jar
+# Output: target/monopoly-backend.jar
 ```
 
 ---
@@ -76,7 +76,7 @@ mvn clean package -DskipTests
 ### Directly from the fat JAR
 
 ```bash
-java -jar target/MonopolyBackend-*.jar
+java -jar target/monopoly-backend.jar
 ```
 
 ### With custom port and configuration
@@ -84,7 +84,7 @@ java -jar target/MonopolyBackend-*.jar
 ```bash
 PORT=9090 java -Dmonopoly.session.ttl.minutes=60 \
                -Dmonopoly.bot.think.delay.ms=400 \
-               -jar target/MonopolyBackend-*.jar
+               -jar target/monopoly-backend.jar
 ```
 
 ### Docker
@@ -100,7 +100,7 @@ docker run -p 8080:8080 monopoly-backend
 
 | Variable / Property | Default | Description |
 |---|---|---|
-| `PORT` (env var) | `8080` | HTTP server port |
+| `PORT` (env var) | `10000` | HTTP server port (use `PORT=8080` locally to match the client's default `VITE_API_BASE`) |
 | `-Dmonopoly.session.ttl.minutes` | `120` | Minutes of inactivity before a session is automatically evicted |
 | `-Dmonopoly.bot.think.delay.ms` | `900` | Base think-time (ms) added to the situational delay before a bot acts |
 | `-Dmonopoly.bot.initial.delay.ms` | `4000` | Grace period (ms) after session start before bots take their first action |
@@ -172,10 +172,9 @@ All responses include CORS headers (`Access-Control-Allow-Origin: *`).
 
 ```json
 {
-  "names":       ["Jukka", "Maria", "Botti"],
-  "colors":      ["#E63946", "#2A9D8F", "#E9C46A"],
-  "seatKinds":   ["HUMAN", "HUMAN", "BOT"],
-  "difficulties": ["NORMAL", "NORMAL", "STRONG"]
+  "names":     ["Jukka", "Maria", "Botti"],
+  "colors":    ["#E63946", "#2A9D8F", "#E9C46A"],
+  "seatKinds": ["HUMAN", "HUMAN", "BOT"]
 }
 ```
 
@@ -195,9 +194,10 @@ All responses include CORS headers (`Access-Control-Allow-Origin: *`).
 | `names` | yes (direct) | 2–4 player display names |
 | `colors` | no | CSS hex colours per seat; missing entries fall back to grey |
 | `seatKinds` | no | `HUMAN` or `BOT` per seat; missing entries default to `HUMAN` |
-| `difficulties` | no | `EASY`, `NORMAL`, or `STRONG` per seat; only meaningful for `BOT` seats; missing entries default to `NORMAL` |
 | `lobbyMode` | no | `true` to enter lobby flow; game starts when all human seats mark ready |
 | `seatCount` | no | Total seat count for lobby mode (2–4) |
+
+All bots play at the same (strong) level — there is no difficulty field. The strategy preset is selected automatically based on player count (see [Bot players](#bot-players)).
 
 Response `201` (direct start): `{ "sessionId": "..." }`  
 Response `201` (lobby mode): `{ "sessionId": "...", "hostToken": "...", "playerId": "...", "playerToken": "..." }`
@@ -449,13 +449,41 @@ Rules:
 Seats created with `seatKind: "BOT"` are controlled server-side by `PureDomainBotDriver`.  
 The bot responds automatically after `monopoly.bot.think.delay.ms` milliseconds.
 
-### Difficulty levels
+### Strategy presets
 
-| Difficulty | Behaviour |
-|---|---|
-| `EASY` | Skips ~40 % of affordable property purchases; declines ~50 % of auction bids; auto-declines all trade offers; never unmortgages or builds proactively |
-| `NORMAL` | Always buys affordable properties; bids in auctions when it can afford to; accepts trades with equal or positive net value; unmortgages and builds when strategically sound |
-| `STRONG` | All `NORMAL` behaviour plus proactively initiates trades to complete colour groups; counters unfair offers instead of just declining |
+All bots play at the same (strong) level. The strategy is driven by `StrongBotConfig` —
+a set of ~25 tunable weights (buy threshold, cash reserves, build aggression, auction
+ceiling, trade fairness, …). A preset is selected automatically by player count:
+
+| Players | Preset | Character |
+|---|---|---|
+| 2 | `aggressive()` | Builds fast, accepts thin cash positions, hotels welcome |
+| 3 | `sixPlayer()` | Grabs almost everything, builds hard, trades for monopolies |
+| 4–6 | `defaults()` | Balanced; tuned by evolutionary search over ~20 000 games |
+
+Each additional bot seat in the same game receives a ±10 % parameter mutation
+(`StrongBotConfig.forSeat`) so bots don't play identically.
+
+### Tuning the bot
+
+The presets are tuned with a headless tournament engine (`BotTournament`, test scope)
+that plays thousands of games in seconds. The workflow lives in `BotEvolutionTest`
+(all tests `@Disabled` — run manually):
+
+```bash
+# 1. Which parameters matter? (~4 min)
+mvn test -Dtest=BotEvolutionTest#ablationStudy -Dsurefire.failIfNoSpecifiedTests=false
+
+# 2. Evolutionary search for a better config (~30 min)
+mvn test -Dtest=BotEvolutionTest#evolveSmallGame -Dsurefire.failIfNoSpecifiedTests=false
+
+# 3. Verify across player counts, incl. robustness vs human-like play (~90 s)
+mvn test -Dtest=BotEvolutionTest#quickBenchmark -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+A `humanlike()` preset models a typical non-expert human player and is used to verify
+the evolved configs don't overfit to bot-vs-bot patterns. After changing strategy code,
+run `BotQualityRegressionTest` to confirm the preset ordering still holds.
 
 ### Bot speed
 
@@ -568,13 +596,15 @@ A `Dockerfile` and a `render.yaml` (for [Render](https://render.com)) are includ
 1. Push the repository to GitHub.
 2. Create a new **Web Service** on Render pointing at the repo.
 3. Build command: `mvn clean package -DskipTests`
-4. Start command: `java -jar target/MonopolyBackend-*-jar-with-dependencies.jar`
+4. Start command: `java -jar target/monopoly-backend.jar`
 5. Set the `PORT` environment variable if you need a non-default port (Render injects it automatically).
+
+The deployed instance serves the live client at https://jukkakot.github.io/monopoly-client/ from `https://monopoly-backend-bv41.onrender.com`.
 
 ### Environment variables summary
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PORT` | `8080` | Injected automatically by most PaaS platforms |
+| `PORT` | `10000` | Injected automatically by most PaaS platforms |
 | `monopoly.session.ttl.minutes` | `120` | Pass as `-D` JVM flag |
-| `monopoly.bot.think.delay.ms` | `600` | Pass as `-D` JVM flag |
+| `monopoly.bot.think.delay.ms` | `900` | Pass as `-D` JVM flag |
