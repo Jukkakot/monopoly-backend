@@ -235,7 +235,10 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                         ev("PAID_RENT", List.of(debtorId, creditorId),
                                 Map.of("amount", String.valueOf(amount))));
             }
-            return next;
+            String reason = debt != null && debt.reason() != null ? debt.reason() : "maksu";
+            String finReason = "Tax".equals(reason) ? "vero"
+                    : reason.startsWith("Card") ? "kortti" : "velka";
+            return appendEvents(next, evMoney(debtorId, "", amount, finReason));
         });
     }
 

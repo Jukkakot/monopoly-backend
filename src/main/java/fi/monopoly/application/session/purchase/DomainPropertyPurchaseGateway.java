@@ -64,7 +64,8 @@ public final class DomainPropertyPurchaseGateway implements PropertyPurchaseGate
             return appendEvents(
                     state.toBuilder().players(players).properties(properties).build(),
                     ev("BOUGHT_PROPERTY", playerId, Map.of("property", propertyId,
-                            "price", String.valueOf(deduct))));
+                            "price", String.valueOf(deduct))),
+                    evMoney(playerId, "", deduct, "osto"));
         });
         return true;
     }

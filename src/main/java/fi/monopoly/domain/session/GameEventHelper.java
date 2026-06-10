@@ -18,7 +18,7 @@ public final class GameEventHelper {
 
     private static final Logger logger = LoggerFactory.getLogger(GameEventHelper.class);
 
-    static final int MAX_EVENT_LOG = 30;
+    static final int MAX_EVENT_LOG = 50;
 
     private GameEventHelper() {}
 
@@ -62,5 +62,19 @@ public final class GameEventHelper {
 
     public static GameEventEntry ev(String type, List<String> playerIds, Map<String, String> data) {
         return new GameEventEntry(0, 0, type, playerIds, data);
+    }
+
+    /**
+     * Create a MONEY_FLOW event. {@code from}/{@code to} are player IDs or empty string for the bank.
+     * {@code reason} is a short Finnish category label (e.g. "vuokra", "vero", "kortti").
+     */
+    public static GameEventEntry evMoney(String from, String to, int amount, String reason) {
+        List<String> playerIds = new ArrayList<>();
+        if (from != null && !from.isBlank()) playerIds.add(from);
+        if (to != null && !to.isBlank() && !to.equals(from)) playerIds.add(to);
+        return new GameEventEntry(0, 0, "MONEY_FLOW",
+                Collections.unmodifiableList(playerIds),
+                Map.of("from", from != null ? from : "", "to", to != null ? to : "",
+                        "amount", String.valueOf(amount), "reason", reason));
     }
 }

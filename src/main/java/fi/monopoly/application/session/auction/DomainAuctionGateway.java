@@ -5,6 +5,7 @@ import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
 import fi.monopoly.domain.session.SeatState;
 import fi.monopoly.domain.session.SessionState;
+import static fi.monopoly.domain.session.GameEventHelper.*;
 import fi.monopoly.types.SpotType;
 import lombok.RequiredArgsConstructor;
 
@@ -99,7 +100,9 @@ public final class DomainAuctionGateway implements AuctionGateway {
                             ? new PropertyStateSnapshot(prop.propertyId(), winnerId, prop.mortgaged(), prop.houseCount(), prop.hotelCount())
                             : prop)
                     .toList();
-            return state.toBuilder().players(players).properties(properties).build();
+            return appendEvents(
+                    state.toBuilder().players(players).properties(properties).build(),
+                    evMoney(winnerId, "", amount, "huutokauppa"));
         });
         return true;
     }

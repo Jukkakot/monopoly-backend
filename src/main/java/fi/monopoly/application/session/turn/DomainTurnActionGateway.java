@@ -297,7 +297,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                     .build();
             return appendEvents(updated,
                     ev(becomesHotel ? "BUILT_HOTEL" : "BUILT_HOUSE", activePlayerIdFinal,
-                            Map.of("property", propertyId)));
+                            Map.of("property", propertyId)),
+                    evMoney(activePlayerIdFinal, "", housePrice, "rakennus"));
         });
         return true;
     }
@@ -354,7 +355,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                     return appendEvents(
                             s.toBuilder().properties(updatedProps)
                                     .players(updateCash(s.players(), activePlayerIdFinal, saleProceeds)).build(),
-                            ev("SOLD_HOTEL", activePlayerIdFinal, Map.of("property", propertyId)));
+                            ev("SOLD_HOTEL", activePlayerIdFinal, Map.of("property", propertyId)),
+                            evMoney("", activePlayerIdFinal, saleProceeds, "myynti"));
                 });
             } else {
                 store.update(s -> {
@@ -366,7 +368,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                     return appendEvents(
                             s.toBuilder().properties(updatedProps)
                                     .players(updateCash(s.players(), activePlayerIdFinal, saleProceeds)).build(),
-                            ev("SOLD_HOTEL", activePlayerIdFinal, Map.of("property", propertyId)));
+                            ev("SOLD_HOTEL", activePlayerIdFinal, Map.of("property", propertyId)),
+                            evMoney("", activePlayerIdFinal, saleProceeds, "myynti"));
                 });
             }
         } else {
@@ -380,7 +383,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 return appendEvents(
                         s.toBuilder().properties(updatedProps)
                                 .players(updateCash(s.players(), activePlayerIdFinal, saleProceeds)).build(),
-                        ev("SOLD_HOUSE", activePlayerIdFinal, Map.of("property", propertyId)));
+                        ev("SOLD_HOUSE", activePlayerIdFinal, Map.of("property", propertyId)),
+                        evMoney("", activePlayerIdFinal, saleProceeds, "myynti"));
             });
         }
         return true;
@@ -414,7 +418,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                                 false, property.houseCount(), property.hotelCount())))
                                 .players(updateCash(state.players(), activePlayerId, -unmortgageCost))
                                 .build(),
-                        ev("REDEEMED", activePlayerId, Map.of("property", propertyId)));
+                        ev("REDEEMED", activePlayerId, Map.of("property", propertyId)),
+                        evMoney(activePlayerId, "", unmortgageCost, "lunastus"));
             } else {
                 return appendEvents(
                         state.toBuilder()
@@ -423,7 +428,8 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                                 true, property.houseCount(), property.hotelCount())))
                                 .players(updateCash(state.players(), activePlayerId, mortgageValue))
                                 .build(),
-                        ev("MORTGAGED", activePlayerId, Map.of("property", propertyId)));
+                        ev("MORTGAGED", activePlayerId, Map.of("property", propertyId)),
+                        evMoney("", activePlayerId, mortgageValue, "kiinnitys"));
             }
         });
         return true;
@@ -467,9 +473,11 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         if (activePlayer.cash() < GET_OUT_OF_JAIL_FEE) return false;
 
         // Snapshot 1: deduct fine
-        store.update(s -> s.toBuilder()
-                .players(updateCash(s.players(), activePlayerId, -GET_OUT_OF_JAIL_FEE))
-                .build());
+        store.update(s -> appendEvents(
+                s.toBuilder()
+                        .players(updateCash(s.players(), activePlayerId, -GET_OUT_OF_JAIL_FEE))
+                        .build(),
+                evMoney(activePlayerId, "", GET_OUT_OF_JAIL_FEE, "vankilamaksu")));
         // Snapshot 2: release from jail
         store.update(s -> appendEvents(
                 s.toBuilder()
@@ -774,10 +782,12 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     private void applyCardMoney(String playerId, int amount, boolean isDoubles, int consecutiveDoubles) {
         log.debug("applyCardMoney player={} amount={}", playerId, amount);
         if (amount >= 0) {
-            store.update(s -> s.toBuilder()
-                    .players(updateCash(s.players(), playerId, amount))
-                    .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
-                    .build());
+            store.update(s -> appendEvents(
+                    s.toBuilder()
+                            .players(updateCash(s.players(), playerId, amount))
+                            .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
+                            .build(),
+                    evMoney("", playerId, amount, "kortti")));
         } else {
             SessionState current = store.get();
             applyRentOrDebt(current, playerId, null, -amount, isDoubles, consecutiveDoubles, "Card payment");
@@ -972,6 +982,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             // Can afford: deduct from active, distribute to others
             final int payment = Math.abs(amountPerPlayer);
             final int total = totalOwed;
+            final List<String> recipientIds = others.stream().map(PlayerSnapshot::playerId).toList();
             store.update(s -> {
                 List<PlayerSnapshot> updated = s.players().stream()
                         .map(p -> {
@@ -988,19 +999,24 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                             return p;
                         })
                         .toList();
-                return s.toBuilder()
+                GameEventEntry[] flows = recipientIds.stream()
+                        .map(rid -> evMoney(playerId, rid, payment, "kortti"))
+                        .toArray(GameEventEntry[]::new);
+                return appendEvents(s.toBuilder()
                         .players(updated)
                         .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
-                        .build();
+                        .build(), flows);
             });
         } else {
             // amountPerPlayer > 0: others pay active player
             // Clamp each payer's deduction to their available cash (P3 will add proper per-player debt)
             store.update(s -> {
-                int totalReceived = s.players().stream()
+                List<int[]> payments = new ArrayList<>();  // [actualPay] per other player (same order as stream)
+                s.players().stream()
                         .filter(p -> !playerId.equals(p.playerId()) && !p.eliminated())
-                        .mapToInt(p -> Math.min(p.cash(), amountPerPlayer))
-                        .sum();
+                        .forEach(p -> payments.add(new int[]{ Math.min(p.cash(), amountPerPlayer) }));
+                int totalReceived = payments.stream().mapToInt(arr -> arr[0]).sum();
+                int[] payIdx = {0};
                 List<PlayerSnapshot> updated = s.players().stream()
                         .map(p -> {
                             if (playerId.equals(p.playerId())) {
@@ -1017,10 +1033,19 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                             return p;
                         })
                         .toList();
-                return s.toBuilder()
+                // Emit MONEY_FLOW per payer
+                List<GameEventEntry> flows = new ArrayList<>();
+                int idx = 0;
+                for (PlayerSnapshot p : s.players()) {
+                    if (!playerId.equals(p.playerId()) && !p.eliminated()) {
+                        int pay = idx < payments.size() ? payments.get(idx++)[0] : 0;
+                        if (pay > 0) flows.add(evMoney(p.playerId(), playerId, pay, "kortti"));
+                    }
+                }
+                return appendEvents(s.toBuilder()
                         .players(updated)
                         .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
-                        .build();
+                        .build(), flows.toArray(GameEventEntry[]::new));
             });
         }
     }
@@ -1081,10 +1106,12 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                         .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
                         .build());
             } else {
-                store.update(s -> s.toBuilder()
-                        .players(updateCash(s.players(), debtorId, -amount))
-                        .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
-                        .build());
+                store.update(s -> appendEvents(
+                        s.toBuilder()
+                                .players(updateCash(s.players(), debtorId, -amount))
+                                .turn(postMovePhase(s.turn(), isDoubles, consecutiveDoubles))
+                                .build(),
+                        evMoney(debtorId, "", amount, toFinReason(reason))));
             }
         } else {
             openDebt(state, debtorId, creditorId, amount, isDoubles, consecutiveDoubles, reason);
@@ -1308,5 +1335,11 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         return state.properties().stream()
                 .filter(p -> propertyId.equals(p.propertyId()))
                 .findFirst().orElse(null);
+    }
+
+    private static String toFinReason(String reason) {
+        if ("Tax".equals(reason)) return "vero";
+        if (reason != null && reason.startsWith("Card")) return "kortti";
+        return "maksu";
     }
 }

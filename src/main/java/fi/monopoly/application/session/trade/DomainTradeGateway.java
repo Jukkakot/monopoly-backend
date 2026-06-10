@@ -116,8 +116,15 @@ public final class DomainTradeGateway implements TradeGateway {
         if (requested.moneyAmount() > 0) data.put("requestedMoney",  String.valueOf(requested.moneyAmount()));
         if (!offered.propertyIds().isEmpty())   data.put("offeredProps",   String.join(",", offered.propertyIds()));
         if (!requested.propertyIds().isEmpty()) data.put("requestedProps", String.join(",", requested.propertyIds()));
-        store.update(state -> appendEvents(state,
-                ev("TRADE_ACCEPTED", List.of(initiatorId, recipientId), Map.copyOf(data))));
+        store.update(state -> {
+            List<fi.monopoly.domain.session.GameEventEntry> events = new java.util.ArrayList<>();
+            events.add(ev("TRADE_ACCEPTED", List.of(initiatorId, recipientId), Map.copyOf(data)));
+            if (offered.moneyAmount() > 0)
+                events.add(evMoney(initiatorId, recipientId, offered.moneyAmount(), "kauppa"));
+            if (requested.moneyAmount() > 0)
+                events.add(evMoney(recipientId, initiatorId, requested.moneyAmount(), "kauppa"));
+            return appendEvents(state, events.toArray(fi.monopoly.domain.session.GameEventEntry[]::new));
+        });
     }
 
     @Override
