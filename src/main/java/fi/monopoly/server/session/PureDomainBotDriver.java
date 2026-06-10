@@ -73,6 +73,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private volatile boolean isFirstTurn = true;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
             = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Last bot playerId whose WAITING_FOR_ROLL we observed — used to detect turn transitions. */
+    private volatile String lastBotTurnStartId = null;
     /** Consecutive EditTradeOffer attempts per tradeId — safety net against infinite edit loops. */
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> counterEditAttempts
             = new java.util.concurrent.ConcurrentHashMap<>();
@@ -254,6 +256,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             lastObservedTrade = null;
             return;
         }
+        // Reset per-partner decline counts at the start of each bot turn so the bot can
+        // re-attempt trading with the same partner in later turns.
+        var turn = state.turn();
+        if (turn != null && turn.phase() == TurnPhase.WAITING_FOR_ROLL
+                && botPlayerIds.contains(turn.activePlayerId())
+                && !turn.activePlayerId().equals(lastBotTurnStartId)) {
+            lastBotTurnStartId = turn.activePlayerId();
+            tradeDeclinesByPartnerId.clear();
+        }
+
         // Track when bot-initiated trades are declined to avoid re-proposing to the same partner.
         // A trade that disappears while someone was required to respond = declined (not cancelled).
         // handleDecline() never writes a "DECLINED" history entry, so we detect via decisionRequiredFromPlayerId.
