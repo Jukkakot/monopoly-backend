@@ -137,6 +137,13 @@ final class StrongBotStrategy {
         if (wouldPushToHotel) score -= cfg.hotelAversion();
         if (unownedCount(state) > 8) score -= 2.0;
         if (boardDangerScore(state, playerId) >= cfg.dangerCashReserve()) score -= 6.0;
+        // Timing: boost if an opponent is about to land on this group — build before they arrive
+        boolean opponentApproaching = state.properties().stream()
+                .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                .anyMatch(p -> opponentLandingDanger(state, playerId, p) > 0);
+        if (opponentApproaching) score += 3.0;
+        // Local danger: hold off if the bot itself is 3–8 steps from an opponent's heavy property
+        if (botApproachingDangerRent(state, playerId) > 0) score -= 4.0;
         score *= cfg.houseBuildAggression();
         score *= cfg.colorGroupWeight(group);
         return score;
@@ -220,6 +227,9 @@ final class StrongBotStrategy {
         if (unowned <= 5)  dynamic += 100;
         dynamic += opponentMonopolyCount(state, playerId) * cfg.buildReservePerOpponentMonopoly();
         if (!completedColorGroups(state, playerId).isEmpty()) dynamic += cfg.postMonopolyCashBuffer();
+        // Local danger: if bot is 3–8 steps from an opponent's hotel/4-house, reserve extra cash
+        int localDangerRent = botApproachingDangerRent(state, playerId);
+        if (localDangerRent > 0) dynamic += localDangerRent / 2;
 
         int raw      = Math.max(baseReserve, dynamic);
         int discount = (int) Math.round(Math.max(0, raw - cfg.minCashReserve()) * cfg.mortgageTolerance());
@@ -416,6 +426,53 @@ final class StrongBotStrategy {
                     return dist >= 1 && dist <= 7;
                 });
         return danger ? 1 : 0;
+    }
+
+    /**
+     * Returns the maximum rent the bot could face on its next roll, looking at opponent-owned
+     * properties with 4+ houses or a hotel that are 3–8 board steps ahead of the bot.
+     * Returns 0 if no such threat exists.
+     */
+    static int botApproachingDangerRent(SessionState state, String botId) {
+        PlayerSnapshot bot = findPlayer(state, botId);
+        if (bot == null) return 0;
+        int botIdx = bot.boardIndex();
+        return state.properties().stream()
+                .filter(p -> p.ownerPlayerId() != null && !p.ownerPlayerId().equals(botId))
+                .filter(p -> buildingLevel(p) >= 4)
+                .mapToInt(p -> {
+                    int propIdx = SpotType.SPOT_TYPES.indexOf(SpotType.valueOf(p.propertyId()));
+                    if (propIdx < 0) return 0;
+                    int dist = (propIdx - botIdx + 40) % 40;
+                    if (dist < 3 || dist > 8) return 0;
+                    String rentsStr = SpotType.valueOf(p.propertyId()).getStringProperty("rents");
+                    if (rentsStr == null || rentsStr.isBlank()) return 0;
+                    String[] rents = rentsStr.split(",");
+                    int level = buildingLevel(p);
+                    if (level >= rents.length) return 0;
+                    try { return Integer.parseInt(rents[level].trim()); } catch (Exception e) { return 0; }
+                })
+                .max().orElse(0);
+    }
+
+    /**
+     * Returns a position-based aggression multiplier: 1.30 (last place) … 0.85 (first place).
+     * Applied to build spend, buy threshold, and trade tolerance so the losing bot takes more
+     * risks while the leader plays conservatively.
+     */
+    static double positionFactor(SessionState state, String botId) {
+        List<String> ranking = state.players().stream()
+                .filter(p -> !p.bankrupt() && !p.eliminated())
+                .sorted(java.util.Comparator.comparingInt(
+                        (PlayerSnapshot p) -> estimateNetWorth(state, p.playerId())).reversed())
+                .map(PlayerSnapshot::playerId)
+                .toList();
+        int n = ranking.size();
+        if (n <= 1) return 1.0;
+        int rank = ranking.indexOf(botId);
+        if (rank < 0) return 1.0;
+        // rank 0 = richest → 0.85; rank n-1 = poorest → 1.30
+        return 0.85 + (n - 1 - rank) * (0.45 / (n - 1));
     }
 
     /**

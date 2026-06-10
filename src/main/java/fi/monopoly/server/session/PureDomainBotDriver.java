@@ -517,8 +517,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // Apply phase-based threshold
-        double threshold = buyThreshold(state, propId, cfg);
+        // Apply phase-based threshold, relaxed when losing and tightened when leading
+        double posFactor = StrongBotStrategy.positionFactor(state, botId);
+        double threshold = buyThreshold(state, propId, cfg) / posFactor;
         if (score >= threshold) {
             publisher.handle(new BuyPropertyCommand(sessionId, botId, decision.decisionId(), propId));
         } else {
@@ -639,8 +640,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false);
 
-        // Accept if deficit is within the configured fairness tolerance
-        int fairnessTolerance = configFor(botId).tradeFairnessTolerance();
+        // Accept if deficit is within the configured fairness tolerance, scaled by position
+        double posFactor = StrongBotStrategy.positionFactor(state, botId);
+        int fairnessTolerance = (int)(configFor(botId).tradeFairnessTolerance() * posFactor);
         if (valueReceived >= valueGiven - fairnessTolerance) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
             return;
@@ -1232,11 +1234,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (player == null) return false;
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
+        // Adjust effective reserve by position: losing bot spends more freely, leader is cautious
+        int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
 
         PropertyStateSnapshot candidate = state.properties().stream()
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && p.mortgaged())
                 .filter(p -> StrongBotStrategy.botOwnsFullGroup(state, playerId, StrongBotStrategy.spotType(p.propertyId()).streetType))
-                .filter(p -> player.cash() - StrongBotStrategy.unmortgageCost(p.propertyId()) >= reserve)
+                .filter(p -> player.cash() - StrongBotStrategy.unmortgageCost(p.propertyId()) >= posAdjustedReserve)
                 .max(java.util.Comparator.comparingDouble(p -> StrongBotStrategy.unmortgageScore(p, state, cfg)))
                 .orElse(null);
         if (candidate == null) return false;
@@ -1256,6 +1260,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (player == null) return false;
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
+        // Adjust effective reserve by position: losing bot spends more freely, leader is cautious
+        int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
 
         StreetType bestGroup = null;
         double bestScore = Double.NEGATIVE_INFINITY;
@@ -1263,7 +1269,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         for (StreetType group : StrongBotStrategy.completedColorGroups(state, playerId)) {
             int maxLevel = StrongBotStrategy.maxLevelInGroup(state, playerId, group);
             if (maxLevel >= cfg.buildRoundCap()) continue;
-            if (!StrongBotStrategy.canAffordBuildRound(state, player, group, reserve)) continue;
+            if (!StrongBotStrategy.canAffordBuildRound(state, player, group, posAdjustedReserve)) continue;
             double score = StrongBotStrategy.buildGroupScore(state, playerId, group, cfg);
             if (score > bestScore) { bestScore = score; bestGroup = group; }
         }
