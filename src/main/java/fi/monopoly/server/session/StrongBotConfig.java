@@ -519,24 +519,24 @@ public record StrongBotConfig(
      */
     public static StrongBotConfig sixPlayer() {
         return new Builder()
-                .buyThreshold(3.5)                 // grab almost everything
-                .minCashReserve(80)                // low: more players = more Go income per round
-                .dangerCashReserve(200)
+                .buyThreshold(4.0)                 // slightly pickier — keep more cash for deals
+                .minCashReserve(120)               // higher floor: 3-player needs cash for trades
+                .dangerCashReserve(280)
                 .completionWeight(9.5)
                 .progressWeight(3.0)
                 .opponentBlockWeight(5.0)          // was 8.0 — ablation confirmed blocking hurts in 3p
-                .railroadWeight(4.0)
+                .railroadWeight(5.16)
                 .utilityWeight(0.35)
-                .liquidityPenaltyWeight(1.5)
+                .liquidityPenaltyWeight(1.69)
                 .preferJailLateGame(false)
-                .houseBuildAggression(1.8)         // high — build fast to create rent pressure
-                .hotelAversion(3.5)                // hotels needed to force bankruptcies in 3p
+                .houseBuildAggression(1.38)        // less aggressive — cash matters more than houses in 3p
+                .hotelAversion(6.53)               // evolution: avoid hotels, keep cash liquid in 3p
                 .developmentBias(2.8)
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1.2)
-                .buildReservePerOpponentMonopoly(35)
+                .buildReservePerOpponentMonopoly(56) // larger buffer when opponent has monopoly
                 .auctionAggression(1.1)
-                .tradeFairnessTolerance(65)        // 3-player: accept moderately unfavourable trades to keep deals flowing
+                .tradeFairnessTolerance(30)        // threatScore premium now handles the gap; base tolerance can be tight
                 .tradeSetCompletionWeight(280)
                 .jailExitThreshold(350)
                 .bankruptcyAversion(1.1)
@@ -545,7 +545,7 @@ public record StrongBotConfig(
                 .buildRoundCap(5)
                 .postMonopolyCashBuffer(75)
                 .auctionSetCompletionBonus(100)
-                .tradeLiquidityWeight(0.9)
+                .tradeLiquidityWeight(1.0)
                 .opponentLeaderPressure(1.2)
                 .jailCardHoldBias(0.5)
                 .mortgageRecoveryPriority(1.2)
