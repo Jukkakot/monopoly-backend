@@ -607,15 +607,16 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
-    // Trade: bot does not repeat the same declined offer
+    // Trade: bot escalates to mutual-swap after a cash offer is declined
     // -------------------------------------------------------------------------
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void strongBotDoesNotRepeatSameDeclinedTradeOffer() throws InterruptedException {
+    void strongBotProposesSwapAfterCashOfferDeclined() throws InterruptedException {
         CopyOnWriteArrayList<SessionCommand> commands = new CopyOnWriteArrayList<>();
         CountDownLatch anyCommand = new CountDownLatch(1);
 
+        // Bot owns B1, human owns B2 — both need the other's property to complete the brown monopoly.
         PropertyStateSnapshot b1 = new PropertyStateSnapshot("B1", BOT_PLAYER, false, 0, 0);
         PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", HUMAN_PLAYER, false, 0, 0);
 
@@ -623,8 +624,7 @@ class PureDomainBotDriverTest {
                 new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
                 List.of(b1, b2));
 
-        // Trade where bot offered 60€ for B2 and human has to decide (but hasn't yet)
-        // decisionRequiredFromPlayerId = HUMAN → needsBotAction = false, so driver won't act on it
+        // Bot previously offered 60€ for B2; human declined (decisionRequiredFromPlayerId = HUMAN)
         TradeOfferState declinedOffer = new TradeOfferState(
                 BOT_PLAYER, HUMAN_PLAYER,
                 new TradeSelectionState(60, List.of(), 0),
@@ -647,22 +647,19 @@ class PureDomainBotDriverTest {
         };
 
         SessionCommandPublisher publisher = new SessionCommandPublisher(port);
-        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, baseState,
-                Map.of());
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, baseState, Map.of());
 
-        // Inject trade-pending snapshot (driver won't act — human decides, not bot)
+        // Inject trade-pending snapshot (driver won't act — human decides)
         driver.onSnapshotChanged(ClientSessionSnapshot.from(stateWithTrade, true));
-        // Inject trade-gone snapshot → decline is detected, lastDeclinedOfferAmount[HUMAN][B2]=60
+        // Inject trade-gone snapshot → decline detected, lastDeclinedOfferAmount[HUMAN][B2]=60
         driver.onSnapshotChanged(ClientSessionSnapshot.from(baseState, true));
 
         assertTrue(anyCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch some command after decline");
 
-        // Bot's max affordable offer for B2 is min(60, cash-reserve) = 60.
-        // Since 60 <= lastDeclined(60), re-proposing is blocked → no OpenTradeCommand.
-        assertFalse(commands.stream().anyMatch(c -> c instanceof OpenTradeCommand),
-                "Bot must not re-propose same trade when it cannot beat the declined offer; got: " + commands);
-        assertTrue(commands.stream().anyMatch(c -> c instanceof EndTurnCommand),
-                "Bot should fall through to EndTurn instead; got: " + commands);
+        // After a cash offer is declined, the mutual-swap pass fires because both players
+        // need each other's property to complete the brown group.  Bot opens a new trade.
+        assertTrue(commands.stream().anyMatch(c -> c instanceof OpenTradeCommand),
+                "Bot should re-propose as a mutual swap (B1 for B2) after cash offer declined; got: " + commands);
     }
 
     // -------------------------------------------------------------------------

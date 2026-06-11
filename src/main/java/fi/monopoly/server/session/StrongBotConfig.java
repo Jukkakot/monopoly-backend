@@ -536,7 +536,7 @@ public record StrongBotConfig(
                 .unmortgageAggression(1.2)
                 .buildReservePerOpponentMonopoly(35)
                 .auctionAggression(1.1)
-                .tradeFairnessTolerance(40)        // accept slightly losing trades to complete monopoly
+                .tradeFairnessTolerance(65)        // 3-player: accept moderately unfavourable trades to keep deals flowing
                 .tradeSetCompletionWeight(280)
                 .jailExitThreshold(350)
                 .bankruptcyAversion(1.1)

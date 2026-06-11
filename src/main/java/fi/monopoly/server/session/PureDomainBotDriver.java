@@ -627,12 +627,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeOfferState offer = trade.currentOffer();
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
 
-        // Don't help the board leader or a player one property away from completing a strong monopoly
         String tradePartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
-        if (StrongBotStrategy.isLeadingThreat(state, tradePartnerId)) {
-            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
-            return;
-        }
+        boolean partnerIsLeadingThreat = StrongBotStrategy.isLeadingThreat(state, tradePartnerId);
 
         TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
@@ -640,10 +636,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false);
 
-        // Accept if deficit is within the configured fairness tolerance, scaled by position
+        // For leading threats: require clear profit (≥40 surplus) so the bot only makes deals
+        // that are genuinely worth it.  For others: standard fairness tolerance applies.
         double posFactor = StrongBotStrategy.positionFactor(state, botId);
         int fairnessTolerance = (int)(configFor(botId).tradeFairnessTolerance() * posFactor);
-        if (valueReceived >= valueGiven - fairnessTolerance) {
+        boolean acceptable = partnerIsLeadingThreat
+                ? valueReceived >= valueGiven + Math.max(40, fairnessTolerance)
+                : valueReceived >= valueGiven - fairnessTolerance;
+        if (acceptable) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
             return;
         }
@@ -683,8 +683,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
-        // Target: bot wants ~5% profit over what it gives
-        int targetMoneyReceived = Math.max(0, (int) (valueGiven * 1.05) - nonMoneyReceived);
+        // For leading threats, require 20 % profit (harder to exploit the bot);
+        // for normal partners, 5 % profit is enough to cover uncertainty.
+        String counterPartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
+        double profitFactor = StrongBotStrategy.isLeadingThreat(state, counterPartnerId) ? 1.20 : 1.05;
+        int targetMoneyReceived = Math.max(0, (int) (valueGiven * profitFactor) - nonMoneyReceived);
 
         // editOfferedSide: side the bot RECEIVES; editGiveSide: side the bot GIVES
         boolean editOfferedSide = botIsRecipient;
@@ -790,12 +793,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         PlayerSnapshot botSnap = findPlayer(state, botId);
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
-        // Step 2a: offer an own expendable property when cash can't cover the target price
+        // Step 2a: offer an own property when cash can't cover the target price.
+        // Prefer a property that completes the partner's monopoly (mutual-benefit swap) —
+        // they're more likely to accept, and both parties gain.  Fall back to expendable.
         if (myGive.propertyIds().isEmpty() && available0 < targetPrice) {
-            String expendable = findExpendableOwnProperty(state, botId);
-            if (expendable != null) {
+            String swapProp    = findStrategicTargetProperty(state, partnerId0, botId);
+            String propToOffer = swapProp != null ? swapProp : findExpendableOwnProperty(state, botId);
+            if (propToOffer != null) {
                 publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                        new TradeEditPatch(null, giveSide, null, List.of(expendable), List.of(), null)));
+                        new TradeEditPatch(null, giveSide, null, List.of(propToOffer), List.of(), null)));
                 return;
             }
         }
@@ -837,10 +843,26 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int reserve = dynamicReserve(state, botId);
         if (bot == null || bot.cash() < reserve + 50) return false;
 
+        // Pass 1: mutual monopoly swap — both sides complete a color group.
+        // These are the highest-value trades; attempt even with near-monopoly partners.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            // Don't help the board leader or a player one property away from a strong monopoly
-            if (StrongBotStrategy.isLeadingThreat(state, other.playerId())) continue;
+            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
+            String botWantsFromPartner  = findStrategicTargetProperty(state, botId, other.playerId());
+            String partnerWantsFromBot  = findStrategicTargetProperty(state, other.playerId(), botId);
+            if (botWantsFromPartner != null && partnerWantsFromBot != null) {
+                CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
+                if (result.accepted()) return true;
+            }
+        }
+
+        // Pass 2: regular acquisition — pay (or offer an expendable property) for a needed property.
+        for (PlayerSnapshot other : state.players()) {
+            if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            // Don't request properties from a player who is one property away from a monopoly
+            // (it is unlikely they'll give it up, and opening a trade could be exploited).
+            // Rich-but-not-near-monopoly players are fine trade partners.
+            if (StrongBotStrategy.isNearMonopoly(state, other.playerId())) continue;
             // Skip partners who have repeatedly declined bot-initiated offers
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             // Verify handleTradeEditing would actually find a target and afford an offer
