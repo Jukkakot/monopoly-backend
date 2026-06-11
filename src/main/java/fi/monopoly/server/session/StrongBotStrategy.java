@@ -7,8 +7,10 @@ import fi.monopoly.types.PlaceType;
 import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
 
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -515,5 +517,58 @@ final class StrongBotStrategy {
         return state.players().stream()
                 .filter(p -> !p.playerId().equals(playerId) && !p.bankrupt() && !p.eliminated())
                 .allMatch(p -> estimateNetWorth(state, p.playerId()) < playerWorth);
+    }
+
+    /**
+     * Continuous threat score for {@code playerId} in [0, 1].
+     *
+     * <p>Primary component: monopoly-group progress, weighted by group value.
+     * A player with 2/3 of a €300-average group scores higher than 2/3 of a €60-average group.
+     * Secondary component: net-worth lead over opponents — only counts when the lead exceeds €400
+     * (cash fluctuates too much to be meaningful at smaller margins).
+     *
+     * <p>Used in trade decisions to require a proportional premium instead of a flat amount.
+     */
+    static double threatScore(SessionState state, String playerId) {
+        double maxGroupScore = 0.0;
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long owned = state.properties().stream()
+                    .filter(p -> playerId.equals(p.ownerPlayerId())
+                            && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (owned == 0) continue;
+            double progress = (double) owned / groupSize;
+            double avgPrice = groupAveragePrice(group);
+            double valueWeight = Math.min(1.5, avgPrice / 200.0);
+            maxGroupScore = Math.max(maxGroupScore, progress * valueWeight);
+        }
+
+        int playerWorth = estimateNetWorth(state, playerId);
+        OptionalDouble avgOthers = state.players().stream()
+                .filter(p -> !p.playerId().equals(playerId) && !p.bankrupt() && !p.eliminated())
+                .mapToInt(p -> estimateNetWorth(state, p.playerId()))
+                .average();
+        double netWorthComponent = 0.0;
+        if (avgOthers.isPresent()) {
+            double gap = playerWorth - avgOthers.getAsDouble();
+            netWorthComponent = Math.max(0.0, (gap - 400.0) / 1500.0);
+            netWorthComponent = Math.min(0.4, netWorthComponent);
+        }
+
+        return Math.min(1.0, maxGroupScore + netWorthComponent);
+    }
+
+    private static double groupAveragePrice(StreetType group) {
+        return Arrays.stream(SpotType.values())
+                .filter(s -> s.streetType == group)
+                .mapToInt(s -> {
+                    Integer p = s.getIntegerProperty("price");
+                    return p != null ? p : 0;
+                })
+                .average()
+                .orElse(200.0);
     }
 }

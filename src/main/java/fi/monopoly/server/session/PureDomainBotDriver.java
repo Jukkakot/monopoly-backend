@@ -628,7 +628,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
 
         String tradePartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
-        boolean partnerIsLeadingThreat = StrongBotStrategy.isLeadingThreat(state, tradePartnerId);
 
         TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
@@ -636,14 +635,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false);
 
-        // For leading threats: require clear profit (≥40 surplus) so the bot only makes deals
-        // that are genuinely worth it.  For others: standard fairness tolerance applies.
+        // Acceptance threshold scales with the partner's threat score (0-1):
+        //   low threat  → standard fairness tolerance
+        //   high threat → up to 25% profit premium required (proportional to property value)
         double posFactor = StrongBotStrategy.positionFactor(state, botId);
         int fairnessTolerance = (int)(configFor(botId).tradeFairnessTolerance() * posFactor);
-        boolean acceptable = partnerIsLeadingThreat
-                ? valueReceived >= valueGiven + Math.max(40, fairnessTolerance)
-                : valueReceived >= valueGiven - fairnessTolerance;
-        if (acceptable) {
+        double ts = StrongBotStrategy.threatScore(state, tradePartnerId);
+        int requiredPremium = (int)(valueGiven * ts * 0.25);
+        if (valueReceived >= valueGiven - fairnessTolerance + requiredPremium) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
             return;
         }
@@ -683,10 +682,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
-        // For leading threats, require 20 % profit (harder to exploit the bot);
-        // for normal partners, 5 % profit is enough to cover uncertainty.
+        // Profit target scales with partner threat score (0-1): 1.05 (no threat) to 1.25 (full threat).
         String counterPartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
-        double profitFactor = StrongBotStrategy.isLeadingThreat(state, counterPartnerId) ? 1.20 : 1.05;
+        double ts = StrongBotStrategy.threatScore(state, counterPartnerId);
+        double profitFactor = 1.05 + ts * 0.20;
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * profitFactor) - nonMoneyReceived);
 
         // editOfferedSide: side the bot RECEIVES; editGiveSide: side the bot GIVES
