@@ -43,6 +43,9 @@ class SessionRegistryHttpIntegrationTest {
 
     private static final Pattern SESSION_ID_PATTERN = Pattern.compile("\"sessionId\":\"([^\"]+)\"");
     private static final Pattern ACTIVE_PLAYER_PATTERN = Pattern.compile("\"activePlayerId\":\"([^\"]+)\"");
+    private static final Pattern PLAYER_ID_PATTERN = Pattern.compile("\"playerId\":\"([^\"]+)\"");
+    private static final Pattern PLAYER_TOKEN_PATTERN = Pattern.compile("\"playerToken\":\"([^\"]+)\"");
+    private static final Pattern HOST_TOKEN_PATTERN = Pattern.compile("\"hostToken\":\"([^\"]+)\"");
 
     private int port;
     private SessionHttpServer httpServer;
@@ -268,6 +271,52 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     // -------------------------------------------------------------------------
+    // Player token validation
+    // -------------------------------------------------------------------------
+
+    /**
+     * A command submitted with a wrong playerToken must be rejected with HTTP 403.
+     * A command submitted with the correct playerToken must not return 403
+     * (it may still be rejected with 422 for game-rule reasons if it is not the player's turn).
+     */
+    @Test
+    void commandWithWrongPlayerToken_returns403() throws Exception {
+        // 1. Create a lobby session
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        assertEquals(201, createResp.statusCode());
+        String sessionId    = extractSessionId(createResp.body());
+        String hostToken    = extractPattern(HOST_TOKEN_PATTERN, createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String validToken   = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+
+        // 2. Add a bot so we have >= 2 players, then mark the host ready to auto-start the game
+        post("/sessions/" + sessionId + "/lobby/bots", "{\"hostToken\":\"" + hostToken + "\"}");
+        post("/sessions/" + sessionId + "/lobby/ready",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken + "\",\"ready\":true}");
+
+        // Wait briefly for the game to start (all-ready triggers auto-start synchronously in test)
+        Thread.sleep(200);
+
+        // 3. RollDice with a WRONG token — must be 403
+        String wrongTokenCmd = "{\"type\":\"RollDice\",\"sessionId\":\"" + sessionId
+                + "\",\"actorPlayerId\":\"" + hostPlayerId + "\",\"playerToken\":\"wrong-token\"}";
+        HttpResponse<String> wrongResp = post("/sessions/" + sessionId + "/command", wrongTokenCmd);
+        assertEquals(403, wrongResp.statusCode(),
+                "Command with wrong playerToken should return 403, got: " + wrongResp.body());
+
+        // 4. Same command for the HOST player with the CORRECT token — must NOT return 403.
+        // The game may reject the command for a game-rule reason (422) if it is not the host's
+        // turn, but it must never return 403 when the token matches.
+        String correctTokenCmd = "{\"type\":\"RollDice\",\"sessionId\":\"" + sessionId
+                + "\",\"actorPlayerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken + "\"}";
+        HttpResponse<String> correctResp = post("/sessions/" + sessionId + "/command", correctTokenCmd);
+        // 200 = accepted (host's turn), 422 = game-rule rejection (bot's turn) — both are valid; 403 is not
+        assertNotEquals(403, correctResp.statusCode(),
+                "Command with correct playerToken must not return 403, got: " + correctResp.body());
+    }
+
+    // -------------------------------------------------------------------------
     // CORS
     // -------------------------------------------------------------------------
 
@@ -304,6 +353,12 @@ class SessionRegistryHttpIntegrationTest {
     private String extractActivePlayerId(String json) {
         Matcher m = ACTIVE_PLAYER_PATTERN.matcher(json);
         assertTrue(m.find(), "No activePlayerId in: " + json);
+        return m.group(1);
+    }
+
+    private String extractPattern(Pattern pattern, String json) {
+        Matcher m = pattern.matcher(json);
+        assertTrue(m.find(), "Pattern " + pattern + " not found in: " + json);
         return m.group(1);
     }
 
