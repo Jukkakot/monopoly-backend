@@ -48,6 +48,7 @@ class SessionRegistryHttpIntegrationTest {
     private static final Pattern PLAYER_ID_PATTERN = Pattern.compile("\"playerId\":\"([^\"]+)\"");
     private static final Pattern PLAYER_TOKEN_PATTERN = Pattern.compile("\"playerToken\":\"([^\"]+)\"");
     private static final Pattern HOST_TOKEN_PATTERN = Pattern.compile("\"hostToken\":\"([^\"]+)\"");
+    private static final Pattern SSE_ID_PATTERN = Pattern.compile("^id: (\\d+)$");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -272,6 +273,92 @@ class SessionRegistryHttpIntegrationTest {
         assertTrue(initial.contains("\"sessionId\":\"" + sessionId + "\""));
 
         sseThread.join(2_000);
+    }
+
+    // -------------------------------------------------------------------------
+    // SSE reconnect with Last-Event-ID
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies SSE resumption: when a client reconnects with {@code Last-Event-ID} equal to
+     * the current snapshot version, the server must NOT resend the already-seen snapshot.
+     *
+     * <p>This tests the fix that emits {@code id:} fields on SSE events, enabling the browser's
+     * native {@code Last-Event-ID} mechanism to suppress replay of already-seen snapshots.</p>
+     */
+    @Test
+    @DisabledIfSystemProperty(named = "skipSseTests", matches = "true",
+            disabledReason = "SSE test is flaky under Docker CPU load — run with -DskipSseTests=false to enable")
+    void sseReconnect_withCurrentLastEventId_doesNotResendSnapshot() throws Exception {
+        String sessionId = extractSessionId(post("/sessions",
+                "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#E63946\",\"#2A9D8F\"]}").body());
+
+        // --- First connection: receive the initial snapshot and note its SSE event id ---
+        BlockingQueue<Long> firstConnSseId = new LinkedBlockingQueue<>();
+        Thread firstConn = Thread.ofVirtual().start(() -> {
+            try {
+                HttpURLConnection conn = (HttpURLConnection)
+                        new URL("http://localhost:" + port + "/sessions/" + sessionId + "/events")
+                                .openConnection();
+                conn.setRequestProperty("Accept", "text/event-stream");
+                conn.setReadTimeout(15_000);
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    long seenId = -1;
+                    while ((line = reader.readLine()) != null) {
+                        Matcher idMatcher = SSE_ID_PATTERN.matcher(line);
+                        if (idMatcher.matches()) {
+                            seenId = Long.parseLong(idMatcher.group(1));
+                        }
+                        if (line.startsWith("data: ") && seenId >= 0) {
+                            firstConnSseId.offer(seenId);
+                            break; // got what we need
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        });
+
+        Long seenVersion = firstConnSseId.poll(15, TimeUnit.SECONDS);
+        assertNotNull(seenVersion, "First SSE connection should deliver an event with an id: field");
+        firstConn.join(2_000);
+
+        // --- Second connection: reconnect with Last-Event-ID = the version we already saw ---
+        // Since no new commands were submitted, the backend has nothing newer to send.
+        BlockingQueue<String> reconnectEvents = new LinkedBlockingQueue<>();
+        Thread secondConn = Thread.ofVirtual().start(() -> {
+            try {
+                HttpURLConnection conn = (HttpURLConnection)
+                        new URL("http://localhost:" + port + "/sessions/" + sessionId + "/events")
+                                .openConnection();
+                conn.setRequestProperty("Accept", "text/event-stream");
+                conn.setRequestProperty("Last-Event-ID", String.valueOf(seenVersion));
+                conn.setReadTimeout(3_000); // short timeout: no new events expected
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith("data: ")) {
+                            reconnectEvents.offer(line.substring(6));
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // read timeout is expected when no new events arrive
+            }
+        });
+
+        // Wait for the reconnect thread — it will either timeout (no new data) or deliver an event
+        secondConn.join(5_000);
+
+        // The client is already up to date: the server should NOT have resent the snapshot.
+        // If no event arrived, the queue will be empty — that is the correct behavior.
+        String unexpectedEvent = reconnectEvents.poll();
+        assertNull(unexpectedEvent,
+                "Server must not resend the already-seen snapshot on reconnect with current Last-Event-ID, "
+                        + "but received: " + unexpectedEvent);
     }
 
     // -------------------------------------------------------------------------
