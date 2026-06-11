@@ -540,7 +540,8 @@ public final class SessionHttpServer {
         ClientSessionListener listener = snapshot -> {
             if (!client.terminated()) {
                 try {
-                    client.sendEvent(snapshot.stampedNow());
+                    ClientSessionSnapshot stamped = snapshot.stampedNow();
+                    client.sendEvent("message", stamped, String.valueOf(stamped.version()));
                 } catch (Exception e) {
                     client.close();
                 }
@@ -554,10 +555,17 @@ public final class SessionHttpServer {
         // Send initial snapshot synchronously while the response is still in synchronous
         // mode — before keepAlive() switches it to async. This is the canonical Javalin SSE
         // pattern and avoids any race between the async ctx.future() and the first write.
-        long clientVersion = parseLastEventId(client.ctx().header("Last-Event-ID"));
+        // Accept Last-Event-ID from header (native browser SSE reconnect) or query param
+        // (client fallback on initial connect before browser has seen any event id).
+        String lastEventIdHeader = client.ctx().header("Last-Event-ID");
+        String lastEventIdQuery  = client.ctx().queryParam("lastEventId");
+        long clientVersion = parseLastEventId(lastEventIdHeader != null ? lastEventIdHeader : lastEventIdQuery);
         ClientSessionSnapshot initial = snapshotSupplier.get();
         if (clientVersion < initial.version()) {
-            try { client.sendEvent(initial.stampedNow()); } catch (Exception ignored) {}
+            try {
+                ClientSessionSnapshot stamped = initial.stampedNow();
+                client.sendEvent("message", stamped, String.valueOf(stamped.version()));
+            } catch (Exception ignored) {}
         }
         client.keepAlive();
     }
