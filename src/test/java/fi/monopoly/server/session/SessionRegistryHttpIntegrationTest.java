@@ -23,6 +23,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -46,6 +48,8 @@ class SessionRegistryHttpIntegrationTest {
     private static final Pattern PLAYER_ID_PATTERN = Pattern.compile("\"playerId\":\"([^\"]+)\"");
     private static final Pattern PLAYER_TOKEN_PATTERN = Pattern.compile("\"playerToken\":\"([^\"]+)\"");
     private static final Pattern HOST_TOKEN_PATTERN = Pattern.compile("\"hostToken\":\"([^\"]+)\"");
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private int port;
     private SessionHttpServer httpServer;
@@ -317,6 +321,58 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     // -------------------------------------------------------------------------
+    // Debug state endpoint — no-auth current behavior
+    // -------------------------------------------------------------------------
+
+    /**
+     * Documents the CURRENT behavior of {@code PUT /sessions/{id}/debug/state}:
+     * any caller with a valid session id can apply a state patch — no authentication
+     * is required. This test makes the design gap visible in the test suite.
+     *
+     * <ul>
+     *   <li>Valid session + minimal patch → HTTP 200, {@code applied:true}</li>
+     *   <li>Invalid session id → HTTP 404</li>
+     * </ul>
+     */
+    @Test
+    void debugStateEndpoint_requiresNoAuth_currentBehavior() throws Exception {
+        // Create a session
+        String sessionId = extractSessionId(post("/sessions",
+                "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#E63946\",\"#2A9D8F\"]}").body());
+
+        // GET snapshot to find a real playerId to patch
+        String snapshot = get("/sessions/" + sessionId + "/snapshot").body();
+        String activePlayerId = extractActivePlayerId(snapshot);
+
+        // Minimal valid patch: set active player's cash to 2000
+        String patch = "{\"players\":[{\"playerId\":\"" + activePlayerId + "\",\"cash\":2000}]}";
+        HttpResponse<String> patchResp = put("/sessions/" + sessionId + "/debug/state", patch);
+        assertEquals(200, patchResp.statusCode(),
+                "Debug state patch should return 200 (no auth check), got: " + patchResp.body());
+        assertTrue(patchResp.body().contains("\"applied\":true"),
+                "Response should contain applied:true, got: " + patchResp.body());
+
+        // Verify the patch was applied by checking the snapshot.
+        // The snapshot has shape: { "state": { "players": [...] } }
+        String updatedSnapshot = get("/sessions/" + sessionId + "/snapshot").body();
+        JsonNode snapshotRoot = objectMapper.readTree(updatedSnapshot);
+        JsonNode players = snapshotRoot.path("state").path("players");
+        boolean cashUpdated = false;
+        for (JsonNode player : players) {
+            if (activePlayerId.equals(player.path("playerId").asText())) {
+                cashUpdated = player.path("cash").asInt() == 2000;
+                break;
+            }
+        }
+        assertTrue(cashUpdated, "Player cash should have been updated to 2000 by debug patch");
+
+        // Invalid sessionId must return 404
+        HttpResponse<String> notFoundResp = put("/sessions/nonexistent-id/debug/state", patch);
+        assertEquals(404, notFoundResp.statusCode(),
+                "Debug state patch for unknown session should return 404");
+    }
+
+    // -------------------------------------------------------------------------
     // CORS
     // -------------------------------------------------------------------------
 
@@ -375,6 +431,15 @@ class SessionRegistryHttpIntegrationTest {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:" + port + path))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
+                .header("Content-Type", "application/json").build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> put(String path, String body) throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .PUT(HttpRequest.BodyPublishers.ofString(body))
                 .header("Content-Type", "application/json").build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
