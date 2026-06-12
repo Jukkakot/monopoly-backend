@@ -729,6 +729,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int actualMoney = Math.min(targetMoneyReceived, proposerCash);
         if (actualMoney < 10) {
             // Proposer can't cover a fair counter — cancel
+            recordBotCancelAsDecline(botId, trade);
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
         }
@@ -745,6 +746,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             log.warn("Bot {} counter-edit loop detected for trade {} ({} attempts) — cancelling",
                     botId.substring(0, 8), tradeId.substring(0, 12), attempts);
             counterEditAttempts.remove(tradeId);
+            recordBotCancelAsDecline(botId, trade);
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
         }
@@ -778,6 +780,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             String partnerId = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
             String targetProp = findStrategicTargetProperty(state, botId, partnerId);
             if (targetProp == null) {
+                recordBotCancelAsDecline(botId, trade);
                 publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
             }
@@ -819,6 +822,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                         .getOrDefault(partnerId0, new java.util.concurrent.ConcurrentHashMap<>())
                         .getOrDefault(targetPropId0, 0);
                 if (offerAmount < 10 || (!hasOwnProp && offerAmount <= prevDeclined)) {
+                    recordBotCancelAsDecline(botId, trade);
                     publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                     return;
                 }
@@ -1301,6 +1305,22 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         CommandResult result = publisher.handle(
                 new BuyBuildingRoundCommand(sessionId, playerId, target.propertyId()));
         return result.accepted();
+    }
+
+    /**
+     * Records a bot-initiated trade cancellation as a decline for the given partner.
+     * This prevents the bot from immediately re-proposing the same trade after it had
+     * to cancel due to convergence failure (counter-edit loop, insufficient funds, etc.).
+     * Without this, tradeDeclinesByPartnerId stays at 0 and the bot loops indefinitely.
+     */
+    private void recordBotCancelAsDecline(String botId, TradeState trade) {
+        if (trade == null) return;
+        String partnerId = botId.equals(trade.initiatorPlayerId())
+                ? trade.recipientPlayerId() : trade.initiatorPlayerId();
+        tradeDeclinesByPartnerId.merge(partnerId, 1, Integer::sum);
+        log.debug("Bot {} recorded self-cancel as decline for partner {} (cumulative: {})",
+                botId.substring(0, 8), partnerId,
+                tradeDeclinesByPartnerId.get(partnerId));
     }
 
     private static SpotType spotType(String propertyId) {
