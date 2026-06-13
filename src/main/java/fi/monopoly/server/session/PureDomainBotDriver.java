@@ -795,16 +795,25 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         PlayerSnapshot botSnap = findPlayer(state, botId);
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
-        // Step 2a: offer an own property when cash can't cover the target price.
-        // Prefer a property that completes the partner's monopoly (mutual-benefit swap) —
-        // they're more likely to accept, and both parties gain.  Fall back to expendable.
-        if (myGive.propertyIds().isEmpty() && available0 < targetPrice) {
-            String swapProp    = findStrategicTargetProperty(state, partnerId0, botId);
-            String propToOffer = swapProp != null ? swapProp : findExpendableOwnProperty(state, botId);
-            if (propToOffer != null) {
+        // Step 2a: offer an own property when beneficial.
+        // Always prefer a set-completing swap property over cash — mutual benefit, preserves bot's cash,
+        // and avoids the infinite open→cancel loop caused by lastDeclinedOfferAmount blocking re-offers.
+        // Fall back to an expendable property only when cash alone can't cover the target price.
+        // Only run when the give-side is completely empty (no property AND no money already set).
+        if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
+            String swapProp = findStrategicTargetProperty(state, partnerId0, botId);
+            if (swapProp != null) {
                 publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                        new TradeEditPatch(null, giveSide, null, List.of(propToOffer), List.of(), null)));
+                        new TradeEditPatch(null, giveSide, null, List.of(swapProp), List.of(), null)));
                 return;
+            }
+            if (available0 < targetPrice) {
+                String expendable = findExpendableOwnProperty(state, botId);
+                if (expendable != null) {
+                    publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                            new TradeEditPatch(null, giveSide, null, List.of(expendable), List.of(), null)));
+                    return;
+                }
             }
         }
 
