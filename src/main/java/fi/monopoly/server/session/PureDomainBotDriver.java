@@ -889,9 +889,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Pass 2: P3 acquisition — pay cash (or offer an expendable) for a foothold property.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            // Skip near-monopoly partners for P3 acquisitions: they are unlikely to sell and
-            // engaging them could give them leverage.
-            if (StrongBotStrategy.isNearMonopoly(state, other.playerId())) continue;
             // Skip partners who have repeatedly declined bot-initiated offers
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             // Verify handleTradeEditing would actually find a target and afford an offer
