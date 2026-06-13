@@ -815,12 +815,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
         // Step 2a: offer an own property when beneficial.
-        // Always prefer a set-completing swap property over cash — mutual benefit, preserves bot's cash,
-        // and avoids the infinite open→cancel loop caused by lastDeclinedOfferAmount blocking re-offers.
+        // Only offer a property as a swap if it is a critical (P1) target for the partner — i.e. it
+        // would complete the partner's street monopoly. Offering a property for a partner's P3 interest
+        // produces same-value straight swaps with no strategic gain for either side.
         // Fall back to an expendable property only when cash alone can't cover the target price.
         // Only run when the give-side is completely empty (no property AND no money already set).
         if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
-            String swapProp = findStrategicTargetProperty(state, partnerId0, botId);
+            String swapProp = findCriticalTargetProperty(state, partnerId0, botId);
             if (swapProp != null) {
                 publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
                         new TradeEditPatch(null, giveSide, null, List.of(swapProp), List.of(), null)));
@@ -874,14 +875,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int reserve = dynamicReserve(state, botId);
         if (bot == null || bot.cash() < reserve + 50) return false;
 
-        // Pass 1: mutual monopoly swap — bot must gain a critical (P1/P2) property; partner must also
-        // have a strategic interest in something from the bot. Restricting to critical targets prevents
-        // low-value P3 foothold swaps that trade roughly equal properties for no net benefit.
+        // Pass 1: mutual monopoly swap — BOTH sides must have a critical (P1) target from each other.
+        // Requiring both directions to be P1 ensures the swap only fires when both players would
+        // complete a street monopoly, making it a genuine mutual benefit. Asymmetric or P3-only
+        // swaps produce roughly equal-value trades with no net strategic gain.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             String botWantsFromPartner  = findCriticalTargetProperty(state, botId, other.playerId());
-            String partnerWantsFromBot  = findStrategicTargetProperty(state, other.playerId(), botId);
+            String partnerWantsFromBot  = findCriticalTargetProperty(state, other.playerId(), botId);
             if (botWantsFromPartner != null && partnerWantsFromBot != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
                 if (result.accepted()) return true;
