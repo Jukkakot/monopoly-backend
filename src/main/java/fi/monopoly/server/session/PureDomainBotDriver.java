@@ -815,11 +815,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
         // Step 2a: offer an own property when beneficial.
-        // Only offer a property as a swap if it is a critical (P1) target for the partner — i.e. it
-        // would complete the partner's street monopoly. Offering a property for a partner's P3 interest
-        // produces same-value straight swaps with no strategic gain for either side.
-        // Fall back to an expendable property only when cash alone can't cover the target price.
+        // Only offer a strategic swap property if it satisfies a P1 critical need for the partner.
+        // When the bot itself is chasing a P1 target (monopoly completion), also proactively offer
+        // an expendable property as a sweetener — the partner knows the bot is about to get a
+        // monopoly and will demand a premium; a property bundle is more persuasive than cash alone.
+        // Otherwise fall back to expendable only when cash is insufficient.
         // Only run when the give-side is completely empty (no property AND no money already set).
+        boolean targetIsP1 = isMonopolyCompletingTarget(state, botId, targetPropId0);
         if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
             String swapProp = findCriticalTargetProperty(state, partnerId0, botId);
             if (swapProp != null) {
@@ -827,7 +829,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                         new TradeEditPatch(null, giveSide, null, List.of(swapProp), List.of(), null)));
                 return;
             }
-            if (available0 < targetPrice) {
+            if (available0 < targetPrice || targetIsP1) {
                 String expendable = findExpendableOwnProperty(state, botId);
                 if (expendable != null) {
                     publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
@@ -986,6 +988,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         return null;
+    }
+
+    /** Returns true if acquiring {@code propId} would complete a street monopoly for {@code botId}. */
+    private boolean isMonopolyCompletingTarget(SessionState state, String botId, String propId) {
+        StreetType group = spotType(propId).streetType;
+        if (group == null || group.placeType != PlaceType.STREET) return false;
+        Integer groupSize = SpotType.getNumberOfSpots(group);
+        if (groupSize == null || groupSize == 0) return false;
+        long botOwns = state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                .count();
+        return botOwns == groupSize - 1;
     }
 
     /**
