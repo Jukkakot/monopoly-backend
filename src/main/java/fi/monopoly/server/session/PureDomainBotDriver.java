@@ -733,6 +733,25 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
         }
+
+        // If cash alone can't reach the target AND the receive side has no properties yet,
+        // try requesting a strategic property from the partner to bridge the gap.
+        // If no strategic property exists and cash doesn't even cover face value, cancel.
+        if (actualMoney < targetMoneyReceived && myReceiving.propertyIds().isEmpty()) {
+            String extraProp = findStrategicTargetProperty(state, botId, otherPartyId);
+            if (extraProp != null) {
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, editOfferedSide, null, List.of(extraProp), List.of(), null)));
+                return;
+            }
+            // No strategic property to soften the deal — cancel if it doesn't break even.
+            if (actualMoney < valueGiven) {
+                recordBotCancelAsDecline(botId, trade);
+                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+                return;
+            }
+        }
+
         if (actualMoney == currentMoneyReceived) {
             // Other party's cash caps us at what's already set — submit the best we can get
             publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
