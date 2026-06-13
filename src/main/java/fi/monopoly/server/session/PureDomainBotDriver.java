@@ -874,12 +874,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int reserve = dynamicReserve(state, botId);
         if (bot == null || bot.cash() < reserve + 50) return false;
 
-        // Pass 1: mutual monopoly swap — both sides complete a color group.
-        // These are the highest-value trades; attempt even with near-monopoly partners.
+        // Pass 1: mutual monopoly swap — bot must gain a critical (P1/P2) property; partner must also
+        // have a strategic interest in something from the bot. Restricting to critical targets prevents
+        // low-value P3 foothold swaps that trade roughly equal properties for no net benefit.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
-            String botWantsFromPartner  = findStrategicTargetProperty(state, botId, other.playerId());
+            String botWantsFromPartner  = findCriticalTargetProperty(state, botId, other.playerId());
             String partnerWantsFromBot  = findStrategicTargetProperty(state, other.playerId(), botId);
             if (botWantsFromPartner != null && partnerWantsFromBot != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
@@ -982,6 +983,46 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (found != null) return found;
         }
 
+        return null;
+    }
+
+    /**
+     * Finds a high-priority target property (Priority 1: monopoly completion; Priority 2: railroad).
+     * Unlike {@link #findStrategicTargetProperty}, this excludes Priority 3 (foothold group) targets
+     * so that Pass-1 mutual swaps are only initiated for genuinely valuable acquisitions.
+     */
+    private String findCriticalTargetProperty(SessionState state, String botId, String partnerId) {
+        // Priority 1: property that would immediately complete bot's street monopoly
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (botOwns != groupSize - 1) continue;
+            String found = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && spotType(p.propertyId()).streetType == group)
+                    .map(PropertyStateSnapshot::propertyId)
+                    .findFirst().orElse(null);
+            if (found != null) return found;
+        }
+        // Priority 2: railroad if bot already has ≥1 railroad and partner has one
+        long botRailroads = state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId())
+                        && spotType(p.propertyId()).streetType.placeType == PlaceType.RAILROAD)
+                .count();
+        if (botRailroads >= 1) {
+            String railroadTarget = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && spotType(p.propertyId()).streetType.placeType == PlaceType.RAILROAD)
+                    .map(PropertyStateSnapshot::propertyId)
+                    .findFirst().orElse(null);
+            if (railroadTarget != null) return railroadTarget;
+        }
         return null;
     }
 
