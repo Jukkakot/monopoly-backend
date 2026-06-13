@@ -816,21 +816,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         PlayerSnapshot botSnap = findPlayer(state, botId);
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
-        // Step 2a: offer an own property when beneficial.
-        // Only offer a strategic swap property if it satisfies a P1 critical need for the partner.
-        // When the bot itself is chasing a P1 target (monopoly completion), also proactively offer
-        // an expendable property as a sweetener — the partner knows the bot is about to get a
-        // monopoly and will demand a premium; a property bundle is more persuasive than cash alone.
-        // Otherwise fall back to expendable only when cash is insufficient.
+        // Step 2a: offer an own property when needed to sweeten the deal.
+        // The bot never proactively offers a property just because the partner wants it —
+        // that is the partner's job to ask for via counter-offer. The bot only adds a property
+        // when chasing a P1 target (the partner will demand a premium, so a bundle helps) or
+        // when cash alone cannot cover the target price.
         // Only run when the give-side is completely empty (no property AND no money already set).
         boolean targetIsP1 = isMonopolyCompletingTarget(state, botId, targetPropId0);
         if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
-            String swapProp = findCriticalTargetProperty(state, partnerId0, botId);
-            if (swapProp != null) {
-                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                        new TradeEditPatch(null, giveSide, null, List.of(swapProp), List.of(), null)));
-                return;
-            }
             if (available0 < targetPrice || targetIsP1) {
                 String expendable = findExpendableOwnProperty(state, botId, partnerId0);
                 if (expendable != null) {
@@ -879,27 +872,25 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int reserve = dynamicReserve(state, botId);
         if (bot == null || bot.cash() < reserve + 50) return false;
 
-        // Pass 1: mutual monopoly swap — BOTH sides must have a critical (P1) target from each other.
-        // Requiring both directions to be P1 ensures the swap only fires when both players would
-        // complete a street monopoly, making it a genuine mutual benefit. Asymmetric or P3-only
-        // swaps produce roughly equal-value trades with no net strategic gain.
+        // Pass 1: bot has a P1 (monopoly-completing) target from partner.
+        // The bot acts in its own interest only — it does NOT check whether the partner also
+        // benefits. The partner can counter-offer to ask for what they want. Near-monopoly
+        // partners are NOT skipped here: completing our own monopoly is worth the attempt.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
-            String botWantsFromPartner  = findCriticalTargetProperty(state, botId, other.playerId());
-            String partnerWantsFromBot  = findCriticalTargetProperty(state, other.playerId(), botId);
-            if (botWantsFromPartner != null && partnerWantsFromBot != null) {
+            String botWantsFromPartner = findCriticalTargetProperty(state, botId, other.playerId());
+            if (botWantsFromPartner != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
                 if (result.accepted()) return true;
             }
         }
 
-        // Pass 2: regular acquisition — pay (or offer an expendable property) for a needed property.
+        // Pass 2: P3 acquisition — pay cash (or offer an expendable) for a foothold property.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            // Don't request properties from a player who is one property away from a monopoly
-            // (it is unlikely they'll give it up, and opening a trade could be exploited).
-            // Rich-but-not-near-monopoly players are fine trade partners.
+            // Skip near-monopoly partners for P3 acquisitions: they are unlikely to sell and
+            // engaging them could give them leverage.
             if (StrongBotStrategy.isNearMonopoly(state, other.playerId())) continue;
             // Skip partners who have repeatedly declined bot-initiated offers
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
