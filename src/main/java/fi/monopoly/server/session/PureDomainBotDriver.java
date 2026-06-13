@@ -847,7 +847,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 int prevDeclined = lastDeclinedOfferAmount
                         .getOrDefault(partnerId0, new java.util.concurrent.ConcurrentHashMap<>())
                         .getOrDefault(targetPropId0, 0);
-                if (offerAmount < 10 || (!hasOwnProp && offerAmount <= prevDeclined)) {
+                int shortfall = cashNeeded - offerAmount;
+                boolean tooShortOnCash = hasOwnProp
+                        ? shortfall > configFor(botId).tradeFairnessTolerance()
+                        : offerAmount <= prevDeclined;
+                if (offerAmount < 10 || tooShortOnCash) {
                     recordBotCancelAsDecline(botId, trade);
                     publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                     return;
