@@ -987,12 +987,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     /**
-     * Finds a high-priority target property (Priority 1: monopoly completion; Priority 2: railroad).
-     * Unlike {@link #findStrategicTargetProperty}, this excludes Priority 3 (foothold group) targets
-     * so that Pass-1 mutual swaps are only initiated for genuinely valuable acquisitions.
+     * Finds a high-priority target property (Priority 1: monopoly completion only).
+     * Unlike {@link #findStrategicTargetProperty}, this excludes railroad (P2) and foothold-group
+     * (P3) targets so that Pass-1 mutual swaps are only initiated when the bot would complete a
+     * color monopoly. Railroads are all equivalent, so swapping one for another yields zero benefit;
+     * they are better acquired via cash (Pass 2).
      */
     private String findCriticalTargetProperty(SessionState state, String botId, String partnerId) {
-        // Priority 1: property that would immediately complete bot's street monopoly
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
             Integer groupSize = SpotType.getNumberOfSpots(group);
@@ -1008,20 +1009,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     .map(PropertyStateSnapshot::propertyId)
                     .findFirst().orElse(null);
             if (found != null) return found;
-        }
-        // Priority 2: railroad if bot already has ≥1 railroad and partner has one
-        long botRailroads = state.properties().stream()
-                .filter(p -> botId.equals(p.ownerPlayerId())
-                        && spotType(p.propertyId()).streetType.placeType == PlaceType.RAILROAD)
-                .count();
-        if (botRailroads >= 1) {
-            String railroadTarget = state.properties().stream()
-                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
-                            && p.houseCount() == 0 && p.hotelCount() == 0
-                            && spotType(p.propertyId()).streetType.placeType == PlaceType.RAILROAD)
-                    .map(PropertyStateSnapshot::propertyId)
-                    .findFirst().orElse(null);
-            if (railroadTarget != null) return railroadTarget;
         }
         return null;
     }
