@@ -1049,10 +1049,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     /**
-     * Finds the least strategically valuable own property to offer in a trade.
-     * Candidates must be unbuilt, unmortgaged, and have low debt-mortgage priority (≤ 3).
-     * Properties that would complete {@code partnerId}'s street monopoly are excluded —
-     * the bot should never give those away cheaply; they belong in a negotiated deal.
+     * Finds the best own property to include as a sweetener in a trade offer.
+     * Ranked by deadweight score: face_value × (1 − bot's group progress).
+     * A property the bot has no chance of completing into a monopoly, but that looks
+     * expensive on paper, is ideal — it costs the bot little strategically while making
+     * the offer attractive. Properties that would complete the partner's monopoly are
+     * excluded regardless of score.
      */
     private String findExpendableOwnProperty(SessionState state, String botId, String partnerId) {
         return state.properties().stream()
@@ -1060,10 +1062,26 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                         && p.houseCount() == 0 && p.hotelCount() == 0)
                 .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
                 .filter(p -> !wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
-                .min(java.util.Comparator.comparingInt(
-                        p -> StrongBotStrategy.debtMortgagePriority(state, botId, p)))
+                .max(java.util.Comparator.comparingDouble(
+                        p -> deadweightScore(state, botId, p.propertyId())))
                 .map(PropertyStateSnapshot::propertyId)
                 .orElse(null);
+    }
+
+    /**
+     * Deadweight score for offering a property: face_value × (1 − group_progress).
+     * High score = expensive-looking but strategically unimportant to the bot.
+     * group_progress = botOwnsInGroup / groupSize (0 if bot owns nothing else in the group).
+     */
+    private double deadweightScore(SessionState state, String botId, String propId) {
+        StreetType group = spotType(propId).streetType;
+        int facePrice = SpotType.valueOf(propId).getIntegerProperty("price");
+        Integer groupSize = group != null ? SpotType.getNumberOfSpots(group) : null;
+        if (groupSize == null || groupSize == 0) return facePrice * 0.5;
+        long botOwnsInGroup = state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                .count();
+        return facePrice * (1.0 - (double) botOwnsInGroup / groupSize);
     }
 
     private boolean wouldCompletePartnerMonopoly(SessionState state, String partnerId, String propId) {
