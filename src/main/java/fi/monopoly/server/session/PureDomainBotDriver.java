@@ -633,7 +633,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
 
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
-        int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false);
+        int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false)
+                          + monopolyGiftPenalty(state, tradePartnerId, myGiving);
 
         // Acceptance threshold scales with the partner's threat score (0-1):
         //   low threat  → standard fairness tolerance
@@ -678,12 +679,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
         TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
 
-        int valueGiven = evaluateSelectionContextual(state, botId, myGiving, false);
+        String counterPartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
+        int valueGiven = evaluateSelectionContextual(state, botId, myGiving, false)
+                       + monopolyGiftPenalty(state, counterPartnerId, myGiving);
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
         // Profit target scales with partner threat score (0-1): 1.05 (no threat) to 1.25 (full threat).
-        String counterPartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
         double ts = StrongBotStrategy.threatScore(state, counterPartnerId);
         double profitFactor = 1.05 + ts * 0.20;
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * profitFactor) - nonMoneyReceived);
@@ -830,7 +832,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 return;
             }
             if (available0 < targetPrice || targetIsP1) {
-                String expendable = findExpendableOwnProperty(state, botId);
+                String expendable = findExpendableOwnProperty(state, botId, partnerId0);
                 if (expendable != null) {
                     publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
                             new TradeEditPatch(null, giveSide, null, List.of(expendable), List.of(), null)));
@@ -990,6 +992,35 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return null;
     }
 
+    /**
+     * Extra cost added to {@code valueGiven} when the giving selection contains a property that
+     * would complete {@code partnerId}'s street monopoly. Mirrors the receiving-side completion
+     * bonus so the bot demands fair compensation for handing an opponent a monopoly.
+     */
+    private int monopolyGiftPenalty(SessionState state, String partnerId, TradeSelectionState giving) {
+        int penalty = 0;
+        StrongBotConfig cfg = configFor(partnerId); // use same weights as the receiving-side bonus
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long inGiving = giving.propertyIds().stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            if (inGiving == 0) continue;
+            long partnerOwns = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (partnerOwns + inGiving >= groupSize) {
+                int groupPriceSum = (int) state.properties().stream()
+                        .filter(p -> spotType(p.propertyId()).streetType == group)
+                        .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
+                        .sum();
+                penalty += groupPriceSum + cfg.tradeSetCompletionWeight();
+            }
+        }
+        return penalty;
+    }
+
     /** Returns true if acquiring {@code propId} would complete a street monopoly for {@code botId}. */
     private boolean isMonopolyCompletingTarget(SessionState state, String botId, String propId) {
         StreetType group = spotType(propId).streetType;
@@ -1030,18 +1061,32 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     /**
-     * Finds the least strategically valuable own property to offer in a trade when cash is short.
+     * Finds the least strategically valuable own property to offer in a trade.
      * Candidates must be unbuilt, unmortgaged, and have low debt-mortgage priority (≤ 3).
+     * Properties that would complete {@code partnerId}'s street monopoly are excluded —
+     * the bot should never give those away cheaply; they belong in a negotiated deal.
      */
-    private String findExpendableOwnProperty(SessionState state, String botId) {
+    private String findExpendableOwnProperty(SessionState state, String botId, String partnerId) {
         return state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
                 .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
+                .filter(p -> !wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
                 .min(java.util.Comparator.comparingInt(
                         p -> StrongBotStrategy.debtMortgagePriority(state, botId, p)))
                 .map(PropertyStateSnapshot::propertyId)
                 .orElse(null);
+    }
+
+    private boolean wouldCompletePartnerMonopoly(SessionState state, String partnerId, String propId) {
+        StreetType group = spotType(propId).streetType;
+        if (group == null || group.placeType != PlaceType.STREET) return false;
+        Integer groupSize = SpotType.getNumberOfSpots(group);
+        if (groupSize == null || groupSize == 0) return false;
+        long partnerOwns = state.properties().stream()
+                .filter(p -> partnerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                .count();
+        return partnerOwns >= groupSize - 1;
     }
 
     private static int evaluateSelectionValue(TradeSelectionState selection) {
