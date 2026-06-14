@@ -674,6 +674,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeOfferState offer = trade.currentOffer();
         String tradeId = trade.tradeId();
 
+        // Safety net (checked up-front so EVERY branch below is counted, not just the
+        // final edit path). If the bot has churned this counter too many times the
+        // convergence has failed — cancel rather than loop indefinitely.
+        int attempts = counterEditAttempts.merge(tradeId, 1, Integer::sum);
+        if (attempts > 8) {
+            log.warn("Bot {} counter-edit loop detected for trade {} ({} attempts) — cancelling",
+                    botId.substring(0, 8), tradeId.substring(0, 12), attempts);
+            counterEditAttempts.remove(tradeId);
+            recordBotCancelAsDecline(botId, trade);
+            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
+
         // Determine which side is bot's give vs receive, same as in handleTradeDecision
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
@@ -709,6 +722,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 // adding cash to the other side.
                 int fairGiveMoney = Math.max(0, (int) (nonMoneyReceived * 0.95));
                 if (fairGiveMoney < 10) {
+                    counterEditAttempts.remove(tradeId);
                     publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
                 } else {
                     publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
@@ -718,8 +732,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        if (currentMoneyReceived >= targetMoneyReceived) {
-            // Already fair — submit as-is
+        if (currentMoneyReceived >= targetMoneyReceived - 2) {
+            // Already fair (small tolerance avoids ±1 float-rounding oscillation) — submit as-is
+            counterEditAttempts.remove(tradeId);
             publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
             return;
         }
@@ -731,6 +746,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int actualMoney = Math.min(targetMoneyReceived, proposerCash);
         if (actualMoney < 10) {
             // Proposer can't cover a fair counter — cancel
+            counterEditAttempts.remove(tradeId);
             recordBotCancelAsDecline(botId, trade);
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
@@ -748,6 +764,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             }
             // No strategic property to soften the deal — cancel if it doesn't break even.
             if (actualMoney < valueGiven) {
+                counterEditAttempts.remove(tradeId);
                 recordBotCancelAsDecline(botId, trade);
                 publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
@@ -756,19 +773,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         if (actualMoney == currentMoneyReceived) {
             // Other party's cash caps us at what's already set — submit the best we can get
-            publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
-            return;
-        }
-
-        // Safety net: if the bot has tried to edit this counter too many times, something is
-        // wrong with the convergence — cancel rather than loop indefinitely.
-        int attempts = counterEditAttempts.merge(tradeId, 1, Integer::sum);
-        if (attempts > 8) {
-            log.warn("Bot {} counter-edit loop detected for trade {} ({} attempts) — cancelling",
-                    botId.substring(0, 8), tradeId.substring(0, 12), attempts);
             counterEditAttempts.remove(tradeId);
-            recordBotCancelAsDecline(botId, trade);
-            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+            publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
             return;
         }
 
