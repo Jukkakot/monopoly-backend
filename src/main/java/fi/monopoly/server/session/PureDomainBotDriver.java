@@ -1087,12 +1087,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
-                // Never give away railroads or utilities as sweeteners: they are all equivalent
-                // (so a railroad-for-railroad swap yields zero benefit) and individually valuable.
-                // Only street properties make sense as a deadweight sweetener.
-                .filter(p -> spotType(p.propertyId()).streetType.placeType == PlaceType.STREET)
-                // Never offer a property from the SAME group the bot is requesting — trading
-                // same-colour-for-same-colour (or any like-for-like) is pointless.
+                // Never offer a property from the SAME group the bot is requesting. This covers
+                // every case of pointless like-for-like swaps: railroad-for-railroad,
+                // utility-for-utility, and same-colour-street-for-same-colour. Offering a utility
+                // for a street (or vice versa) is still allowed — only same-group is excluded.
                 .filter(p -> requestedGroup == null || spotType(p.propertyId()).streetType != requestedGroup)
                 .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
                 .filter(p -> !wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
