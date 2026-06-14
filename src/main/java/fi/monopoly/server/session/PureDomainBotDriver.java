@@ -47,6 +47,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     private static final int MAX_DECLINES_PER_PARTNER = 2;
 
+    /** When demanding cash in a counter-offer, never strip the opponent below this fraction of
+     *  their bankroll (or {@link #MIN_OPPONENT_CASH_BUFFER}, whichever is larger). Prevents the
+     *  bot from only accepting deals when the opponent is broke. */
+    private static final double OPPONENT_CASH_BUFFER_RATIO = 0.25;
+    private static final int MIN_OPPONENT_CASH_BUFFER = 100;
+
     /**
      * Maximum number of state versions the bot is allowed to advance beyond the last
      * client-acknowledged version. Keeps the pending snapshot queue on the client bounded
@@ -743,7 +749,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         String otherPartyId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
         PlayerSnapshot otherParty = findPlayer(state, otherPartyId);
         int proposerCash = otherParty != null ? otherParty.cash() : 0;
-        int actualMoney = Math.min(targetMoneyReceived, proposerCash);
+        // Don't demand the opponent's entire bankroll — that perversely rewards trading with the
+        // bot only when broke. Leave them a livable buffer (a fraction of their cash, min floor)
+        // so a deal never strips them to zero.
+        int opponentBuffer = Math.max(MIN_OPPONENT_CASH_BUFFER, (int) (proposerCash * OPPONENT_CASH_BUFFER_RATIO));
+        int proposerSpendable = Math.max(0, proposerCash - opponentBuffer);
+        int actualMoney = Math.min(targetMoneyReceived, proposerSpendable);
         if (actualMoney < 10) {
             // Proposer can't cover a fair counter — cancel
             counterEditAttempts.remove(tradeId);
@@ -831,7 +842,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         boolean targetIsP1 = isMonopolyCompletingTarget(state, botId, targetPropId0);
         if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
             if (available0 < targetPrice || targetIsP1) {
-                String expendable = findExpendableOwnProperty(state, botId, partnerId0);
+                String expendable = findExpendableOwnProperty(state, botId, partnerId0, targetPropId0);
                 if (expendable != null) {
                     publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
                             new TradeEditPatch(null, giveSide, null, List.of(expendable), List.of(), null)));
@@ -1065,11 +1076,24 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * expensive on paper, is ideal — it costs the bot little strategically while making
      * the offer attractive. Properties that would complete the partner's monopoly are
      * excluded regardless of score.
+     *
+     * @param requestedPropId the property the bot is asking for. Any own property in the SAME
+     *        group (same street colour, or the same railroad/utility class) is excluded — swapping
+     *        like-for-like within a group yields no strategic benefit and looks nonsensical.
      */
-    private String findExpendableOwnProperty(SessionState state, String botId, String partnerId) {
+    private String findExpendableOwnProperty(SessionState state, String botId, String partnerId,
+                                             String requestedPropId) {
+        StreetType requestedGroup = requestedPropId != null ? spotType(requestedPropId).streetType : null;
         return state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
+                // Never give away railroads or utilities as sweeteners: they are all equivalent
+                // (so a railroad-for-railroad swap yields zero benefit) and individually valuable.
+                // Only street properties make sense as a deadweight sweetener.
+                .filter(p -> spotType(p.propertyId()).streetType.placeType == PlaceType.STREET)
+                // Never offer a property from the SAME group the bot is requesting — trading
+                // same-colour-for-same-colour (or any like-for-like) is pointless.
+                .filter(p -> requestedGroup == null || spotType(p.propertyId()).streetType != requestedGroup)
                 .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
                 .filter(p -> !wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
                 .max(java.util.Comparator.comparingDouble(
