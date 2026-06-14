@@ -53,6 +53,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private static final double OPPONENT_CASH_BUFFER_RATIO = 0.25;
     private static final int MIN_OPPONENT_CASH_BUFFER = 100;
 
+    /** When a trade would complete one of the bot's own monopolies, relax the acceptance
+     *  threshold by this fraction of the value given — the bot will pay a premium (or accept a
+     *  small paper loss) to close a set, because a developed monopoly pays for itself in rent. */
+    private static final double MONOPOLY_COMPLETION_DISCOUNT = 0.30;
+
     /**
      * Maximum number of state versions the bot is allowed to advance beyond the last
      * client-acknowledged version. Keeps the pending snapshot queue on the client bounded
@@ -649,7 +654,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int fairnessTolerance = (int)(configFor(botId).tradeFairnessTolerance() * posFactor);
         double ts = StrongBotStrategy.threatScore(state, tradePartnerId);
         int requiredPremium = (int)(valueGiven * ts * 0.25);
-        if (valueReceived >= valueGiven - fairnessTolerance + requiredPremium) {
+
+        // Strategic discount: if accepting completes one of the bot's OWN monopolies, the long-game
+        // value (rent once developed) far exceeds the trade's face value. A human happily pays a
+        // premium — or breaks even — to close a set. Relax the threshold by a fraction of the
+        // value given so the bot will accept break-even or a small paper loss to complete a set.
+        int strategicDiscount = 0;
+        if (completesOwnMonopoly(state, botId, myReceiving)) {
+            strategicDiscount = (int)(valueGiven * MONOPOLY_COMPLETION_DISCOUNT);
+            requiredPremium = 0; // never demand a premium when closing our own set
+        }
+
+        if (valueReceived >= valueGiven - fairnessTolerance - strategicDiscount + requiredPremium) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
             return;
         }
@@ -813,7 +829,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         boolean giveSide = iAmProposer;
         boolean requestSide = !iAmProposer;
 
-        // Step 1: request a target property from partner
+        // Step 1: request a target property from partner (bundled if completing the set needs more)
         if (myRequest.propertyIds().isEmpty()) {
             String partnerId = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
             String targetProp = findStrategicTargetProperty(state, botId, partnerId);
@@ -822,14 +838,17 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
             }
+            java.util.List<String> targets = bundleTargetsForGroup(state, botId, partnerId, targetProp);
             publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                    new TradeEditPatch(null, requestSide, null, List.of(targetProp), List.of(), null)));
+                    new TradeEditPatch(null, requestSide, null, targets, List.of(), null)));
             return;
         }
 
         String targetPropId0 = myRequest.propertyIds().get(0);
         String partnerId0 = iAmProposer ? trade.recipientPlayerId() : trade.initiatorPlayerId();
-        int targetPrice = SpotType.valueOf(targetPropId0).getIntegerProperty("price");
+        int targetPrice = myRequest.propertyIds().stream()
+                .mapToInt(id -> SpotType.valueOf(id).getIntegerProperty("price"))
+                .sum();
         PlayerSnapshot botSnap = findPlayer(state, botId);
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
@@ -892,6 +911,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         PlayerSnapshot bot = findPlayer(state, botId);
         int reserve = dynamicReserve(state, botId);
         if (bot == null || bot.cash() < reserve + 50) return false;
+
+        // Pass 0 (win-win): a partner holds a piece the bot needs to complete a set AND the bot
+        // holds a piece that completes the partner's set. These are the trades humans love and
+        // accept readily. Propose proactively — highest priority.
+        for (PlayerSnapshot other : state.players()) {
+            if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
+            if (findWinWinTargetProperty(state, botId, other.playerId()) != null) {
+                CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
+                if (result.accepted()) return true;
+            }
+        }
 
         // Pass 1: bot has a P1 (monopoly-completing) target from partner.
         // The bot acts in its own interest only — it does NOT check whether the partner also
@@ -975,6 +1006,26 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (railroadTarget != null) return railroadTarget;
         }
 
+        // Priority 2.5 (blocking): if the partner is ONE property short of completing their own
+        // monopoly, and they hold a tradeable piece of that group, acquire it to deny them the set.
+        // Denying an opponent a monopoly is worth a foothold even outside the bot's own groups.
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer gSize = SpotType.getNumberOfSpots(group);
+            if (gSize == null || gSize == 0) continue;
+            long partnerOwns = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (partnerOwns != gSize - 1) continue; // partner is one short of a monopoly
+            String blockPiece = state.properties().stream()
+                    .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                            && p.houseCount() == 0 && p.hotelCount() == 0
+                            && spotType(p.propertyId()).streetType == group)
+                    .map(PropertyStateSnapshot::propertyId)
+                    .findFirst().orElse(null);
+            if (blockPiece != null) return blockPiece;
+        }
+
         // Priority 3: any street group where bot has the most properties (descending), try partner
         java.util.List<StreetType> groupsByBotOwnership = java.util.Arrays.stream(StreetType.values())
                 .filter(g -> g.placeType == PlaceType.STREET)
@@ -1040,6 +1091,72 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .count();
         return botOwns == groupSize - 1;
+    }
+
+    /**
+     * True if receiving {@code selection} would complete at least one of the bot's own street
+     * monopolies (the bot owns all-but-the-pieces-in-this-selection for some group).
+     */
+    private boolean completesOwnMonopoly(SessionState state, String botId, TradeSelectionState selection) {
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long inSelection = selection.propertyIds().stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            if (inSelection == 0) continue;
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (botOwns + inSelection >= groupSize) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Fix 1 (win-win): finds a partner who holds a property the bot needs to complete a monopoly
+     * AND who needs a property the bot can give to complete THEIR monopoly. Returns the property
+     * the bot should request, or null if no mutually-beneficial pair exists with this partner.
+     */
+    private String findWinWinTargetProperty(SessionState state, String botId, String partnerId) {
+        // What the bot wants from the partner that completes the bot's set
+        String botWants = findCriticalTargetProperty(state, botId, partnerId);
+        if (botWants == null) return null;
+        // Does the bot hold something that completes the PARTNER's set? (the sweetener that makes
+        // the partner say yes). If so this is a genuine win-win worth proposing proactively.
+        boolean botCanCompletePartner = state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                        && p.houseCount() == 0 && p.hotelCount() == 0)
+                .anyMatch(p -> wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()));
+        return botCanCompletePartner ? botWants : null;
+    }
+
+    /**
+     * Fix 8 (bundling): if completing the bot's monopoly in the group of {@code primaryTarget}
+     * requires more than one property the partner holds, return ALL of the partner's tradeable
+     * properties in that group so the bot can request them as a single bundle instead of trickling
+     * one-at-a-time. Always includes {@code primaryTarget}. Returns a single-element list if the
+     * group only needs one piece.
+     */
+    private java.util.List<String> bundleTargetsForGroup(SessionState state, String botId,
+                                                         String partnerId, String primaryTarget) {
+        StreetType group = spotType(primaryTarget).streetType;
+        if (group == null || group.placeType != PlaceType.STREET) return List.of(primaryTarget);
+        Integer groupSize = SpotType.getNumberOfSpots(group);
+        if (groupSize == null || groupSize == 0) return List.of(primaryTarget);
+        long botOwns = state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                .count();
+        long needed = groupSize - botOwns; // how many more to complete the set
+        if (needed <= 1) return List.of(primaryTarget);
+        java.util.List<String> partnerPiecesInGroup = state.properties().stream()
+                .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                        && p.houseCount() == 0 && p.hotelCount() == 0
+                        && spotType(p.propertyId()).streetType == group)
+                .map(PropertyStateSnapshot::propertyId)
+                .limit(needed)
+                .toList();
+        return partnerPiecesInGroup.isEmpty() ? List.of(primaryTarget) : partnerPiecesInGroup;
     }
 
     /**
@@ -1177,15 +1294,29 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         StrongBotConfig cfg = configFor(botId);
 
         // Base value: cash weighted by liquidity preference, then property prices.
-        // Mortgaged properties are worth only their mortgage value (face/2) since the
-        // recipient must spend ~55% of face price to unmortgage before earning any rent.
         int value = (int)(selection.moneyAmount() * cfg.tradeLiquidityWeight());
         value += selection.jailCardCount() * 50;
         for (String propId : selection.propertyIds()) {
             int facePrice = SpotType.valueOf(propId).getIntegerProperty("price");
-            boolean mortgaged = state.properties().stream()
-                    .anyMatch(p -> propId.equals(p.propertyId()) && p.mortgaged());
-            value += mortgaged ? facePrice / 2 : facePrice;
+            PropertyStateSnapshot snap = state.properties().stream()
+                    .filter(p -> propId.equals(p.propertyId())).findFirst().orElse(null);
+            boolean mortgaged = snap != null && snap.mortgaged();
+            if (mortgaged) {
+                // A mortgaged property is worth its mortgage value (face/2) MINUS the unmortgage
+                // cost the new owner must pay (~10% premium) before it earns any rent. Without this
+                // the bot over-values mortgaged properties and can be fed them near full price.
+                value += Math.max(0, facePrice / 2 - StrongBotStrategy.unmortgageCost(propId));
+            } else {
+                value += facePrice;
+                // Built houses/hotels make a property far more valuable than its face price.
+                // Each house costs the group's house price; hotels are 5 house-units. Value the
+                // sunk building investment so the bot doesn't trade developed property for face.
+                if (snap != null && (snap.houseCount() > 0 || snap.hotelCount() > 0)) {
+                    int housePrice = SpotType.valueOf(propId).getIntegerProperty("housePrice");
+                    int buildingUnits = snap.houseCount() + snap.hotelCount() * 5;
+                    value += buildingUnits * housePrice;
+                }
+            }
         }
 
         for (StreetType group : StreetType.values()) {
