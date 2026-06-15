@@ -746,25 +746,48 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
-        // ── SANITY GUARD ────────────────────────────────────────────────────────────────────
-        // If the bot is giving something but the received side is completely empty (the classic
-        // "give me your cash for nothing" offer), a money-only counter would just re-propose the
-        // giveaway. Instead, demand fair value: request a strategic property from the partner, or
-        // if none exists, cancel. Never submit a give-for-nothing counter.
+        // ── GIVEAWAY GUARD ──────────────────────────────────────────────────────────────────
+        // The partner is asking the bot for something while offering nothing in return. Two cases:
+        //   1. They asked for the bot's CASH only → no negotiation; cancel. Handing over money for
+        //      nothing makes no sense and there's nothing to price.
+        //   2. They asked for the bot's PROPERTY → the bot may sell it, but only if it's willing to
+        //      part with it AND can get a fair price. Keep the property on the give side and counter
+        //      by requesting fair payment; if the property is one the bot must never sell (completes
+        //      its own monopoly) or no fair price is reachable, cancel.
         boolean receiveEmpty = myReceiving.propertyIds().isEmpty()
                 && currentMoneyReceived <= 0 && myReceiving.jailCardCount() <= 0;
         boolean giveNonEmpty = !myGiving.propertyIds().isEmpty()
                 || myGiving.moneyAmount() > 0 || myGiving.jailCardCount() > 0;
         if (receiveEmpty && giveNonEmpty) {
-            // Try to turn this into a real negotiation: if the bot wants a property this partner
-            // holds, request it in return (whether the bot is being asked for cash or property).
-            String wanted = findStrategicTargetProperty(state, botId, counterPartnerId);
-            if (wanted != null) {
-                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                        new TradeEditPatch(null, botIsRecipient, null, List.of(wanted), List.of(), null)));
+            boolean botGivesProperty = !myGiving.propertyIds().isEmpty();
+
+            // Case 1: pure cash ask (or jail card) — nothing to negotiate. Cancel.
+            if (!botGivesProperty) {
+                counterEditAttempts.remove(tradeId);
+                recordBotCancelAsDecline(botId, trade);
+                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
             }
-            // Nothing worth requesting from this partner — don't give value away for nothing.
+
+            // Case 2: the partner wants the bot's property. The bot won't break its own monopoly,
+            // and won't sell at a loss. If it's willing to sell, price it: request fair payment.
+            if (givingBreaksOwnMonopoly(state, botId, myGiving)) {
+                counterEditAttempts.remove(tradeId);
+                recordBotCancelAsDecline(botId, trade);
+                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+                return;
+            }
+            // Ask the partner to pay the property's fair value in cash. valueGiven already reflects
+            // what the bot is giving up (incl. set/building bonuses). Charge a small profit margin.
+            int askingPrice = (int) (valueGiven * (1.05 + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20));
+            PlayerSnapshot partnerSnap = findPlayer(state, counterPartnerId);
+            int partnerCash = partnerSnap != null ? partnerSnap.cash() : 0;
+            if (askingPrice >= 10 && partnerCash >= askingPrice) {
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, botIsRecipient, askingPrice, List.of(), List.of(), null)));
+                return;
+            }
+            // Partner can't afford a fair price (and has offered no property) — nothing fair to do.
             counterEditAttempts.remove(tradeId);
             recordBotCancelAsDecline(botId, trade);
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
