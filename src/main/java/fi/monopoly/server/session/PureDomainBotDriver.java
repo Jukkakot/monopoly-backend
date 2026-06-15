@@ -47,12 +47,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     private static final int MAX_DECLINES_PER_PARTNER = 2;
 
-    /** When demanding cash in a counter-offer, never strip the opponent below this fraction of
-     *  their bankroll (or {@link #MIN_OPPONENT_CASH_BUFFER}, whichever is larger). Prevents the
-     *  bot from only accepting deals when the opponent is broke. */
-    private static final double OPPONENT_CASH_BUFFER_RATIO = 0.25;
-    private static final int MIN_OPPONENT_CASH_BUFFER = 100;
-
     /** When a trade would complete one of the bot's own monopolies, relax the acceptance
      *  threshold by this fraction of the value given — the bot will pay a premium (or accept a
      *  small paper loss) to close a set, because a developed monopoly pays for itself in rent. */
@@ -650,14 +644,23 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // ── SANITY CHECKS ──────────────────────────────────────────────────────────────────
         // These guard against degenerate offers the value math alone handles poorly.
 
-        // (a) Pure giveaway: bot gives something and gets literally nothing back. Never counter
-        //     such an offer (countering just re-proposes the giveaway) — decline immediately.
+        // (a) Pure giveaway: the partner asks for something and offers nothing back. Rather than a
+        //     flat refusal, treat it as an opening to negotiate: if the bot wants a property this
+        //     partner holds, COUNTER — the counter step will build an offer that asks for that
+        //     property in return. Only decline outright if the bot has nothing to gain from them.
         boolean botGetsNothing = myReceiving.propertyIds().isEmpty()
                 && myReceiving.moneyAmount() <= 0 && myReceiving.jailCardCount() <= 0;
         boolean botGivesSomething = !myGiving.propertyIds().isEmpty()
                 || myGiving.moneyAmount() > 0 || myGiving.jailCardCount() > 0;
         if (botGetsNothing && botGivesSomething) {
-            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            long counterCount = trade.history().stream()
+                    .filter(e -> "COUNTERED".equals(e.actionType())).count();
+            boolean botWantsSomething = findStrategicTargetProperty(state, botId, tradePartnerId) != null;
+            if (botWantsSomething && counterCount < 2) {
+                publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
+            } else {
+                publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            }
             return;
         }
 
@@ -753,23 +756,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         boolean giveNonEmpty = !myGiving.propertyIds().isEmpty()
                 || myGiving.moneyAmount() > 0 || myGiving.jailCardCount() > 0;
         if (receiveEmpty && giveNonEmpty) {
-            // If the bot is giving cash, the fair counter is to ask for cash back covering it.
-            // If giving property, request a strategic target or cancel.
-            if (myGiving.propertyIds().isEmpty() && myGiving.moneyAmount() > 0) {
-                // Bot asked to hand over cash for nothing — flip it: ask for that cash back as a
-                // minimum, i.e. zero out our give and request equivalent value. Simplest fair move
-                // is to cancel: there's nothing to negotiate toward.
-                counterEditAttempts.remove(tradeId);
-                recordBotCancelAsDecline(botId, trade);
-                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
-                return;
-            }
+            // Try to turn this into a real negotiation: if the bot wants a property this partner
+            // holds, request it in return (whether the bot is being asked for cash or property).
             String wanted = findStrategicTargetProperty(state, botId, counterPartnerId);
             if (wanted != null) {
                 publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
                         new TradeEditPatch(null, botIsRecipient, null, List.of(wanted), List.of(), null)));
                 return;
             }
+            // Nothing worth requesting from this partner — don't give value away for nothing.
             counterEditAttempts.remove(tradeId);
             recordBotCancelAsDecline(botId, trade);
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
@@ -821,60 +816,68 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
+        // ── COUNTER CONVERGENCE (iterative; one edit per round, re-entered via snapshot) ──────
+        // Each branch makes ONE change and returns. The new snapshot re-enters this method, so the
+        // bot converges over several rounds: bridge with properties → settle cash → submit.
+        // counterEditAttempts (max 8) bounds the loop.
+
+        // [C1] Already fair: received value meets the target (small tolerance kills ±1 jitter).
         if (currentMoneyReceived >= targetMoneyReceived - 2) {
-            // Already fair (small tolerance avoids ±1 float-rounding oscillation) — submit as-is
             counterEditAttempts.remove(tradeId);
             publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
             return;
         }
 
-        // Check that the other party can actually afford the counter amount
+        // [C2] The asking price is the fair value of the deal (targetMoneyReceived), NOT a function
+        //      of how much cash the opponent happens to hold. We only need their cash as a
+        //      feasibility check: can they actually pay the fair price? We never scale the demand
+        //      up or down based on their bankroll — that would reward trading while poor.
         String otherPartyId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
         PlayerSnapshot otherParty = findPlayer(state, otherPartyId);
         int proposerCash = otherParty != null ? otherParty.cash() : 0;
-        // Don't demand the opponent's entire bankroll — that perversely rewards trading with the
-        // bot only when broke. Leave them a livable buffer (a fraction of their cash, min floor)
-        // so a deal never strips them to zero.
-        int opponentBuffer = Math.max(MIN_OPPONENT_CASH_BUFFER, (int) (proposerCash * OPPONENT_CASH_BUFFER_RATIO));
-        int proposerSpendable = Math.max(0, proposerCash - opponentBuffer);
-        int actualMoney = Math.min(targetMoneyReceived, proposerSpendable);
-        if (actualMoney < 10) {
-            // Proposer can't cover a fair counter — cancel
-            counterEditAttempts.remove(tradeId);
-            recordBotCancelAsDecline(botId, trade);
-            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
-            return;
-        }
 
-        // If cash alone can't reach the target AND the receive side has no properties yet,
-        // try requesting a strategic property from the partner to bridge the gap.
-        // If no strategic property exists and cash doesn't even cover face value, cancel.
-        if (actualMoney < targetMoneyReceived && myReceiving.propertyIds().isEmpty()) {
-            String extraProp = findStrategicTargetProperty(state, botId, otherPartyId);
-            if (extraProp != null) {
-                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                        new TradeEditPatch(null, editOfferedSide, null, List.of(extraProp), List.of(), null)));
-                return;
-            }
-            // No strategic property to soften the deal — cancel if it doesn't break even.
-            if (actualMoney < valueGiven) {
+        // [C3] Opponent can pay the fair price outright → set that fair price and submit next round.
+        if (proposerCash >= targetMoneyReceived) {
+            if (targetMoneyReceived == currentMoneyReceived) {
                 counterEditAttempts.remove(tradeId);
-                recordBotCancelAsDecline(botId, trade);
-                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
-                return;
+                publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
+            } else {
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, editOfferedSide, targetMoneyReceived, List.of(), List.of(), null)));
             }
-        }
-
-        if (actualMoney == currentMoneyReceived) {
-            // Other party's cash caps us at what's already set — submit the best we can get
-            counterEditAttempts.remove(tradeId);
-            publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
             return;
         }
 
-        // Edit the money on the side the bot RECEIVES
-        publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
-                new TradeEditPatch(null, editOfferedSide, actualMoney, List.of(), List.of(), null)));
+        // [C4] Opponent can't pay the full fair price in cash. Bridge the shortfall by ALSO
+        //      requesting a property — across rounds, one new piece at a time. This keeps the price
+        //      tied to value (cash + property must add up to the fair price), never to their wallet.
+        String bridgeProp = findUnrequestedTarget(state, botId, otherPartyId, myReceiving);
+        if (bridgeProp != null) {
+            java.util.List<String> updated = new java.util.ArrayList<>(myReceiving.propertyIds());
+            updated.add(bridgeProp);
+            publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                    new TradeEditPatch(null, editOfferedSide, null, updated, List.of(), null)));
+            return;
+        }
+
+        // [C5] No property left to bridge with and the opponent can't cover the fair price in cash.
+        //      Ask for the most cash they can pay ONLY if that already covers the value the bot is
+        //      giving up (a genuine break-even), otherwise the deal isn't worth doing — cancel.
+        if (proposerCash >= valueGiven) {
+            if (proposerCash == currentMoneyReceived) {
+                counterEditAttempts.remove(tradeId);
+                publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
+            } else {
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, editOfferedSide, proposerCash, List.of(), List.of(), null)));
+            }
+            return;
+        }
+
+        // [C6] Cannot reach a fair deal at all — cancel cleanly.
+        counterEditAttempts.remove(tradeId);
+        recordBotCancelAsDecline(botId, trade);
+        publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
     }
 
     /**
@@ -1039,6 +1042,33 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * </ol>
      * All candidates must be unbuilt (no houses/hotels) and unmortgaged on the partner's side.
      */
+    /**
+     * Like {@link #findStrategicTargetProperty} but skips any property already present in
+     * {@code alreadyRequested}. Used by the iterative counter loop to add a DIFFERENT bridging
+     * property each round; returns null once no new useful target remains (loop terminates).
+     */
+    private String findUnrequestedTarget(SessionState state, String botId, String partnerId,
+                                         TradeSelectionState alreadyRequested) {
+        java.util.Set<String> have = new java.util.HashSet<>(alreadyRequested.propertyIds());
+        // Primary: the normal strategic pick, if not already on the offer.
+        String primary = findStrategicTargetProperty(state, botId, partnerId);
+        if (primary != null && !have.contains(primary)) return primary;
+        // Fallback: any unbuilt, unmortgaged partner property the bot has a foothold in, not yet
+        // requested — lets the bot keep sweetening a multi-piece deal across rounds.
+        return state.properties().stream()
+                .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                        && p.houseCount() == 0 && p.hotelCount() == 0)
+                .map(PropertyStateSnapshot::propertyId)
+                .filter(id -> !have.contains(id))
+                .filter(id -> {
+                    StreetType g = spotType(id).streetType;
+                    if (g.placeType != PlaceType.STREET) return false;
+                    return state.properties().stream().anyMatch(q ->
+                            botId.equals(q.ownerPlayerId()) && spotType(q.propertyId()).streetType == g);
+                })
+                .findFirst().orElse(null);
+    }
+
     private String findStrategicTargetProperty(SessionState state, String botId, String partnerId) {
         // Priority 1: property that would immediately complete bot's street monopoly
         for (StreetType group : StreetType.values()) {
