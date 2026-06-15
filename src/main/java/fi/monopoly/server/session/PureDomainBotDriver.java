@@ -647,6 +647,29 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false)
                           + monopolyGiftPenalty(state, tradePartnerId, myGiving);
 
+        // ── SANITY CHECKS ──────────────────────────────────────────────────────────────────
+        // These guard against degenerate offers the value math alone handles poorly.
+
+        // (a) Pure giveaway: bot gives something and gets literally nothing back. Never counter
+        //     such an offer (countering just re-proposes the giveaway) — decline immediately.
+        boolean botGetsNothing = myReceiving.propertyIds().isEmpty()
+                && myReceiving.moneyAmount() <= 0 && myReceiving.jailCardCount() <= 0;
+        boolean botGivesSomething = !myGiving.propertyIds().isEmpty()
+                || myGiving.moneyAmount() > 0 || myGiving.jailCardCount() > 0;
+        if (botGetsNothing && botGivesSomething) {
+            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
+
+        // (b) Wildly lopsided ask: the bot is asked to give more than ~3× what it would receive.
+        //     No reasonable counter exists; decline rather than churn out an unfair counter.
+        if (valueGiven > 0 && valueReceived * 3 < valueGiven
+                && !completesOwnMonopoly(state, botId, myReceiving)) {
+            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
+        // ───────────────────────────────────────────────────────────────────────────────────
+
         // Acceptance threshold scales with the partner's threat score (0-1):
         //   low threat  → standard fairness tolerance
         //   high threat → up to 25% profit premium required (proportional to property value)
@@ -720,10 +743,54 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
+        // ── SANITY GUARD ────────────────────────────────────────────────────────────────────
+        // If the bot is giving something but the received side is completely empty (the classic
+        // "give me your cash for nothing" offer), a money-only counter would just re-propose the
+        // giveaway. Instead, demand fair value: request a strategic property from the partner, or
+        // if none exists, cancel. Never submit a give-for-nothing counter.
+        boolean receiveEmpty = myReceiving.propertyIds().isEmpty()
+                && currentMoneyReceived <= 0 && myReceiving.jailCardCount() <= 0;
+        boolean giveNonEmpty = !myGiving.propertyIds().isEmpty()
+                || myGiving.moneyAmount() > 0 || myGiving.jailCardCount() > 0;
+        if (receiveEmpty && giveNonEmpty) {
+            // If the bot is giving cash, the fair counter is to ask for cash back covering it.
+            // If giving property, request a strategic target or cancel.
+            if (myGiving.propertyIds().isEmpty() && myGiving.moneyAmount() > 0) {
+                // Bot asked to hand over cash for nothing — flip it: ask for that cash back as a
+                // minimum, i.e. zero out our give and request equivalent value. Simplest fair move
+                // is to cancel: there's nothing to negotiate toward.
+                counterEditAttempts.remove(tradeId);
+                recordBotCancelAsDecline(botId, trade);
+                publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+                return;
+            }
+            String wanted = findStrategicTargetProperty(state, botId, counterPartnerId);
+            if (wanted != null) {
+                publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
+                        new TradeEditPatch(null, botIsRecipient, null, List.of(wanted), List.of(), null)));
+                return;
+            }
+            counterEditAttempts.remove(tradeId);
+            recordBotCancelAsDecline(botId, trade);
+            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
+        // ────────────────────────────────────────────────────────────────────────────────────
+
         // Profit target scales with partner threat score (0-1): 1.05 (no threat) to 1.25 (full threat).
         double ts = StrongBotStrategy.threatScore(state, counterPartnerId);
         double profitFactor = 1.05 + ts * 0.20;
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * profitFactor) - nonMoneyReceived);
+
+        // Sanity: if the ask would break one of the bot's OWN monopolies (e.g. "give me all your
+        // properties"), no cash counter is sensible — the bot won't dismantle a set for money.
+        // Cancel instead of proposing an absurd cash demand.
+        if (givingBreaksOwnMonopoly(state, botId, myGiving)) {
+            counterEditAttempts.remove(tradeId);
+            recordBotCancelAsDecline(botId, trade);
+            publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
+            return;
+        }
 
         // editOfferedSide: side the bot RECEIVES; editGiveSide: side the bot GIVES
         boolean editOfferedSide = botIsRecipient;
@@ -1091,6 +1158,27 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .count();
         return botOwns == groupSize - 1;
+    }
+
+    /**
+     * True if giving away {@code selection} would break one of the bot's own COMPLETE street
+     * monopolies (the bot currently owns the whole group and the selection includes ≥1 of it).
+     * The bot should never dismantle a finished set for cash — decline such asks outright.
+     */
+    private boolean givingBreaksOwnMonopoly(SessionState state, String botId, TradeSelectionState selection) {
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long inSelection = selection.propertyIds().stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            if (inSelection == 0) continue;
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (botOwns >= groupSize) return true; // owns full set, giving away part of it
+        }
+        return false;
     }
 
     /**
