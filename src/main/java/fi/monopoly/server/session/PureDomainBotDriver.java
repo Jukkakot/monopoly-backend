@@ -1796,4 +1796,77 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
         // Adjust effective reserve by position: losing bot spends more freely, leader is cautious
-        int posAdjustedReserve = (int)(reserve / Stro
+                int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
+
+        StreetType bestGroup = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+
+        for (StreetType group : StrongBotStrategy.completedColorGroups(state, playerId)) {
+            int maxLevel = StrongBotStrategy.maxLevelInGroup(state, playerId, group);
+            if (maxLevel >= cfg.buildRoundCap()) continue;
+            if (!StrongBotStrategy.canAffordBuildRound(state, player, group, posAdjustedReserve)) continue;
+            double score = StrongBotStrategy.buildGroupScore(state, playerId, group, cfg);
+            if (score > bestScore) { bestScore = score; bestGroup = group; }
+        }
+
+        if (bestGroup == null) return false;
+        PropertyStateSnapshot target = StrongBotStrategy.findBuildTarget(state, playerId, bestGroup);
+        if (target == null) return false;
+        CommandResult result = publisher.handle(
+                new BuyBuildingRoundCommand(sessionId, playerId, target.propertyId()));
+        return result.accepted();
+    }
+
+    /**
+     * Records a bot-initiated trade cancellation as a decline for the given partner.
+     * This prevents the bot from immediately re-proposing the same trade after it had
+     * to cancel due to convergence failure (counter-edit loop, insufficient funds, etc.).
+     * Without this, tradeDeclinesByPartnerId stays at 0 and the bot loops indefinitely.
+     */
+    private void recordBotCancelAsDecline(String botId, TradeState trade) {
+        if (trade == null) return;
+        String partnerId = botId.equals(trade.initiatorPlayerId())
+                ? trade.recipientPlayerId() : trade.initiatorPlayerId();
+        tradeDeclinesByPartnerId.merge(partnerId, 1, Integer::sum);
+        log.debug("Bot {} recorded self-cancel as decline for partner {} (cumulative: {})",
+                botId.substring(0, 8), partnerId,
+                tradeDeclinesByPartnerId.get(partnerId));
+    }
+
+    private static SpotType spotType(String propertyId) {
+        return StrongBotStrategy.spotType(propertyId);
+    }
+
+    private static int buildingLevel(PropertyStateSnapshot p) {
+        return StrongBotStrategy.buildingLevel(p);
+    }
+
+    /** Mirrors DomainDebtRemediationGateway even-selling rule: (level-1) >= (maxRest-1), i.e. level >= maxRest. */
+    private static boolean evenSellEligible(SessionState state, PropertyStateSnapshot prop) {
+        SpotType st = spotType(prop.propertyId());
+        if (st.streetType.placeType != PlaceType.STREET) return true;
+        int level = buildingLevel(prop);
+        int maxRest = state.properties().stream()
+                .filter(p -> !p.propertyId().equals(prop.propertyId())
+                        && spotType(p.propertyId()).streetType == st.streetType)
+                .mapToInt(PureDomainBotDriver::buildingLevel)
+                .max().orElse(0);
+        return level - 1 >= maxRest - 1;
+    }
+
+    private static Set<String> collectBotPlayerIds(SessionState state) {
+        Set<String> ids = new java.util.HashSet<>();
+        for (SeatState seat : state.seats()) {
+            if (seat.seatKind() == SeatKind.BOT) {
+                ids.add(seat.playerId());
+            }
+        }
+        return ids.isEmpty() ? Set.of() : Set.copyOf(ids);
+    }
+
+    private static PlayerSnapshot findPlayer(SessionState state, String playerId) {
+        return state.players().stream()
+                .filter(p -> playerId.equals(p.playerId()))
+                .findFirst().orElse(null);
+    }
+}
