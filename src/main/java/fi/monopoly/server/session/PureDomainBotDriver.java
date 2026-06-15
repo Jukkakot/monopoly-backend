@@ -656,7 +656,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             long counterCount = trade.history().stream()
                     .filter(e -> "COUNTERED".equals(e.actionType())).count();
             boolean botWantsSomething = findStrategicTargetProperty(state, botId, tradePartnerId) != null;
-            if (botWantsSomething && counterCount < 2) {
+            // Never counter against another bot (loop risk) — only negotiate with humans.
+            if (botWantsSomething && counterCount < 2 && !botPlayerIds.contains(tradePartnerId)) {
                 publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
             } else {
                 publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
@@ -698,7 +699,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         // Prefer countering over declining — always counter the first time,
         // and again if the follow-up is at least 25% reasonable (avoids infinite loops).
-        if (valueGiven > 0) {
+        // BUT never counter against another bot: two bots countering each other can loop
+        // indefinitely. Against a bot, the acceptable deal was already accepted above, so decline.
+        boolean partnerIsBot = botPlayerIds.contains(tradePartnerId);
+        if (valueGiven > 0 && !partnerIsBot) {
             long counterCount = trade.history().stream()
                     .filter(e -> "COUNTERED".equals(e.actionType())).count();
             boolean offerIsReasonable = counterCount == 0 || valueReceived >= valueGiven * 0.25;
@@ -1010,6 +1014,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // accept readily. Propose proactively — highest priority.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            if (botPlayerIds.contains(other.playerId())) continue; // don't trade bot-to-bot (avoids infinite offer loops)
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             if (findWinWinTargetProperty(state, botId, other.playerId()) != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
@@ -1023,6 +1028,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // partners are NOT skipped here: completing our own monopoly is worth the attempt.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            if (botPlayerIds.contains(other.playerId())) continue; // don't trade bot-to-bot (avoids infinite offer loops)
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             String botWantsFromPartner = findCriticalTargetProperty(state, botId, other.playerId());
             if (botWantsFromPartner != null) {
@@ -1034,6 +1040,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Pass 2: P3 acquisition — pay cash (or offer an expendable) for a foothold property.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
+            if (botPlayerIds.contains(other.playerId())) continue; // don't trade bot-to-bot (avoids infinite offer loops)
             // Skip partners who have repeatedly declined bot-initiated offers
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             // Verify handleTradeEditing would actually find a target and afford an offer
