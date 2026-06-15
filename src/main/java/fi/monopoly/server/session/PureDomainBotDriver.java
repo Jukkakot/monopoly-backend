@@ -52,6 +52,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      *  small paper loss) to close a set, because a developed monopoly pays for itself in rent. */
     private static final double MONOPOLY_COMPLETION_DISCOUNT = 0.30;
 
+    /** [Fix 2] Premium multiplier the bot charges when SELLING a property that would complete the
+     *  buyer's monopoly. It will part with it — but only at a steep markup over fair value. */
+    private static final double MONOPOLY_SALE_PREMIUM = 1.6;
+
+    /** [Fix 3] When the game is stalemated (no monopolies and many turns have passed), the bot
+     *  relaxes its monopoly-gift caution by this factor so deals can finally happen. */
+    private static final double STALEMATE_GIFT_RELIEF = 0.5;
+    /** [Fix 3] How many bot turns without any new monopoly before stalemate easing kicks in. */
+    private static final int STALEMATE_TURN_THRESHOLD = 12;
+
+    /** [Fix 4] Extra acceptance relief (fraction of value given) when an opponent already has a
+     *  monopoly and the bot does not — getting our own set becomes urgent, accept worse deals. */
+    private static final double CATCHUP_DISCOUNT = 0.40;
+
     /**
      * Maximum number of state versions the bot is allowed to advance beyond the last
      * client-acknowledged version. Keeps the pending snapshot queue on the client bounded
@@ -80,6 +94,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             = new java.util.concurrent.ConcurrentHashMap<>();
     /** Last bot playerId whose WAITING_FOR_ROLL we observed — used to detect turn transitions. */
     private volatile String lastBotTurnStartId = null;
+    /** [Fix 3] Counts bot turns observed since a monopoly last appeared, for stalemate detection. */
+    private volatile int turnsSinceMonopolyChange = 0;
+    private volatile int lastMonopolyCount = 0;
     /** Consecutive EditTradeOffer attempts per tradeId — safety net against infinite edit loops. */
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> counterEditAttempts
             = new java.util.concurrent.ConcurrentHashMap<>();
@@ -269,6 +286,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 && !turn.activePlayerId().equals(lastBotTurnStartId)) {
             lastBotTurnStartId = turn.activePlayerId();
             tradeDeclinesByPartnerId.clear();
+            // [Fix 3] Track stalemate: count total monopolies on the board. If it hasn't changed,
+            // increment the stall counter; if a new monopoly appeared (or one vanished), reset.
+            int monopolyCount = (int) state.players().stream()
+                    .filter(p -> !p.bankrupt() && !p.eliminated())
+                    .filter(p -> playerHasMonopoly(state, p.playerId()))
+                    .count();
+            if (monopolyCount == lastMonopolyCount) {
+                turnsSinceMonopolyChange++;
+            } else {
+                turnsSinceMonopolyChange = 0;
+                lastMonopolyCount = monopolyCount;
+            }
         }
 
         // Track when bot-initiated trades are declined to avoid re-proposing to the same partner.
@@ -688,7 +717,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // value given so the bot will accept break-even or a small paper loss to complete a set.
         int strategicDiscount = 0;
         if (completesOwnMonopoly(state, botId, myReceiving)) {
-            strategicDiscount = (int)(valueGiven * MONOPOLY_COMPLETION_DISCOUNT);
+            // [Fix 4] If an opponent ALREADY has a monopoly and the bot has none, getting our own
+            // set is urgent — falling further behind loses the game. Accept noticeably worse deals.
+            boolean catchingUp = someoneElseHasMonopoly(state, botId) && !playerHasMonopoly(state, botId);
+            double discountRate = catchingUp ? CATCHUP_DISCOUNT : MONOPOLY_COMPLETION_DISCOUNT;
+            strategicDiscount = (int)(valueGiven * discountRate);
             requiredPremium = 0; // never demand a premium when closing our own set
         }
 
@@ -781,9 +814,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
             }
-            // Ask the partner to pay the property's fair value in cash. valueGiven already reflects
-            // what the bot is giving up (incl. set/building bonuses). Charge a small profit margin.
-            int askingPrice = (int) (valueGiven * (1.05 + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20));
+            // Ask the partner to pay for the property. Base = fair value + small threat margin.
+            // [Fix 2] If selling this property would COMPLETE the buyer's monopoly, the bot is
+            // willing to part with it — but only at a steep premium, not fair value. This unblocks
+            // stalemates (the bot will sell) while still pricing the gift appropriately.
+            double margin = 1.05 + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20;
+            boolean completesBuyerSet = myGiving.propertyIds().stream()
+                    .anyMatch(id -> wouldCompletePartnerMonopoly(state, counterPartnerId, id));
+            if (completesBuyerSet) margin *= MONOPOLY_SALE_PREMIUM;
+            int askingPrice = (int) (valueGiven * margin);
             PlayerSnapshot partnerSnap = findPlayer(state, counterPartnerId);
             int partnerCash = partnerSnap != null ? partnerSnap.cash() : 0;
             if (askingPrice >= 10 && partnerCash >= askingPrice) {
@@ -1184,6 +1223,34 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * would complete {@code partnerId}'s street monopoly. Mirrors the receiving-side completion
      * bonus so the bot demands fair compensation for handing an opponent a monopoly.
      */
+    /** True if {@code playerId} owns at least one full street monopoly. */
+    private boolean playerHasMonopoly(SessionState state, String playerId) {
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long owns = state.properties().stream()
+                    .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            if (owns >= groupSize) return true;
+        }
+        return false;
+    }
+
+    /** True if any player OTHER than {@code botId} already owns a full street monopoly. */
+    private boolean someoneElseHasMonopoly(SessionState state, String botId) {
+        return state.players().stream()
+                .filter(p -> !p.playerId().equals(botId) && !p.bankrupt() && !p.eliminated())
+                .anyMatch(p -> playerHasMonopoly(state, p.playerId()));
+    }
+
+    /** True if NO player owns any monopoly yet — the classic stalemate where nobody will trade. */
+    private boolean noMonopoliesExist(SessionState state) {
+        return state.players().stream()
+                .filter(p -> !p.bankrupt() && !p.eliminated())
+                .noneMatch(p -> playerHasMonopoly(state, p.playerId()));
+    }
+
     private int monopolyGiftPenalty(SessionState state, String partnerId, TradeSelectionState giving) {
         int penalty = 0;
         StrongBotConfig cfg = configFor(partnerId); // use same weights as the receiving-side bonus
@@ -1202,7 +1269,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                         .filter(p -> spotType(p.propertyId()).streetType == group)
                         .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
                         .sum();
-                penalty += groupPriceSum + cfg.tradeSetCompletionWeight();
+                int rawPenalty = groupPriceSum + cfg.tradeSetCompletionWeight();
+                // [Fix 3] If the game is stalemated (no monopolies yet and many turns have passed),
+                // halve the penalty so the bot stops being the reason no deal ever closes.
+                boolean stalemate = noMonopoliesExist(state)
+                        && turnsSinceMonopolyChange >= STALEMATE_TURN_THRESHOLD;
+                penalty += stalemate ? (int)(rawPenalty * STALEMATE_GIFT_RELIEF) : rawPenalty;
             }
         }
         return penalty;
@@ -1267,16 +1339,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      * the bot should request, or null if no mutually-beneficial pair exists with this partner.
      */
     private String findWinWinTargetProperty(SessionState state, String botId, String partnerId) {
-        // What the bot wants from the partner that completes the bot's set
-        String botWants = findCriticalTargetProperty(state, botId, partnerId);
-        if (botWants == null) return null;
-        // Does the bot hold something that completes the PARTNER's set? (the sweetener that makes
-        // the partner say yes). If so this is a genuine win-win worth proposing proactively.
+        // Does the bot hold something that completes the PARTNER's set? That's the sweetener that
+        // makes the partner say yes — the precondition for any genuine win-win.
         boolean botCanCompletePartner = state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
                 .anyMatch(p -> wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()));
-        return botCanCompletePartner ? botWants : null;
+        if (!botCanCompletePartner) return null;
+        // The bot wants something back. Prefer a property that completes the bot's OWN set
+        // (findCriticalTargetProperty); if none, fall back to any strategic target the partner
+        // holds. This widens win-win deals to "you complete my set, I complete yours" even across
+        // different colours — the classic human deal that breaks stalemates.
+        String botWants = findCriticalTargetProperty(state, botId, partnerId);
+        if (botWants == null) botWants = findStrategicTargetProperty(state, botId, partnerId);
+        return botWants;
     }
 
     /**
@@ -1720,77 +1796,4 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
         // Adjust effective reserve by position: losing bot spends more freely, leader is cautious
-        int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
-
-        StreetType bestGroup = null;
-        double bestScore = Double.NEGATIVE_INFINITY;
-
-        for (StreetType group : StrongBotStrategy.completedColorGroups(state, playerId)) {
-            int maxLevel = StrongBotStrategy.maxLevelInGroup(state, playerId, group);
-            if (maxLevel >= cfg.buildRoundCap()) continue;
-            if (!StrongBotStrategy.canAffordBuildRound(state, player, group, posAdjustedReserve)) continue;
-            double score = StrongBotStrategy.buildGroupScore(state, playerId, group, cfg);
-            if (score > bestScore) { bestScore = score; bestGroup = group; }
-        }
-
-        if (bestGroup == null) return false;
-        PropertyStateSnapshot target = StrongBotStrategy.findBuildTarget(state, playerId, bestGroup);
-        if (target == null) return false;
-        CommandResult result = publisher.handle(
-                new BuyBuildingRoundCommand(sessionId, playerId, target.propertyId()));
-        return result.accepted();
-    }
-
-    /**
-     * Records a bot-initiated trade cancellation as a decline for the given partner.
-     * This prevents the bot from immediately re-proposing the same trade after it had
-     * to cancel due to convergence failure (counter-edit loop, insufficient funds, etc.).
-     * Without this, tradeDeclinesByPartnerId stays at 0 and the bot loops indefinitely.
-     */
-    private void recordBotCancelAsDecline(String botId, TradeState trade) {
-        if (trade == null) return;
-        String partnerId = botId.equals(trade.initiatorPlayerId())
-                ? trade.recipientPlayerId() : trade.initiatorPlayerId();
-        tradeDeclinesByPartnerId.merge(partnerId, 1, Integer::sum);
-        log.debug("Bot {} recorded self-cancel as decline for partner {} (cumulative: {})",
-                botId.substring(0, 8), partnerId,
-                tradeDeclinesByPartnerId.get(partnerId));
-    }
-
-    private static SpotType spotType(String propertyId) {
-        return StrongBotStrategy.spotType(propertyId);
-    }
-
-    private static int buildingLevel(PropertyStateSnapshot p) {
-        return StrongBotStrategy.buildingLevel(p);
-    }
-
-    /** Mirrors DomainDebtRemediationGateway even-selling rule: (level-1) >= (maxRest-1), i.e. level >= maxRest. */
-    private static boolean evenSellEligible(SessionState state, PropertyStateSnapshot prop) {
-        SpotType st = spotType(prop.propertyId());
-        if (st.streetType.placeType != PlaceType.STREET) return true;
-        int level = buildingLevel(prop);
-        int maxRest = state.properties().stream()
-                .filter(p -> !p.propertyId().equals(prop.propertyId())
-                        && spotType(p.propertyId()).streetType == st.streetType)
-                .mapToInt(PureDomainBotDriver::buildingLevel)
-                .max().orElse(0);
-        return level - 1 >= maxRest - 1;
-    }
-
-    private static Set<String> collectBotPlayerIds(SessionState state) {
-        Set<String> ids = new java.util.HashSet<>();
-        for (SeatState seat : state.seats()) {
-            if (seat.seatKind() == SeatKind.BOT) {
-                ids.add(seat.playerId());
-            }
-        }
-        return ids.isEmpty() ? Set.of() : Set.copyOf(ids);
-    }
-
-    private static PlayerSnapshot findPlayer(SessionState state, String playerId) {
-        return state.players().stream()
-                .filter(p -> playerId.equals(p.playerId()))
-                .findFirst().orElse(null);
-    }
-}
+        int posAdjustedReserve = (int)(reserve / Stro
