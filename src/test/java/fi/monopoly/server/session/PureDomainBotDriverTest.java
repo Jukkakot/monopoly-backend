@@ -477,7 +477,10 @@ class PureDomainBotDriverTest {
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
         // Unfavorable offer: human requests 150€ from bot, offers nothing in return.
-        // handleTradeDecision would decline this; handleCounterEditing should edit it.
+        // The bot must NOT hand over cash for nothing. With no value on the received side it
+        // either requests something of value back (Edit) or, if it has nothing worth requesting
+        // from this partner, cancels the trade. It must never submit a give-for-nothing counter
+        // and (being in COUNTERED editing mode) must never decline.
         TradeOfferState offer = new TradeOfferState(
                 HUMAN_PLAYER, BOT_PLAYER,
                 new TradeSelectionState(0, List.of(), 0),    // offered to bot: nothing
@@ -503,10 +506,17 @@ class PureDomainBotDriverTest {
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        // In COUNTERED editing mode the bot must never decline.
         assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof DeclineTradeCommand),
-                "STRONG bot in COUNTERED editing mode must not decline — it should edit or submit; got: " + recorder.commands);
-        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof EditTradeOfferCommand || c instanceof SubmitTradeOfferCommand),
-                "STRONG bot should edit or submit the counter-offer; got: " + recorder.commands);
+                "STRONG bot in COUNTERED editing mode must not decline; got: " + recorder.commands);
+        // It must respond by either requesting value (Edit) or cancelling — never by submitting a
+        // counter that still gives the bot's cash away for nothing.
+        boolean requestedValueOrCancelled = recorder.commands.stream()
+                .anyMatch(c -> c instanceof EditTradeOfferCommand || c instanceof CancelTradeCommand);
+        assertTrue(requestedValueOrCancelled,
+                "STRONG bot should request value back or cancel a give-for-nothing offer; got: " + recorder.commands);
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof SubmitTradeOfferCommand),
+                "STRONG bot must not submit a give-for-nothing counter; got: " + recorder.commands);
     }
 
     // -------------------------------------------------------------------------
