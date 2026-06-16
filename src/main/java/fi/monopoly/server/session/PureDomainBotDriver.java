@@ -913,9 +913,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (bot == null || bot.cash() < reserve + 50) return false;
 
         // Pass 0 (win-win): a partner holds a piece the bot needs to complete a set AND the bot holds a piece that co...
+        // Win-win uses a MORE LENIENT cooldown than other passes: a mutual swap is a different,
+        // mutually beneficial deal, so it's worth proposing even right after a cash offer was
+        // declined (the human move "cash didn't work, try a swap"). It still backs off after many
+        // repeated declines so it can't loop pathologically.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
+            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER * 3) continue;
             if (findWinWinTargetProperty(state, botId, other.playerId()) != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
                 if (result.accepted()) return true;
