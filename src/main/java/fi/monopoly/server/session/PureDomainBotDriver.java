@@ -24,90 +24,68 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Server-side greedy bot driver for pure-domain sessions.
- *
- * <p>Registers as a {@link ClientSessionListener} on the provided {@link SessionCommandPublisher}.
- * When a state snapshot arrives and the active actor is a bot seat, schedules a delayed command
- * via a {@link ScheduledExecutorService} — giving the client a brief window to observe the state
- * before the bot responds. The greedy strategy mirrors {@code PureDomainGameSimulationTest}:
- * always buy when affordable, pay debt when possible, mortgage otherwise, declare bankruptcy last.</p>
- *
- * <p>Thread safety: {@code pendingAction} is an {@link AtomicBoolean} to prevent double-scheduling.
- * All commands go through the synchronized {@link SessionCommandPublisher#handle} method.</p>
- */
+// Server-side greedy bot driver for pure-domain sessions.
 @Slf4j
 public final class PureDomainBotDriver implements ClientSessionListener {
 
-    /** Fallback delay used when situational logic cannot determine a better value. */
+    // Fallback delay used when situational logic cannot determine a better value.
     private static final long DEFAULT_BOT_DELAY_MS = 900L;
 
-    /** Minimum delay even in "fast" mode — prevents server overload from rapid-fire bot games. */
+    // Minimum delay even in "fast" mode — prevents server overload from rapid-fire bot games.
     private static final long MIN_FAST_DELAY_MS = 50L;
 
     private static final int MAX_DECLINES_PER_PARTNER = 2;
+    // Max counter-offers the bot will make within a single trade before it must accept or decline.
+    // Applies to every partner equally; guarantees a trade negotiation always terminates.
+    private static final int MAX_COUNTERS_PER_TRADE = 2;
 
-    /** When a trade would complete one of the bot's own monopolies, relax the acceptance
-     *  threshold by this fraction of the value given — the bot will pay a premium (or accept a
-     *  small paper loss) to close a set, because a developed monopoly pays for itself in rent. */
+    // threshold by this fraction of the value given — the bot will pay a premium (or accept a small paper loss) t...
     private static final double MONOPOLY_COMPLETION_DISCOUNT = 0.30;
 
-    /** [Fix 2] Premium multiplier the bot charges when SELLING a property that would complete the
-     *  buyer's monopoly. It will part with it — but only at a steep markup over fair value. */
+    // buyer's monopoly.
     private static final double MONOPOLY_SALE_PREMIUM = 1.6;
 
-    /** [Fix 3] When the game is stalemated (no monopolies and many turns have passed), the bot
-     *  relaxes its monopoly-gift caution by this factor so deals can finally happen. */
+    // relaxes its monopoly-gift caution by this factor so deals can finally happen.
     private static final double STALEMATE_GIFT_RELIEF = 0.5;
-    /** [Fix 3] How many bot turns without any new monopoly before stalemate easing kicks in. */
+    // [Fix 3] How many bot turns without any new monopoly before stalemate easing kicks in.
     private static final int STALEMATE_TURN_THRESHOLD = 12;
 
-    /** [Fix 4] Extra acceptance relief (fraction of value given) when an opponent already has a
-     *  monopoly and the bot does not — getting our own set becomes urgent, accept worse deals. */
+    // monopoly and the bot does not — getting our own set becomes urgent, accept worse deals.
     private static final double CATCHUP_DISCOUNT = 0.40;
 
-    /**
-     * Maximum number of state versions the bot is allowed to advance beyond the last
-     * client-acknowledged version. Keeps the pending snapshot queue on the client bounded
-     * and prevents the backend from doing wasted work the client will never animate.
-     * Only enforced when viewerGatingEnabled is true.
-     */
+    // Maximum number of state versions the bot is allowed to advance beyond the last client-acknowledged version.
     private static final int MAX_CLIENT_LAG_VERSIONS = 5;
 
     private final SessionCommandPublisher publisher;
     private final String sessionId;
     private final Set<String> botPlayerIds;
-    /** Per-player bot configs. Falls back to StrongBotConfig.defaults() if absent. */
+    // Per-player bot configs. Falls back to StrongBotConfig.defaults() if absent.
     private final Map<String, StrongBotConfig> configs;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
     private final AtomicInteger viewerCount = new AtomicInteger(0);
-    /** The highest snapshot version the client has explicitly acknowledged. -1 = no ACK received yet. */
+    // The highest snapshot version the client has explicitly acknowledged. -1 = no ACK received yet.
     private final AtomicLong latestClientVersion = new AtomicLong(-1);
-    /** Disabled by default so unit tests work without simulating SSE connections. */
+    // Disabled by default so unit tests work without simulating SSE connections.
     private volatile boolean viewerGatingEnabled = false;
     private volatile double speedMultiplier = 1.0;
     private volatile TradeState lastObservedTrade = null;
-    /** True until the bot acts for the first time this game — adds extra delay so players can orient. */
+    // True until the bot acts for the first time this game — adds extra delay so players can orient.
     private volatile boolean isFirstTurn = true;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
             = new java.util.concurrent.ConcurrentHashMap<>();
-    /** Last bot playerId whose WAITING_FOR_ROLL we observed — used to detect turn transitions. */
+    // Last bot playerId whose WAITING_FOR_ROLL we observed — used to detect turn transitions.
     private volatile String lastBotTurnStartId = null;
-    /** [Fix 3] Counts bot turns observed since a monopoly last appeared, for stalemate detection. */
+    // [Fix 3] Counts bot turns observed since a monopoly last appeared, for stalemate detection.
     private volatile int turnsSinceMonopolyChange = 0;
     private volatile int lastMonopolyCount = 0;
-    /** Consecutive EditTradeOffer attempts per tradeId — safety net against infinite edit loops. */
+    // Consecutive EditTradeOffer attempts per tradeId — safety net against infinite edit loops.
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> counterEditAttempts
             = new java.util.concurrent.ConcurrentHashMap<>();
-    // Generic stuck-detection: if the bot keeps dispatching in the same situation repeatedly,
-    // something is wrong. Volatile is safe — dispatcher runs on a single-thread executor.
+    // Generic stuck-detection: if the bot keeps dispatching in the same situation repeatedly, something is wrong.
     private volatile String lastDispatchFingerprint = "";
     private volatile int consecutiveDispatchCount = 0;
-    /**
-     * Last money amount the bot offered per (partnerId -> propertyId) that was declined.
-     * Next offer for the same property+partner must strictly exceed this amount.
-     */
+    // Last money amount the bot offered per (partnerId -> propertyId) that was declined.
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, Integer>>
             lastDeclinedOfferAmount = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -122,9 +100,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         this.configs = Map.copyOf(configs);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("bot-driver-" + sessionId.substring(0, 8), 0).factory());
-        // Watchdog: fires every 5 s to catch cases where the bot missed an action due to
-        // lag-gating, rapid-fire snapshots, or scheduler/executor edge cases.  Only active
-        // when viewer gating is enabled (i.e. a real game, not a unit-test simulation).
+        // Watchdog: fires every 5 s to catch cases where the bot missed an action due to lag-gating, rapid-fire snaps...
         this.scheduler.scheduleAtFixedRate(() -> {
             try {
                 if (!viewerGatingEnabled || viewerCount.get() == 0) return;
@@ -143,10 +119,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }, 5, 5, TimeUnit.SECONDS);
     }
 
-    /**
-     * Creates and registers a {@link PureDomainBotDriver} for any BOT seats in the given state.
-     * Returns {@code null} if the session has no bot seats.
-     */
+    // Creates and registers a {@link PureDomainBotDriver} for any BOT seats in the given state.
     static PureDomainBotDriver createAndRegisterIfNeeded(
             SessionCommandPublisher publisher,
             SessionState initialState,
@@ -160,10 +133,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         publisher.addListener(driver);
         log.info("Bot driver registered for session {} — bots: {}",
                 initialState.sessionId().substring(0, 8), botIds);
-        // Trigger initial check after a short grace period. Viewer-gating now handles the
-        // "wait for frontend" concern — the bot pauses immediately if viewerCount == 0, so
-        // this delay only needs to survive the session-creation HTTP round-trip (~200ms).
-        // Reduced from 4000 ms to 500 ms; override with -Dmonopoly.bot.initial.delay.ms=N.
+        // Trigger initial check after a short grace period.
         long initialDelayMs = Long.getLong("monopoly.bot.initial.delay.ms", 500L);
         ClientSessionSnapshot initialSnap = ClientSessionSnapshot.from(initialState, true);
         if (initialDelayMs > 0) {
@@ -185,25 +155,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         scheduler.shutdownNow();
     }
 
-    /**
-     * Forces the bot to re-evaluate and act immediately (0 ms delay).
-     *
-     * <p>Used in two cases:
-     * <ul>
-     *   <li>Host detects the bot is stuck (failsafe recovery) — want immediate action.</li>
-     *   <li>Debug panel sets a dice/card override — want the bot to consume it right away
-     *       before the already-scheduled takeStep fires with the old dice.</li>
-     * </ul>
-     * By scheduling with 0 delay we bypass the human-like think time so the override takes
-     * effect in the current turn rather than potentially being ignored.</p>
-     */
+    // Forces the bot to re-evaluate and act immediately (0 ms delay).
     public void retrigger() {
         pendingAction.set(false);
         SessionState state = publisher.currentState();
         if (state == null || !needsBotAction(state)) return;
         if (pendingAction.compareAndSet(false, true)) {
-            // Bypass viewer gating: explicit retrigger calls are intentional (e.g. tests,
-            // debug tooling) and should always produce one bot step.
+            // Bypass viewer gating: explicit retrigger calls are intentional (e.g.
             scheduler.schedule(this::takeStepForced, 0L, TimeUnit.MILLISECONDS);
         }
     }
@@ -220,10 +178,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         dispatchGreedy(state);
     }
 
-    /**
-     * Called when an SSE viewer connects to this session.
-     * If the bot was paused due to no viewers, this triggers immediate re-evaluation.
-     */
+    // Called when an SSE viewer connects to this session.
     public void onSseConnected() {
         if (viewerCount.incrementAndGet() == 1) {
             log.info("First SSE viewer connected for session {} — resuming bot", sessionId.substring(0, 8));
@@ -231,10 +186,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
     }
 
-    /**
-     * Called when an SSE viewer disconnects from this session.
-     * When the last viewer leaves, the bot pauses until someone reconnects.
-     */
+    // Called when an SSE viewer disconnects from this session.
     public void onSseDisconnected() {
         int remaining = viewerCount.updateAndGet(v -> Math.max(0, v - 1));
         if (remaining == 0) {
@@ -242,10 +194,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
     }
 
-    /**
-     * Called when the client acknowledges it has processed a snapshot at the given version.
-     * Advances the pacing window so the bot can continue if it was waiting.
-     */
+    // Called when the client acknowledges it has processed a snapshot at the given version.
     public void onClientAck(long version) {
         long prev = latestClientVersion.getAndUpdate(v -> Math.max(v, version));
         if (prev < version) {
@@ -266,9 +215,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return speedMultiplier;
     }
 
-    // -------------------------------------------------------------------------
     // ClientSessionListener
-    // -------------------------------------------------------------------------
 
     @Override
     public void onSnapshotChanged(ClientSessionSnapshot snapshot) {
@@ -278,16 +225,17 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             lastObservedTrade = null;
             return;
         }
-        // Reset per-partner decline counts at the start of each bot turn so the bot can
-        // re-attempt trading with the same partner in later turns.
+        // Decay (don't wipe) per-partner decline memory at each bot turn. Wiping it every turn let
+        // bots re-propose the same rejected trade endlessly (the bot-vs-bot loop). Decaying by one
+        // lets a partner be retried only after several turns have passed, not immediately.
         var turn = state.turn();
         if (turn != null && turn.phase() == TurnPhase.WAITING_FOR_ROLL
                 && botPlayerIds.contains(turn.activePlayerId())
                 && !turn.activePlayerId().equals(lastBotTurnStartId)) {
             lastBotTurnStartId = turn.activePlayerId();
-            tradeDeclinesByPartnerId.clear();
-            // [Fix 3] Track stalemate: count total monopolies on the board. If it hasn't changed,
-            // increment the stall counter; if a new monopoly appeared (or one vanished), reset.
+            tradeDeclinesByPartnerId.replaceAll((k, v) -> v > 0 ? v - 1 : 0);
+            tradeDeclinesByPartnerId.values().removeIf(v -> v <= 0);
+            // [Fix 3] Track stalemate: count total monopolies on the board.
             int monopolyCount = (int) state.players().stream()
                     .filter(p -> !p.bankrupt() && !p.eliminated())
                     .filter(p -> playerHasMonopoly(state, p.playerId()))
@@ -301,8 +249,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // Track when bot-initiated trades are declined to avoid re-proposing to the same partner.
-        // A trade that disappears while someone was required to respond = declined (not cancelled).
-        // handleDecline() never writes a "DECLINED" history entry, so we detect via decisionRequiredFromPlayerId.
         TradeState prevTrade = lastObservedTrade;
         lastObservedTrade = state.tradeState();
         // Clear the edit-loop counter when the trade resolves (tradeId changes or trade disappears)
@@ -318,7 +264,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 && prevTrade.decisionRequiredFromPlayerId() != null) {
             String partner = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId())
                     ? prevTrade.recipientPlayerId() : prevTrade.initiatorPlayerId();
-            tradeDeclinesByPartnerId.merge(partner, 1, Integer::sum);
+            tradeDeclinesByPartnerId.merge(partner, 2, Integer::sum);
             log.debug("Bot trade declined by {} (cumulative: {})", partner,
                     tradeDeclinesByPartnerId.get(partner));
             // Record what was offered so we require a strictly better offer next time
@@ -354,9 +300,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         scheduler.schedule(this::takeStep, computeDelay(snapshot.state()), TimeUnit.MILLISECONDS);
     }
 
-    // -------------------------------------------------------------------------
     // Bot step
-    // -------------------------------------------------------------------------
 
     private void takeStep() {
         pendingAction.set(false);
@@ -391,8 +335,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
         if (state.auctionState() != null) {
             AuctionState auction = state.auctionState();
-            // During WON_PENDING_RESOLUTION, currentActorPlayerId is null; use winner so a bot
-            // winner can dispatch FinishAuctionResolutionCommand.
+            // During WON_PENDING_RESOLUTION, currentActorPlayerId is null; use winner so a bot winner can dispatch Finish...
             if (auction.status() == AuctionStatus.WON_PENDING_RESOLUTION) {
                 return auction.winningPlayerId();
             }
@@ -414,7 +357,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return state.turn().activePlayerId();
     }
 
-    /** Fingerprint of the current game situation — used to detect stuck/looping bot behaviour. */
+    // Fingerprint of the current game situation — used to detect stuck/looping bot behaviour.
     private String situationFingerprint(SessionState state) {
         String phase = state.turn() != null ? state.turn().phase().name() : "NONE";
         String tradeId = state.tradeState() != null ? state.tradeState().tradeId() : "-";
@@ -446,9 +389,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             String tradeActor = trade.decisionRequiredFromPlayerId();
             String editor = trade.editingPlayerId();
 
-            // COUNTERED editing must be checked before tradeActor: handleCounter sets
-            // decisionRequiredFromPlayerId = bot (the counter editor), which would
-            // otherwise route to handleTradeDecision and immediately decline the offer.
+            // COUNTERED editing must be checked before tradeActor: handleCounter sets decisionRequiredFromPlayerId = bot...
             if (trade.status() == TradeStatus.COUNTERED && editor != null && botPlayerIds.contains(editor)) {
                 handleCounterEditing(state, editor);
                 return;
@@ -486,11 +427,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private void handleDecision(SessionState state, String activeId) {
         PendingDecision decision = state.pendingDecision();
         if (decision == null) {
-            // WAITING_FOR_DECISION is set by OverlaySessionStateStore whenever tradeState OR
-            // pendingDecision is non-null.  If only tradeState is active, the trade conditions
-            // in dispatchGreedy() should have already returned — but as a safety guard, don't
-            // send EndTurnCommand while a trade is open: it would be rejected and leave the bot
-            // stuck waiting for a state change that never comes.
+            // WAITING_FOR_DECISION is set by OverlaySessionStateStore whenever tradeState OR pendingDecision is non-null.
             if (state.tradeState() != null) {
                 log.warn("Bot in WAITING_FOR_DECISION with active trade but no pending decision — trade actor is not a bot, waiting");
                 return;
@@ -507,11 +444,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
     }
 
-    /**
-     * Score-based property purchase decision for STRONG bots.
-     * Weighs set completion, progress, opponent blocking, type bonuses, liquidity risk,
-     * and color-group preferences according to the bot's StrongBotConfig.
-     */
+    // Score-based property purchase decision for STRONG bots.
     private void handleDecisionStrong(SessionState state, String botId,
                                        PendingDecision decision,
                                        PropertyPurchaseDecisionPayload purchase, int cash) {
@@ -573,11 +506,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return StrongBotStrategy.wouldCompleteSet(state, botId, propId);
     }
 
-    /**
-     * Finds the best property to mortgage to raise at least {@code needed} extra cash for a purchase.
-     * Avoids mortgaging complete monopolies (strategic value) and prefers utilities/railroads first.
-     * Returns null if no suitable property exists or the bot wouldn't want to do this.
-     */
+    // Finds the best property to mortgage to raise at least {@code needed} extra cash for a purchase.
     private PropertyStateSnapshot findMortgageCandidateForPurchase(SessionState state, String playerId, int needed) {
         // Collect mortgageable properties: not already mortgaged, no buildings in the group
         List<PropertyStateSnapshot> candidates = state.properties().stream()
@@ -623,7 +552,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
         if (allowed.contains(DebtAction.SELL_BUILDING)) {
             // Sell the building where rent-loss-per-sell-value is lowest (least costly to remove).
-            // Among tied scores, prefer the property with the most buildings (even-sell rule).
             var buildingProp = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
                     .filter(p -> evenSellEligible(state, p))
@@ -656,8 +584,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         String tradeId = trade.tradeId();
 
         // Determine perspective: the currentOffer always expresses things from the proposer's view.
-        // If botId == offer.recipientPlayerId → bot receives offeredToRecipient, gives requestedFromRecipient.
-        // Otherwise (bot is the proposer, e.g. deciding on a counter) → sides are reversed.
         TradeOfferState offer = trade.currentOffer();
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
 
@@ -670,13 +596,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false)
                           + monopolyGiftPenalty(state, tradePartnerId, myGiving);
 
-        // ── SANITY CHECKS ──────────────────────────────────────────────────────────────────
-        // These guard against degenerate offers the value math alone handles poorly.
+        // ── SANITY CHECKS ────────────────────────────────────────────────────────────────── These guard against deg...
 
-        // (a) Pure giveaway: the partner asks for something and offers nothing back. Rather than a
-        //     flat refusal, treat it as an opening to negotiate: if the bot wants a property this
-        //     partner holds, COUNTER — the counter step will build an offer that asks for that
-        //     property in return. Only decline outright if the bot has nothing to gain from them.
+        // (a) Pure giveaway: the partner asks for something and offers nothing back.
         boolean botGetsNothing = myReceiving.propertyIds().isEmpty()
                 && myReceiving.moneyAmount() <= 0 && myReceiving.jailCardCount() <= 0;
         boolean botGivesSomething = !myGiving.propertyIds().isEmpty()
@@ -685,8 +607,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             long counterCount = trade.history().stream()
                     .filter(e -> "COUNTERED".equals(e.actionType())).count();
             boolean botWantsSomething = findStrategicTargetProperty(state, botId, tradePartnerId) != null;
-            // Never counter against another bot (loop risk) — only negotiate with humans.
-            if (botWantsSomething && counterCount < 2 && !botPlayerIds.contains(tradePartnerId)) {
+            if (botWantsSomething && counterCount < MAX_COUNTERS_PER_TRADE) {
                 publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
             } else {
                 publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
@@ -695,30 +616,22 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // (b) Wildly lopsided ask: the bot is asked to give more than ~3× what it would receive.
-        //     No reasonable counter exists; decline rather than churn out an unfair counter.
         if (valueGiven > 0 && valueReceived * 3 < valueGiven
                 && !completesOwnMonopoly(state, botId, myReceiving)) {
             publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
             return;
         }
-        // ───────────────────────────────────────────────────────────────────────────────────
 
-        // Acceptance threshold scales with the partner's threat score (0-1):
-        //   low threat  → standard fairness tolerance
-        //   high threat → up to 25% profit premium required (proportional to property value)
+        // Acceptance threshold scales with the partner's threat score (0-1): low threat  → standard fairness toleranc...
         double posFactor = StrongBotStrategy.positionFactor(state, botId);
         int fairnessTolerance = (int)(configFor(botId).tradeFairnessTolerance() * posFactor);
         double ts = StrongBotStrategy.threatScore(state, tradePartnerId);
         int requiredPremium = (int)(valueGiven * ts * 0.25);
 
-        // Strategic discount: if accepting completes one of the bot's OWN monopolies, the long-game
-        // value (rent once developed) far exceeds the trade's face value. A human happily pays a
-        // premium — or breaks even — to close a set. Relax the threshold by a fraction of the
-        // value given so the bot will accept break-even or a small paper loss to complete a set.
+        // Strategic discount: if accepting completes one of the bot's OWN monopolies, the long-game value (rent once...
         int strategicDiscount = 0;
         if (completesOwnMonopoly(state, botId, myReceiving)) {
-            // [Fix 4] If an opponent ALREADY has a monopoly and the bot has none, getting our own
-            // set is urgent — falling further behind loses the game. Accept noticeably worse deals.
+            // [Fix 4] If an opponent ALREADY has a monopoly and the bot has none, getting our own set is urgent — falling...
             boolean catchingUp = someoneElseHasMonopoly(state, botId) && !playerHasMonopoly(state, botId);
             double discountRate = catchingUp ? CATCHUP_DISCOUNT : MONOPOLY_COMPLETION_DISCOUNT;
             strategicDiscount = (int)(valueGiven * discountRate);
@@ -730,16 +643,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // Prefer countering over declining — always counter the first time,
-        // and again if the follow-up is at least 25% reasonable (avoids infinite loops).
-        // BUT never counter against another bot: two bots countering each other can loop
-        // indefinitely. Against a bot, the acceptable deal was already accepted above, so decline.
-        boolean partnerIsBot = botPlayerIds.contains(tradePartnerId);
-        if (valueGiven > 0 && !partnerIsBot) {
+        // Prefer countering over declining. Counter count is monotonic within a trade, and the cap
+        // guarantees termination — same rule for every partner, human or bot.
+        if (valueGiven > 0) {
             long counterCount = trade.history().stream()
                     .filter(e -> "COUNTERED".equals(e.actionType())).count();
             boolean offerIsReasonable = counterCount == 0 || valueReceived >= valueGiven * 0.25;
-            if (offerIsReasonable && counterCount < 2) {
+            if (offerIsReasonable && counterCount < MAX_COUNTERS_PER_TRADE) {
                 publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
                 return;
             }
@@ -748,20 +658,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
     }
 
-    /**
-     * Called when the bot is in COUNTERED editing mode — it rejected the incoming offer terms
-     * and is now proposing adjusted terms. Modifies the money on the received side to cover
-     * the value gap, then submits.
-     */
+    // Called when the bot is in COUNTERED editing mode — it rejected the incoming offer terms and is now proposin...
     private void handleCounterEditing(SessionState state, String botId) {
         TradeState trade = state.tradeState();
         if (trade == null) return;
         TradeOfferState offer = trade.currentOffer();
         String tradeId = trade.tradeId();
 
-        // Safety net (checked up-front so EVERY branch below is counted, not just the
-        // final edit path). If the bot has churned this counter too many times the
-        // convergence has failed — cancel rather than loop indefinitely.
+        // Safety net (checked up-front so EVERY branch below is counted, not just the final edit path).
         int attempts = counterEditAttempts.merge(tradeId, 1, Integer::sum);
         if (attempts > 8) {
             log.warn("Bot {} counter-edit loop detected for trade {} ({} attempts) — cancelling",
@@ -783,14 +687,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
-        // ── GIVEAWAY GUARD ──────────────────────────────────────────────────────────────────
-        // The partner is asking the bot for something while offering nothing in return. Two cases:
-        //   1. They asked for the bot's CASH only → no negotiation; cancel. Handing over money for
-        //      nothing makes no sense and there's nothing to price.
-        //   2. They asked for the bot's PROPERTY → the bot may sell it, but only if it's willing to
-        //      part with it AND can get a fair price. Keep the property on the give side and counter
-        //      by requesting fair payment; if the property is one the bot must never sell (completes
-        //      its own monopoly) or no fair price is reachable, cancel.
+        // ── GIVEAWAY GUARD ────────────────────────────────────────────────────────────────── The partner is asking...
         boolean receiveEmpty = myReceiving.propertyIds().isEmpty()
                 && currentMoneyReceived <= 0 && myReceiving.jailCardCount() <= 0;
         boolean giveNonEmpty = !myGiving.propertyIds().isEmpty()
@@ -806,18 +703,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 return;
             }
 
-            // Case 2: the partner wants the bot's property. The bot won't break its own monopoly,
-            // and won't sell at a loss. If it's willing to sell, price it: request fair payment.
+            // Case 2: the partner wants the bot's property.
             if (givingBreaksOwnMonopoly(state, botId, myGiving)) {
                 counterEditAttempts.remove(tradeId);
                 recordBotCancelAsDecline(botId, trade);
                 publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
                 return;
             }
-            // Ask the partner to pay for the property. Base = fair value + small threat margin.
-            // [Fix 2] If selling this property would COMPLETE the buyer's monopoly, the bot is
-            // willing to part with it — but only at a steep premium, not fair value. This unblocks
-            // stalemates (the bot will sell) while still pricing the gift appropriately.
+            // Ask the partner to pay for the property.
             double margin = 1.05 + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20;
             boolean completesBuyerSet = myGiving.propertyIds().stream()
                     .anyMatch(id -> wouldCompletePartnerMonopoly(state, counterPartnerId, id));
@@ -836,16 +729,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
             return;
         }
-        // ────────────────────────────────────────────────────────────────────────────────────
 
         // Profit target scales with partner threat score (0-1): 1.05 (no threat) to 1.25 (full threat).
         double ts = StrongBotStrategy.threatScore(state, counterPartnerId);
         double profitFactor = 1.05 + ts * 0.20;
         int targetMoneyReceived = Math.max(0, (int) (valueGiven * profitFactor) - nonMoneyReceived);
 
-        // Sanity: if the ask would break one of the bot's OWN monopolies (e.g. "give me all your
-        // properties"), no cash counter is sensible — the bot won't dismantle a set for money.
-        // Cancel instead of proposing an absurd cash demand.
+        // Sanity: if the ask would break one of the bot's OWN monopolies (e.g.
         if (givingBreaksOwnMonopoly(state, botId, myGiving)) {
             counterEditAttempts.remove(tradeId);
             recordBotCancelAsDecline(botId, trade);
@@ -858,8 +748,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         boolean editGiveSide    = !editOfferedSide;
 
         // Single-side money rule: never submit an offer with money on both sides — it is confusing.
-        // If the given side already carries cash AND we'd also put money on the received side,
-        // resolve the conflict first (in a separate command step) before continuing.
         int givenMoney = myGiving.moneyAmount();
         if (givenMoney > 0 && (targetMoneyReceived > 0 || currentMoneyReceived > 0)) {
             if (!myGiving.propertyIds().isEmpty()) {
@@ -867,9 +755,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 publisher.handle(new EditTradeOfferCommand(sessionId, botId, tradeId,
                         new TradeEditPatch(null, editGiveSide, 0, List.of(), List.of(), null)));
             } else {
-                // Given side = pure cash: this is cash-for-properties. Counter by reducing the
-                // payment to a fair rate (~95 % of the received property value) instead of
-                // adding cash to the other side.
+                // Given side = pure cash: this is cash-for-properties.
                 int fairGiveMoney = Math.max(0, (int) (nonMoneyReceived * 0.95));
                 if (fairGiveMoney < 10) {
                     counterEditAttempts.remove(tradeId);
@@ -882,10 +768,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // ── COUNTER CONVERGENCE (iterative; one edit per round, re-entered via snapshot) ──────
-        // Each branch makes ONE change and returns. The new snapshot re-enters this method, so the
-        // bot converges over several rounds: bridge with properties → settle cash → submit.
-        // counterEditAttempts (max 8) bounds the loop.
+        // ── COUNTER CONVERGENCE (iterative; one edit per round, re-entered via snapshot) ────── Each branch makes ON...
 
         // [C1] Already fair: received value meets the target (small tolerance kills ±1 jitter).
         if (currentMoneyReceived >= targetMoneyReceived - 2) {
@@ -894,10 +777,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // [C2] The asking price is the fair value of the deal (targetMoneyReceived), NOT a function
-        //      of how much cash the opponent happens to hold. We only need their cash as a
-        //      feasibility check: can they actually pay the fair price? We never scale the demand
-        //      up or down based on their bankroll — that would reward trading while poor.
+        // [C2] The asking price is the fair value of the deal (targetMoneyReceived), NOT a function of how much cash...
         String otherPartyId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
         PlayerSnapshot otherParty = findPlayer(state, otherPartyId);
         int proposerCash = otherParty != null ? otherParty.cash() : 0;
@@ -914,9 +794,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // [C4] Opponent can't pay the full fair price in cash. Bridge the shortfall by ALSO
-        //      requesting a property — across rounds, one new piece at a time. This keeps the price
-        //      tied to value (cash + property must add up to the fair price), never to their wallet.
+        // [C4] Opponent can't pay the full fair price in cash.
         String bridgeProp = findUnrequestedTarget(state, botId, otherPartyId, myReceiving);
         if (bridgeProp != null) {
             java.util.List<String> updated = new java.util.ArrayList<>(myReceiving.propertyIds());
@@ -927,8 +805,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // [C5] No property left to bridge with and the opponent can't cover the fair price in cash.
-        //      Ask for the most cash they can pay ONLY if that already covers the value the bot is
-        //      giving up (a genuine break-even), otherwise the deal isn't worth doing — cancel.
         if (proposerCash >= valueGiven) {
             if (proposerCash == currentMoneyReceived) {
                 counterEditAttempts.remove(tradeId);
@@ -946,10 +822,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         publisher.handle(new CancelTradeCommand(sessionId, botId, tradeId));
     }
 
-    /**
-     * Called when the bot is in EDITING mode (it opened the trade or sent a counter).
-     * Fills the offer in stages: first request a target property, then offer money, then submit.
-     */
+    // Called when the bot is in EDITING mode (it opened the trade or sent a counter).
     private void handleTradeEditing(SessionState state, String botId) {
         TradeState trade = state.tradeState();
         if (trade == null) return;
@@ -958,8 +831,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         String tradeId = trade.tradeId();
         boolean iAmProposer = botId.equals(trade.initiatorPlayerId());
 
-        // From the canonical offer perspective:
-        // offeredToRecipient = what proposer gives; requestedFromRecipient = what proposer wants.
+        // From the canonical offer perspective: offeredToRecipient = what proposer gives; requestedFromRecipient = wh...
         TradeSelectionState myGive = iAmProposer ? offer.offeredToRecipient() : offer.requestedFromRecipient();
         TradeSelectionState myRequest = iAmProposer ? offer.requestedFromRecipient() : offer.offeredToRecipient();
         boolean giveSide = iAmProposer;
@@ -989,11 +861,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int available0 = botSnap != null ? Math.max(0, botSnap.cash() - dynamicReserve(state, botId)) : 0;
 
         // Step 2a: offer an own property when needed to sweeten the deal.
-        // The bot never proactively offers a property just because the partner wants it —
-        // that is the partner's job to ask for via counter-offer. The bot only adds a property
-        // when chasing a P1 target (the partner will demand a premium, so a bundle helps) or
-        // when cash alone cannot cover the target price.
-        // Only run when the give-side is completely empty (no property AND no money already set).
         boolean targetIsP1 = isMonopolyCompletingTarget(state, botId, targetPropId0);
         if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
             if (available0 < targetPrice || targetIsP1) {
@@ -1039,21 +906,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
     }
 
-    /**
-     * STRONG bot tries to open a trade to acquire a property that advances a color group it already
-     * partially owns. Returns true if {@link OpenTradeCommand} was dispatched.
-     */
+    // STRONG bot tries to open a trade to acquire a property that advances a color group it already partially owns.
     private boolean tryInitiateStrategicTrade(SessionState state, String botId) {
         PlayerSnapshot bot = findPlayer(state, botId);
         int reserve = dynamicReserve(state, botId);
         if (bot == null || bot.cash() < reserve + 50) return false;
 
-        // Pass 0 (win-win): a partner holds a piece the bot needs to complete a set AND the bot
-        // holds a piece that completes the partner's set. These are the trades humans love and
-        // accept readily. Propose proactively — highest priority.
+        // Pass 0 (win-win): a partner holds a piece the bot needs to complete a set AND the bot holds a piece that co...
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            if (botPlayerIds.contains(other.playerId())) continue; // don't trade bot-to-bot (avoids infinite offer loops)
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             if (findWinWinTargetProperty(state, botId, other.playerId()) != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
@@ -1062,12 +923,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // Pass 1: bot has a P1 (monopoly-completing) target from partner.
-        // The bot acts in its own interest only — it does NOT check whether the partner also
-        // benefits. The partner can counter-offer to ask for what they want. Near-monopoly
-        // partners are NOT skipped here: completing our own monopoly is worth the attempt.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            if (botPlayerIds.contains(other.playerId())) continue; // don't trade bot-to-bot (avoids infinite offer loops)
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             String botWantsFromPartner = findCriticalTargetProperty(state, botId, other.playerId());
             if (botWantsFromPartner != null) {
@@ -1079,7 +936,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Pass 2: P3 acquisition — pay cash (or offer an expendable) for a foothold property.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            if (botPlayerIds.contains(other.playerId())) continue; // don't trade bot-to-bot (avoids infinite offer loops)
             // Skip partners who have repeatedly declined bot-initiated offers
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             // Verify handleTradeEditing would actually find a target and afford an offer
@@ -1100,30 +956,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return false;
     }
 
-    /**
-     * Finds the highest-priority property in the partner's portfolio that the bot would benefit from.
-     *
-     * <p>Priority order:
-     * <ol>
-     *   <li>Street property that would complete the bot's monopoly (missing last piece)</li>
-     *   <li>Railroad, if bot already has at least one and partner has one to spare</li>
-     *   <li>Street property in any group where the bot has the most properties</li>
-     * </ol>
-     * All candidates must be unbuilt (no houses/hotels) and unmortgaged on the partner's side.
-     */
-    /**
-     * Like {@link #findStrategicTargetProperty} but skips any property already present in
-     * {@code alreadyRequested}. Used by the iterative counter loop to add a DIFFERENT bridging
-     * property each round; returns null once no new useful target remains (loop terminates).
-     */
+    // Finds the highest-priority property in the partner's portfolio that the bot would benefit from.
+    // Like {@link #findStrategicTargetProperty} but skips any property already present in {@code alreadyRequested}.
     private String findUnrequestedTarget(SessionState state, String botId, String partnerId,
                                          TradeSelectionState alreadyRequested) {
         java.util.Set<String> have = new java.util.HashSet<>(alreadyRequested.propertyIds());
         // Primary: the normal strategic pick, if not already on the offer.
         String primary = findStrategicTargetProperty(state, botId, partnerId);
         if (primary != null && !have.contains(primary)) return primary;
-        // Fallback: any unbuilt, unmortgaged partner property the bot has a foothold in, not yet
-        // requested — lets the bot keep sweetening a multi-piece deal across rounds.
+        // Fallback: any unbuilt, unmortgaged partner property the bot has a foothold in, not yet requested — lets the...
         return state.properties().stream()
                 .filter(p -> partnerId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
@@ -1172,9 +1013,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (railroadTarget != null) return railroadTarget;
         }
 
-        // Priority 2.5 (blocking): if the partner is ONE property short of completing their own
-        // monopoly, and they hold a tradeable piece of that group, acquire it to deny them the set.
-        // Denying an opponent a monopoly is worth a foothold even outside the bot's own groups.
+        // Priority 2.5 (blocking): if the partner is ONE property short of completing their own monopoly, and they ho...
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
             Integer gSize = SpotType.getNumberOfSpots(group);
@@ -1218,12 +1057,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return null;
     }
 
-    /**
-     * Extra cost added to {@code valueGiven} when the giving selection contains a property that
-     * would complete {@code partnerId}'s street monopoly. Mirrors the receiving-side completion
-     * bonus so the bot demands fair compensation for handing an opponent a monopoly.
-     */
-    /** True if {@code playerId} owns at least one full street monopoly. */
+    // Extra cost added to {@code valueGiven} when the giving selection contains a property that would complete {@...
+    // True if {@code playerId} owns at least one full street monopoly.
     private boolean playerHasMonopoly(SessionState state, String playerId) {
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
@@ -1237,14 +1072,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return false;
     }
 
-    /** True if any player OTHER than {@code botId} already owns a full street monopoly. */
+    // True if any player OTHER than {@code botId} already owns a full street monopoly.
     private boolean someoneElseHasMonopoly(SessionState state, String botId) {
         return state.players().stream()
                 .filter(p -> !p.playerId().equals(botId) && !p.bankrupt() && !p.eliminated())
                 .anyMatch(p -> playerHasMonopoly(state, p.playerId()));
     }
 
-    /** True if NO player owns any monopoly yet — the classic stalemate where nobody will trade. */
+    // True if NO player owns any monopoly yet — the classic stalemate where nobody will trade.
     private boolean noMonopoliesExist(SessionState state) {
         return state.players().stream()
                 .filter(p -> !p.bankrupt() && !p.eliminated())
@@ -1270,8 +1105,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                         .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
                         .sum();
                 int rawPenalty = groupPriceSum + cfg.tradeSetCompletionWeight();
-                // [Fix 3] If the game is stalemated (no monopolies yet and many turns have passed),
-                // halve the penalty so the bot stops being the reason no deal ever closes.
+                // [Fix 3] If the game is stalemated (no monopolies yet and many turns have passed), halve the penalty so the...
                 boolean stalemate = noMonopoliesExist(state)
                         && turnsSinceMonopolyChange >= STALEMATE_TURN_THRESHOLD;
                 penalty += stalemate ? (int)(rawPenalty * STALEMATE_GIFT_RELIEF) : rawPenalty;
@@ -1280,7 +1114,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return penalty;
     }
 
-    /** Returns true if acquiring {@code propId} would complete a street monopoly for {@code botId}. */
+    // Returns true if acquiring {@code propId} would complete a street monopoly for {@code botId}.
     private boolean isMonopolyCompletingTarget(SessionState state, String botId, String propId) {
         StreetType group = spotType(propId).streetType;
         if (group == null || group.placeType != PlaceType.STREET) return false;
@@ -1292,11 +1126,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return botOwns == groupSize - 1;
     }
 
-    /**
-     * True if giving away {@code selection} would break one of the bot's own COMPLETE street
-     * monopolies (the bot currently owns the whole group and the selection includes ≥1 of it).
-     * The bot should never dismantle a finished set for cash — decline such asks outright.
-     */
+    // True if giving away {@code selection} would break one of the bot's own COMPLETE street monopolies (the bot...
     private boolean givingBreaksOwnMonopoly(SessionState state, String botId, TradeSelectionState selection) {
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
@@ -1313,10 +1143,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return false;
     }
 
-    /**
-     * True if receiving {@code selection} would complete at least one of the bot's own street
-     * monopolies (the bot owns all-but-the-pieces-in-this-selection for some group).
-     */
+    // True if receiving {@code selection} would complete at least one of the bot's own street monopolies (the bot...
     private boolean completesOwnMonopoly(SessionState state, String botId, TradeSelectionState selection) {
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
@@ -1333,35 +1160,21 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return false;
     }
 
-    /**
-     * Fix 1 (win-win): finds a partner who holds a property the bot needs to complete a monopoly
-     * AND who needs a property the bot can give to complete THEIR monopoly. Returns the property
-     * the bot should request, or null if no mutually-beneficial pair exists with this partner.
-     */
+    // Fix 1 (win-win): finds a partner who holds a property the bot needs to complete a monopoly AND who needs a...
     private String findWinWinTargetProperty(SessionState state, String botId, String partnerId) {
-        // Does the bot hold something that completes the PARTNER's set? That's the sweetener that
-        // makes the partner say yes — the precondition for any genuine win-win.
+        // Does the bot hold something that completes the PARTNER's set? That's the sweetener that makes the partner s...
         boolean botCanCompletePartner = state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
                 .anyMatch(p -> wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()));
         if (!botCanCompletePartner) return null;
-        // The bot wants something back. Prefer a property that completes the bot's OWN set
-        // (findCriticalTargetProperty); if none, fall back to any strategic target the partner
-        // holds. This widens win-win deals to "you complete my set, I complete yours" even across
-        // different colours — the classic human deal that breaks stalemates.
+        // The bot wants something back.
         String botWants = findCriticalTargetProperty(state, botId, partnerId);
         if (botWants == null) botWants = findStrategicTargetProperty(state, botId, partnerId);
         return botWants;
     }
 
-    /**
-     * Fix 8 (bundling): if completing the bot's monopoly in the group of {@code primaryTarget}
-     * requires more than one property the partner holds, return ALL of the partner's tradeable
-     * properties in that group so the bot can request them as a single bundle instead of trickling
-     * one-at-a-time. Always includes {@code primaryTarget}. Returns a single-element list if the
-     * group only needs one piece.
-     */
+    // Fix 8 (bundling): if completing the bot's monopoly in the group of {@code primaryTarget} requires more than...
     private java.util.List<String> bundleTargetsForGroup(SessionState state, String botId,
                                                          String partnerId, String primaryTarget) {
         StreetType group = spotType(primaryTarget).streetType;
@@ -1383,13 +1196,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return partnerPiecesInGroup.isEmpty() ? List.of(primaryTarget) : partnerPiecesInGroup;
     }
 
-    /**
-     * Finds a high-priority target property (Priority 1: monopoly completion only).
-     * Unlike {@link #findStrategicTargetProperty}, this excludes railroad (P2) and foothold-group
-     * (P3) targets so that Pass-1 mutual swaps are only initiated when the bot would complete a
-     * color monopoly. Railroads are all equivalent, so swapping one for another yields zero benefit;
-     * they are better acquired via cash (Pass 2).
-     */
+    // Finds a high-priority target property (Priority 1: monopoly completion only).
     private String findCriticalTargetProperty(SessionState state, String botId, String partnerId) {
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
@@ -1410,28 +1217,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return null;
     }
 
-    /**
-     * Finds the best own property to include as a sweetener in a trade offer.
-     * Ranked by deadweight score: face_value × (1 − bot's group progress).
-     * A property the bot has no chance of completing into a monopoly, but that looks
-     * expensive on paper, is ideal — it costs the bot little strategically while making
-     * the offer attractive. Properties that would complete the partner's monopoly are
-     * excluded regardless of score.
-     *
-     * @param requestedPropId the property the bot is asking for. Any own property in the SAME
-     *        group (same street colour, or the same railroad/utility class) is excluded — swapping
-     *        like-for-like within a group yields no strategic benefit and looks nonsensical.
-     */
+    // Finds the best own property to include as a sweetener in a trade offer.
     private String findExpendableOwnProperty(SessionState state, String botId, String partnerId,
                                              String requestedPropId) {
         StreetType requestedGroup = requestedPropId != null ? spotType(requestedPropId).streetType : null;
         return state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
-                // Never offer a property from the SAME group the bot is requesting. This covers
-                // every case of pointless like-for-like swaps: railroad-for-railroad,
-                // utility-for-utility, and same-colour-street-for-same-colour. Offering a utility
-                // for a street (or vice versa) is still allowed — only same-group is excluded.
+                // Never offer a property from the SAME group the bot is requesting.
                 .filter(p -> requestedGroup == null || spotType(p.propertyId()).streetType != requestedGroup)
                 .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
                 .filter(p -> !wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
@@ -1441,11 +1234,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 .orElse(null);
     }
 
-    /**
-     * Deadweight score for offering a property: face_value × (1 − group_progress).
-     * High score = expensive-looking but strategically unimportant to the bot.
-     * group_progress = botOwnsInGroup / groupSize (0 if bot owns nothing else in the group).
-     */
+    // Deadweight score for offering a property: face_value × (1 − group_progress).
     private double deadweightScore(SessionState state, String botId, String propId) {
         StreetType group = spotType(propId).streetType;
         int facePrice = SpotType.valueOf(propId).getIntegerProperty("price");
@@ -1472,9 +1261,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return evaluateSelectionValue(selection, null);
     }
 
-    /** Returns the total estimated value of a trade selection.
-     *  Mortgaged properties are valued at half face price (their mortgage value),
-     *  since the recipient must spend ~55% of face price to unmortgage them. */
+    // Mortgaged properties are valued at half face price (their mortgage value), since the recipient must spend ~...
     private static int evaluateSelectionValue(TradeSelectionState selection, SessionState state) {
         int value = selection.moneyAmount();
         value += selection.jailCardCount() * 50;
@@ -1508,11 +1295,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return value;
     }
 
-    /**
-     * Context-aware trade evaluation that considers what the bot already owns.
-     * For STRONG bots uses {@link StrongBotConfig#tradeSetCompletionWeight} and
-     * {@link StrongBotConfig#tradeLiquidityWeight}; others use fixed ratios.
-     */
+    // Context-aware trade evaluation that considers what the bot already owns.
     private int evaluateSelectionContextual(SessionState state, String botId,
                                              TradeSelectionState selection, boolean receiving) {
         StrongBotConfig cfg = configFor(botId);
@@ -1526,15 +1309,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     .filter(p -> propId.equals(p.propertyId())).findFirst().orElse(null);
             boolean mortgaged = snap != null && snap.mortgaged();
             if (mortgaged) {
-                // A mortgaged property is worth its mortgage value (face/2) MINUS the unmortgage
-                // cost the new owner must pay (~10% premium) before it earns any rent. Without this
-                // the bot over-values mortgaged properties and can be fed them near full price.
+                // A mortgaged property is worth its mortgage value (face/2) MINUS the unmortgage cost the new owner must pay...
                 value += Math.max(0, facePrice / 2 - StrongBotStrategy.unmortgageCost(propId));
             } else {
                 value += facePrice;
                 // Built houses/hotels make a property far more valuable than its face price.
-                // Each house costs the group's house price; hotels are 5 house-units. Value the
-                // sunk building investment so the bot doesn't trade developed property for face.
                 if (snap != null && (snap.houseCount() > 0 || snap.hotelCount() > 0)) {
                     int housePrice = SpotType.valueOf(propId).getIntegerProperty("housePrice");
                     int buildingUnits = snap.houseCount() + snap.hotelCount() * 5;
@@ -1597,8 +1376,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Bid up to a config-based ceiling based on property value and set completion
         if (minBid > 0) {
             StrongBotConfig cfg = configFor(bidderId);
-            // Auction reserve is capped at dangerCashReserve — the full dynamic reserve (which
-            // can exceed 500 late game) is for purchase decisions, not competitive bidding.
+            // Auction reserve is capped at dangerCashReserve — the full dynamic reserve (which can exceed 500 late game)...
             int reserve = Math.min(dynamicReserve(state, bidderId), cfg.dangerCashReserve());
             String propId = auction.propertyId();
             int facePrice = propId != null
@@ -1657,14 +1435,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
     }
 
-    // -------------------------------------------------------------------------
     // Delay computation
-    // -------------------------------------------------------------------------
 
-    /**
-     * Computes a human-like delay before the bot acts, based on what the current state demands.
-     * A ±20 % random jitter is applied on top.
-     */
+    // Computes a human-like delay before the bot acts, based on what the current state demands.
     private long computeDelay(SessionState state) {
         long botDelayMs = Long.getLong("monopoly.bot.think.delay.ms", DEFAULT_BOT_DELAY_MS);
         if (botDelayMs == 0) return 0;  // instant mode (tests / system property = 0)
@@ -1743,27 +1516,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         };
     }
 
-    // -------------------------------------------------------------------------
     // Helpers
-    // -------------------------------------------------------------------------
 
-    /** Returns the bot config for the given player; falls back to defaults() if absent. */
+    // Returns the bot config for the given player; falls back to defaults() if absent.
     private StrongBotConfig configFor(String playerId) {
         return configs.getOrDefault(playerId, StrongBotConfig.defaults());
     }
 
-    /**
-     * Dynamic cash reserve that scales with board danger and opponent monopolies.
-     */
+    // Dynamic cash reserve that scales with board danger and opponent monopolies.
     private int dynamicReserve(SessionState state, String playerId) {
         return StrongBotStrategy.dynamicReserve(state, playerId, configFor(playerId));
     }
 
-    /**
-     * Unmortgages the highest-scored mortgaged property the bot can afford.
-     * STRONG: uses config weights (unmortgageAggression, colorGroupWeight, developmentBias).
-     * NORMAL: unmortgages cheapest mortgaged property in a complete group.
-     */
+    // Unmortgages the highest-scored mortgaged property the bot can afford.
     private boolean tryUnmortgageGreedy(SessionState state, String playerId) {
         PlayerSnapshot player = StrongBotStrategy.findPlayer(state, playerId);
         if (player == null) return false;
@@ -1784,19 +1549,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return result.accepted();
     }
 
-    /**
-     * Picks the best group to build on and buys one round of houses.
-     * STRONG: uses config weights (houseBuildAggression, hotelAversion, buildRoundCap,
-     * prioritizeThreeHouses, colorGroupWeight, developmentBias).
-     * NORMAL/EASY: simple even-build greedy.
-     */
+    // Picks the best group to build on and buys one round of houses.
     private boolean tryBuildGreedy(SessionState state, String playerId) {
         PlayerSnapshot player = StrongBotStrategy.findPlayer(state, playerId);
         if (player == null) return false;
         int reserve = dynamicReserve(state, playerId);
         StrongBotConfig cfg = configFor(playerId);
         // Adjust effective reserve by position: losing bot spends more freely, leader is cautious
-                int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
+        int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
 
         StreetType bestGroup = null;
         double bestScore = Double.NEGATIVE_INFINITY;
@@ -1817,17 +1577,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return result.accepted();
     }
 
-    /**
-     * Records a bot-initiated trade cancellation as a decline for the given partner.
-     * This prevents the bot from immediately re-proposing the same trade after it had
-     * to cancel due to convergence failure (counter-edit loop, insufficient funds, etc.).
-     * Without this, tradeDeclinesByPartnerId stays at 0 and the bot loops indefinitely.
-     */
+    // Records a bot-initiated trade cancellation as a decline for the given partner.
     private void recordBotCancelAsDecline(String botId, TradeState trade) {
         if (trade == null) return;
         String partnerId = botId.equals(trade.initiatorPlayerId())
                 ? trade.recipientPlayerId() : trade.initiatorPlayerId();
-        tradeDeclinesByPartnerId.merge(partnerId, 1, Integer::sum);
+        tradeDeclinesByPartnerId.merge(partnerId, 2, Integer::sum);
         log.debug("Bot {} recorded self-cancel as decline for partner {} (cumulative: {})",
                 botId.substring(0, 8), partnerId,
                 tradeDeclinesByPartnerId.get(partnerId));
@@ -1841,7 +1596,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return StrongBotStrategy.buildingLevel(p);
     }
 
-    /** Mirrors DomainDebtRemediationGateway even-selling rule: (level-1) >= (maxRest-1), i.e. level >= maxRest. */
+    // Mirrors DomainDebtRemediationGateway even-selling rule: (level-1) >= (maxRest-1), i.e. level >= maxRest.
     private static boolean evenSellEligible(SessionState state, PropertyStateSnapshot prop) {
         SpotType st = spotType(prop.propertyId());
         if (st.streetType.placeType != PlaceType.STREET) return true;
