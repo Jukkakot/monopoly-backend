@@ -225,16 +225,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             lastObservedTrade = null;
             return;
         }
-        // Decay (don't wipe) per-partner decline memory at each bot turn. Wiping it every turn let
-        // bots re-propose the same rejected trade endlessly (the bot-vs-bot loop). Decaying by one
-        // lets a partner be retried only after several turns have passed, not immediately.
+        // Decline memory persists for the whole game: once a partner has declined the bot's offers
+        // MAX_DECLINES_PER_PARTNER times, the bot gives up on that partner and won't keep proposing.
+        // This is what stops bots looping trades forever. (Not wiped or decayed per turn.)
         var turn = state.turn();
         if (turn != null && turn.phase() == TurnPhase.WAITING_FOR_ROLL
                 && botPlayerIds.contains(turn.activePlayerId())
                 && !turn.activePlayerId().equals(lastBotTurnStartId)) {
             lastBotTurnStartId = turn.activePlayerId();
-            tradeDeclinesByPartnerId.replaceAll((k, v) -> v > 0 ? v - 1 : 0);
-            tradeDeclinesByPartnerId.values().removeIf(v -> v <= 0);
             // [Fix 3] Track stalemate: count total monopolies on the board.
             int monopolyCount = (int) state.players().stream()
                     .filter(p -> !p.bankrupt() && !p.eliminated())
@@ -264,7 +262,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 && prevTrade.decisionRequiredFromPlayerId() != null) {
             String partner = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId())
                     ? prevTrade.recipientPlayerId() : prevTrade.initiatorPlayerId();
-            tradeDeclinesByPartnerId.merge(partner, 2, Integer::sum);
+            tradeDeclinesByPartnerId.merge(partner, 1, Integer::sum);
             log.debug("Bot trade declined by {} (cumulative: {})", partner,
                     tradeDeclinesByPartnerId.get(partner));
             // Record what was offered so we require a strictly better offer next time
@@ -919,7 +917,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // repeated declines so it can't loop pathologically.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
-            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER * 3) continue;
+            if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             if (findWinWinTargetProperty(state, botId, other.playerId()) != null) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
                 if (result.accepted()) return true;
@@ -1586,7 +1584,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (trade == null) return;
         String partnerId = botId.equals(trade.initiatorPlayerId())
                 ? trade.recipientPlayerId() : trade.initiatorPlayerId();
-        tradeDeclinesByPartnerId.merge(partnerId, 2, Integer::sum);
+        tradeDeclinesByPartnerId.merge(partnerId, 1, Integer::sum);
         log.debug("Bot {} recorded self-cancel as decline for partner {} (cumulative: {})",
                 botId.substring(0, 8), partnerId,
                 tradeDeclinesByPartnerId.get(partnerId));
