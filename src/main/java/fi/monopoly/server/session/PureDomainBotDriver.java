@@ -56,6 +56,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // Maximum number of state versions the bot is allowed to advance beyond the last client-acknowledged version.
     private static final int MAX_CLIENT_LAG_VERSIONS = 5;
 
+    // Watchdog: how many consecutive 5 s ticks the same actionable state must persist while no viewer
+    // is connected before the watchdog force-recovers it. Guards against reacting to normal between-action
+    // pacing while still rescuing a bot whose SSE viewer dropped mid-action.
+    private static final int WATCHDOG_NO_VIEWER_STALL_TICKS = 2;
+
     private final SessionCommandPublisher publisher;
     private final String sessionId;
     private final Set<String> botPlayerIds;
@@ -88,6 +93,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // Last money amount the bot offered per (partnerId -> propertyId) that was declined.
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, Integer>>
             lastDeclinedOfferAmount = new java.util.concurrent.ConcurrentHashMap<>();
+    // Watchdog stall tracking — only read/written on the single scheduler thread, so no synchronisation needed.
+    private long watchdogStuckVersion = Long.MIN_VALUE;
+    private int watchdogStuckTicks = 0;
 
     private PureDomainBotDriver(
             SessionCommandPublisher publisher,
@@ -100,19 +108,58 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         this.configs = Map.copyOf(configs);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("bot-driver-" + sessionId.substring(0, 8), 0).factory());
-        // Watchdog: fires every 5 s to catch cases where the bot missed an action due to lag-gating, rapid-fire snaps...
+        // Watchdog: fires every 5 s to recover a bot that has stopped acting even though the game still
+        // needs it to — e.g. it paused on the client-lag gate mid-trade-edit and the awaited ACK never
+        // arrived, or the SSE viewer dropped (or was miscounted) while the player was still on the screen.
+        //
+        // Recovery is split by viewer presence:
+        //   • viewers present → retrigger immediately, as before (fast recovery while someone is watching).
+        //   • no viewers      → this previously returned early and gave up, which is exactly the failure
+        //     behind the "Odotetaan kaupan vastausta…" freeze: a mobile client whose SSE silently dropped
+        //     leaves viewerCount at 0, so nothing ever unstuck the bot. We now still recover, but only once
+        //     the same actionable state has persisted unchanged for WATCHDOG_NO_VIEWER_STALL_TICKS ticks, so
+        //     we react to genuine stalls rather than normal between-action pacing. This cannot run an
+        //     abandoned game away: needsBotAction() is false on a human's turn, so headless progress halts
+        //     there, and idle sessions are reaped by the registry TTL regardless.
         this.scheduler.scheduleAtFixedRate(() -> {
             try {
-                if (!viewerGatingEnabled || viewerCount.get() == 0) return;
+                if (!viewerGatingEnabled) return;
                 if (pendingAction.get()) return;
                 SessionState s = publisher.currentState();
                 if (s == null || s.status() == SessionStatus.GAME_OVER
-                        || s.status() == SessionStatus.LOBBY) return;
-                if (!needsBotAction(s)) return;
+                        || s.status() == SessionStatus.LOBBY
+                        || !needsBotAction(s)) {
+                    // Not an actionable bot state (game over, lobby, or a human's turn) — clear stall tracking.
+                    watchdogStuckVersion = Long.MIN_VALUE;
+                    watchdogStuckTicks = 0;
+                    return;
+                }
+
                 ClientSessionSnapshot snap = publisher.currentSnapshot();
-                long lag = snap != null ? snap.version() - latestClientVersion.get() : 0;
-                log.info("Bot watchdog: retriggering for session {} (lag {})", sessionId.substring(0, 8), lag);
-                retrigger();
+                long version = snap != null ? snap.version() : -1;
+                if (version == watchdogStuckVersion) {
+                    watchdogStuckTicks++;
+                } else {
+                    watchdogStuckVersion = version;
+                    watchdogStuckTicks = 1;
+                }
+
+                if (viewerCount.get() > 0) {
+                    long lag = version - latestClientVersion.get();
+                    log.info("Bot watchdog: retriggering for session {} (lag {})",
+                            sessionId.substring(0, 8), lag);
+                    retrigger();
+                    return;
+                }
+
+                // No connected viewers: only recover a genuine stall (state unchanged across several ticks).
+                // This is the dropped-SSE case that used to deadlock indefinitely.
+                if (watchdogStuckTicks >= WATCHDOG_NO_VIEWER_STALL_TICKS) {
+                    log.warn("Bot watchdog: recovering stalled bot with no connected viewers "
+                                    + "(session {}, stuck {} ticks at version {}) — likely a dropped SSE connection",
+                            sessionId.substring(0, 8), watchdogStuckTicks, version);
+                    retrigger();
+                }
             } catch (Exception e) {
                 log.warn("Bot watchdog threw", e);
             }
