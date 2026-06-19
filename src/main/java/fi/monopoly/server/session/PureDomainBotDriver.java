@@ -54,7 +54,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private static final double CATCHUP_DISCOUNT = 0.40;
 
     // Maximum number of state versions the bot is allowed to advance beyond the last client-acknowledged version.
-    private static final int MAX_CLIENT_LAG_VERSIONS = 5;
+    private static final int MAX_CLIENT_LAG_VERSIONS = 10;
 
     // Watchdog: how many consecutive 5 s ticks the same actionable state must persist while no viewer
     // is connected before the watchdog force-recovers it. Guards against reacting to normal between-action
@@ -245,7 +245,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     public void onClientAck(long version) {
         long prev = latestClientVersion.getAndUpdate(v -> Math.max(v, version));
         if (prev < version) {
-            retrigger();
+            // Resume at normal pace, not 0 ms: lets the client ack on receipt (not only on
+            // animation-drain) without the bot outrunning its own pacing. pendingAction guards.
+            SessionState state = publisher.currentState();
+            if (state != null && needsBotAction(state) && pendingAction.compareAndSet(false, true)) {
+                scheduler.schedule(this::takeStep, computeDelay(state), TimeUnit.MILLISECONDS);
+            }
         }
     }
 
