@@ -1518,6 +1518,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // Trade decision: evaluating someone else's offer — most deliberate action
         if (state.tradeState() != null) {
             TradeState trade = state.tradeState();
+            // Bot-to-bot trades have no human party to pace for — the human only spectates them,
+            // so resolve them quickly instead of applying the deliberate "reading/editing" delays
+            // (which exist so a human can follow a trade they're actually part of).
+            boolean bothBots = trade.initiatorPlayerId() != null && trade.recipientPlayerId() != null
+                    && botPlayerIds.contains(trade.initiatorPlayerId())
+                    && botPlayerIds.contains(trade.recipientPlayerId());
+            if (bothBots) {
+                return 250;
+            }
             if (trade.decisionRequiredFromPlayerId() != null) {
                 return 2900;  // reading the offer, weighing it
             }
