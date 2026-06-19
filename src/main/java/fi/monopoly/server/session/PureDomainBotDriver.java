@@ -245,11 +245,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     public void onClientAck(long version) {
         long prev = latestClientVersion.getAndUpdate(v -> Math.max(v, version));
         if (prev < version) {
-            // Resume at normal pace, not 0 ms: lets the client ack on receipt (not only on
-            // animation-drain) without the bot outrunning its own pacing. pendingAction guards.
+            // An ack is reliable proof a viewer is present and caught up — more reliable than the
+            // SSE connect/disconnect counter, which misses viewers that connected during the lobby
+            // phase (before the bot driver existed). So drive the bot off the ack via the
+            // gate-bypassing forced step, paced by computeDelay so it can't outrun itself or storm.
+            // When unwatched there are no acks, so the bot still pauses (watchdog only). pendingAction guards.
             SessionState state = publisher.currentState();
             if (state != null && needsBotAction(state) && pendingAction.compareAndSet(false, true)) {
-                scheduler.schedule(this::takeStep, computeDelay(state), TimeUnit.MILLISECONDS);
+                scheduler.schedule(this::takeStepForced, computeDelay(state), TimeUnit.MILLISECONDS);
             }
         }
     }
