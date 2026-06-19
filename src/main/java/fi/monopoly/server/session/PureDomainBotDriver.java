@@ -53,8 +53,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // monopoly and the bot does not — getting our own set becomes urgent, accept worse deals.
     private static final double CATCHUP_DISCOUNT = 0.40;
 
-    // Maximum number of state versions the bot is allowed to advance beyond the last client-acknowledged version.
-    private static final int MAX_CLIENT_LAG_VERSIONS = 10;
+    // Version-lag throttle is effectively disabled: client presence is now gated on recent acks
+    // (see viewerPresent), which pauses a dead/stalled client without throttling a watched bot
+    // mid-trade. The client queues snapshots and drains them in order, so the bot may run ahead.
+    private static final int MAX_CLIENT_LAG_VERSIONS = Integer.MAX_VALUE;
+
+    // A client ack within this window counts as "a viewer is present", independent of the SSE
+    // connect counter — which misses viewers that connected during the lobby, before the driver
+    // existed, leaving viewerCount stuck at 0 for the whole game.
+    private static final long VIEWER_PRESENCE_ACK_GRACE_MS = 15_000L;
 
     // Watchdog: how many consecutive 5 s ticks the same actionable state must persist while no viewer
     // is connected before the watchdog force-recovers it. Guards against reacting to normal between-action
@@ -71,6 +78,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final AtomicInteger viewerCount = new AtomicInteger(0);
     // The highest snapshot version the client has explicitly acknowledged. -1 = no ACK received yet.
     private final AtomicLong latestClientVersion = new AtomicLong(-1);
+    // Wall-clock time (ms) of the most recent client ack — a robust "viewer present" signal.
+    private volatile long lastClientAckAtMillis = 0L;
     // Disabled by default so unit tests work without simulating SSE connections.
     private volatile boolean viewerGatingEnabled = false;
     private volatile double speedMultiplier = 1.0;
@@ -144,7 +153,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     watchdogStuckTicks = 1;
                 }
 
-                if (viewerCount.get() > 0) {
+                if (viewerPresent()) {
                     long lag = version - latestClientVersion.get();
                     log.info("Bot watchdog: retriggering for session {} (lag {})",
                             sessionId.substring(0, 8), lag);
@@ -225,6 +234,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         dispatchGreedy(state);
     }
 
+    // True if someone is watching: either an SSE viewer is counted, or the client acked recently.
+    // The ack-based signal is essential because lobby-phase connects are not counted (driver was null then).
+    private boolean viewerPresent() {
+        return viewerCount.get() > 0
+                || System.currentTimeMillis() - lastClientAckAtMillis < VIEWER_PRESENCE_ACK_GRACE_MS;
+    }
+
     // Called when an SSE viewer connects to this session.
     public void onSseConnected() {
         if (viewerCount.incrementAndGet() == 1) {
@@ -243,6 +259,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
     // Called when the client acknowledges it has processed a snapshot at the given version.
     public void onClientAck(long version) {
+        lastClientAckAtMillis = System.currentTimeMillis();
         long prev = latestClientVersion.getAndUpdate(v -> Math.max(v, version));
         if (prev < version) {
             // An ack is reliable proof a viewer is present and caught up — more reliable than the
@@ -341,8 +358,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (!needsBotAction(state)) {
             return;
         }
-        if (viewerGatingEnabled && viewerCount.get() == 0) {
-            return;  // no SSE viewers — pause until someone connects
+        if (viewerGatingEnabled && !viewerPresent()) {
+            return;  // nobody watching (no viewer, no recent ack) — pause until someone connects/acks
         }
         if (viewerGatingEnabled && snapshot.version() - latestClientVersion.get() > MAX_CLIENT_LAG_VERSIONS) {
             return;  // client is too far behind — wait for ACK before advancing
@@ -366,8 +383,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (!needsBotAction(state)) {
             return;
         }
-        if (viewerGatingEnabled && viewerCount.get() == 0) {
-            return;  // no SSE viewers — pause until someone connects
+        if (viewerGatingEnabled && !viewerPresent()) {
+            return;  // nobody watching (no viewer, no recent ack) — pause until someone connects/acks
         }
         ClientSessionSnapshot current = publisher.currentSnapshot();
         if (viewerGatingEnabled && current != null
