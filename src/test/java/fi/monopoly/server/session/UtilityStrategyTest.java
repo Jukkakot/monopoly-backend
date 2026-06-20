@@ -1,12 +1,16 @@
 package fi.monopoly.server.session;
 
+import fi.monopoly.domain.session.AuctionState;
+import fi.monopoly.domain.session.AuctionStatus;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.server.bot.BotMemory;
 import fi.monopoly.server.bot.Intent;
 import fi.monopoly.utils.RandomSource;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -72,6 +76,45 @@ class UtilityStrategyTest {
         Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
         assertInstanceOf(Intent.Unmortgage.class, intent,
                 "should choose to unmortgage the mortgaged property in a complete group");
+    }
+
+    @Test
+    void bidsInAuctionWhenPropertyIsAffordableAndValuable() {
+        // player-1 has 1 500 € and is the current bidder in an auction for O1 (€180 face price)
+        // min bid = 100, which is well below face price — bot should bid
+        var baseState = TestSessionState.twoPlayerGame()
+                .withCash("player-1", 1500)
+                .withPhase(TurnPhase.WAITING_FOR_AUCTION)
+                .build();
+        AuctionState auction = new AuctionState(
+                "auction-1", "O1", "player-2", "player-1", "player-2",
+                90, 100,
+                Set.of(), List.of("player-1", "player-2"),
+                AuctionStatus.ACTIVE, 0, null);
+        var state = baseState.toBuilder().auctionState(auction).build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+        assertInstanceOf(Intent.Bid.class, intent,
+                "bot with 1 500 € should bid in auction when property is affordable");
+    }
+
+    @Test
+    void passesAuctionWhenBrokeAfterReserve() {
+        // player-1 has only 200 €; dynamic reserve likely ≥ 200 → can't afford min bid
+        var baseState = TestSessionState.twoPlayerGame()
+                .withCash("player-1", 200)
+                .withPhase(TurnPhase.WAITING_FOR_AUCTION)
+                .build();
+        AuctionState auction = new AuctionState(
+                "auction-1", "O1", "player-2", "player-1", "player-2",
+                90, 100,
+                Set.of(), List.of("player-1", "player-2"),
+                AuctionStatus.ACTIVE, 0, null);
+        var state = baseState.toBuilder().auctionState(auction).build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+        assertInstanceOf(Intent.PassAuction.class, intent,
+                "bot with 200 € below reserve should pass the auction");
     }
 
     @Test

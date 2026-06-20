@@ -2,6 +2,8 @@ package fi.monopoly.server.session;
 
 import fi.monopoly.domain.decision.PendingDecision;
 import fi.monopoly.domain.decision.PropertyPurchaseDecisionPayload;
+import fi.monopoly.domain.session.AuctionState;
+import fi.monopoly.domain.session.AuctionStatus;
 import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
 import fi.monopoly.domain.session.SessionState;
@@ -72,6 +74,12 @@ public final class UtilityStrategy implements BotStrategy {
         if (isEndTurnManagementOpportunity(state, botId)) {
             Intent mgmtIntent = decideEndTurnManagement(state, botId, memory);
             if (mgmtIntent != null) return mgmtIntent;
+        }
+
+        // ---- Phase 4.4: handle auction bidding via utility model -------------
+        if (isAuctionOpportunity(state, botId)) {
+            Intent auctionIntent = decideAuction(state, botId, memory, rng);
+            if (auctionIntent != null) return auctionIntent;
         }
 
         // ---- All other decisions: delegate to PureDomainStrategy -------------
@@ -192,6 +200,79 @@ public final class UtilityStrategy implements BotStrategy {
         }
 
         return bestIntent;
+    }
+
+    // -------------------------------------------------------------------------
+    // Auction bid decision (Phase 4.4)
+    // -------------------------------------------------------------------------
+
+    private static boolean isAuctionOpportunity(SessionState state, String botId) {
+        AuctionState auction = state.auctionState();
+        if (auction == null) return false;
+        if (auction.status() == AuctionStatus.WON_PENDING_RESOLUTION) return false;
+        return botId.equals(auction.currentActorPlayerId());
+    }
+
+    private Intent decideAuction(SessionState state, String botId, BotMemory memory, RandomSource rng) {
+        AuctionState auction = state.auctionState();
+        if (auction == null) return null;
+        if (auction.propertyId() == null) return null;
+
+        String propId   = auction.propertyId();
+        int    minBid   = auction.minimumNextBid();
+        int    facePrice = AuctionConsiderations.facePrice(propId);
+        if (facePrice <= 0) return null;
+
+        BotParams params  = paramsFor(botId);
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, botId);
+        int cash = player != null ? player.cash() : 0;
+        int reserve = StrongBotStrategy.dynamicReserve(state, botId, StrongBotConfig.defaults());
+
+        // Score at the minimum bid to determine whether we're willing to bid at all
+        CandidateAction bidAction = new CandidateAction.AuctionBid(propId, minBid);
+        DecisionContext ctx = new DecisionContext(state, botId, memory, params, bidAction);
+        double score = Consideration.combine(AuctionConsiderations.BID_CONSIDERATIONS, ctx);
+
+        double passBaseline = params.weight("bid_pass_baseline", 0.15);
+        if (score <= passBaseline) {
+            return new Intent.PassAuction(auction.auctionId());
+        }
+
+        // Ceiling is personality-based (how far above face price we'll go), not score-based.
+        // Score already determined we want to bid; aggression sets the price limit.
+        double aggression = params.weight("bid_aggression", 1.0);
+        int ceiling = (int)(facePrice * aggression);
+        int maxAffordable = cash - reserve;
+        int maxBid = Math.min(ceiling, maxAffordable);
+
+        if (maxBid < minBid) {
+            // Can't afford even minimum — but if the property is mortgageable we still gain value
+            int mortgageFloor = facePrice / 2;
+            if (minBid <= mortgageFloor && cash >= minBid) {
+                return new Intent.Bid(auction.auctionId(), minBid);
+            }
+            return new Intent.PassAuction(auction.auctionId());
+        }
+
+        // Avoid over-bidding when there's no competition
+        java.util.Set<String> active = new java.util.HashSet<>(auction.eligiblePlayerIds());
+        active.removeAll(auction.passedPlayerIds());
+        active.remove(botId);
+        boolean noCompetition = active.isEmpty() || active.stream()
+                .allMatch(id -> {
+                    PlayerSnapshot p = StrongBotStrategy.findPlayer(state, id);
+                    return p == null || p.cash() < 2 * minBid;
+                });
+        if (noCompetition) {
+            return new Intent.Bid(auction.auctionId(), minBid);
+        }
+
+        // Bid with some randomised headroom so opponents can't predict our ceiling
+        int headroom = maxBid - minBid;
+        double factor = 0.6 + rng.nextDouble() * 0.8;
+        int extra = ((int)(headroom / 3.0 * factor) / 10) * 10;
+        int bid = Math.min(maxBid, minBid + Math.max(10, extra));
+        return new Intent.Bid(auction.auctionId(), bid);
     }
 
     // -------------------------------------------------------------------------

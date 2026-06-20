@@ -127,6 +127,38 @@ public record BotParams(
         double unmortgageBaseline = 0.25 + (1.0 - p.aggression()) * 0.15;
         w.put("unmortgage_end_turn_baseline", unmortgageBaseline);
 
+        // ---- Auction bid decision -------------------------------------------
+        // Veto: can't afford minimum bid (input = cash - reserve - minBid)
+        w.put("bid_affordability", 1.0);
+        c.put("bid_affordability", Curve.veto(0.0));
+
+        // Value ratio: score rises as bid drops below face price (all weights = 1.0 so curves drive the score)
+        w.put("bid_value_ratio", 1.0);
+        c.put("bid_value_ratio", Curve.linear(1.0, 0.0));  // input = 1 - bid/facePrice
+
+        // Set completion: neutral (0.5) when not completing, bonus (1.0) when completing.
+        // Personality shifts the curve via the "neutral" value rather than the weight.
+        double bidCompletionNeutral = 0.35 + p.monopolyAppetite() * 0.25;  // 0.475 balanced, 0.55 aggressive
+        w.put("bid_set_completion", 1.0);
+        c.put("bid_set_completion", Curve.step(0.5, bidCompletionNeutral, 1.0));
+
+        // Opponent blocking: neutral when not blocking, bonus when we'd prevent opponent monopoly
+        double bidBlockingNeutral = 0.35 + p.aggression() * 0.20;  // 0.45 balanced, 0.52 aggressive
+        w.put("bid_opponent_blocking", 1.0);
+        c.put("bid_opponent_blocking", Curve.step(0.5, bidBlockingNeutral, 1.0));
+
+        // Group ROI — linear from 0 to 1 based on published Markov ROI rank
+        w.put("bid_group_roi", 1.0);
+        c.put("bid_group_roi", Curve.linear(1.0, 0.0));
+
+        // Bid aggression multiplier: face_price × bidAggression = bid ceiling
+        double bidAggression = 0.85 + p.aggression() * 0.30 + p.monopolyAppetite() * 0.15;
+        w.put("bid_aggression", bidAggression);
+
+        // Bid pass baseline: minimum combined score required to place any bid
+        double bidPassBaseline = 0.08 + (1.0 - p.aggression()) * 0.10;
+        w.put("bid_pass_baseline", bidPassBaseline);
+
         return new BotParams(id, Map.copyOf(w), Map.copyOf(c), p);
     }
 

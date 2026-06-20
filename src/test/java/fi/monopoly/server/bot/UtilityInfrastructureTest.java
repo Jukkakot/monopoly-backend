@@ -202,6 +202,18 @@ class UtilityInfrastructureTest {
     }
 
     @Test
+    void defaultParamsHaveRequiredAuctionCurves() {
+        BotParams params = BotParams.defaults();
+        assertNotNull(params.curve("bid_affordability"));
+        assertNotNull(params.curve("bid_value_ratio"));
+        assertNotNull(params.curve("bid_set_completion"));
+        assertNotNull(params.curve("bid_opponent_blocking"));
+        assertNotNull(params.curve("bid_group_roi"));
+        assertTrue(params.weight("bid_aggression", 0) > 0);
+        assertTrue(params.weight("bid_pass_baseline", 0) > 0);
+    }
+
+    @Test
     void aggressiveParamsHaveLowerAuctionBaseline() {
         BotParams aggressive = BotParams.aggressive();
         BotParams cautious   = BotParams.cautious();
