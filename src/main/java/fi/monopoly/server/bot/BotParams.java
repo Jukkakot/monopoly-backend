@@ -81,6 +81,29 @@ public record BotParams(
         double buyThreshold = 0.20 + p.liquidityPreference() * 0.15;
         w.put("buy_threshold", buyThreshold);
 
+        // ---- Build-houses decision ------------------------------------------
+        // Veto: can't afford → 0
+        w.put("build_affordability", 1.0);
+        c.put("build_affordability", Curve.veto(0.0));  // input = cash_after_build
+
+        // Reserve margin after building
+        double buildReserveSteepness = 1.5 + (p.riskTolerance() - 0.5) * 2.0;
+        w.put("build_reserve_margin", 1.0);
+        c.put("build_reserve_margin", Curve.logistic(0.0, buildReserveSteepness));
+
+        // ROI rank of the color group
+        double buildRoiWeight = 0.3 + p.monopolyAppetite() * 0.4;
+        w.put("build_group_roi", buildRoiWeight);
+        c.put("build_group_roi", Curve.linear(1.0, 0.0));
+
+        // Level efficiency: input is already normalised [0,1] by BuildConsiderations
+        w.put("build_level_efficiency", 1.0);
+        c.put("build_level_efficiency", Curve.identity());
+
+        // Baseline for comparing build vs. end-turn (lower → builds more aggressively)
+        double buildBaseline = 0.15 + (1.0 - p.aggression()) * 0.15;
+        w.put("build_end_turn_baseline", buildBaseline);
+
         return new BotParams(id, Map.copyOf(w), Map.copyOf(c), p);
     }
 

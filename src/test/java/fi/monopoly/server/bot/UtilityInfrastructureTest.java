@@ -172,13 +172,23 @@ class UtilityInfrastructureTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void defaultParamsHaveRequiredCurves() {
+    void defaultParamsHaveRequiredBuyCurves() {
         BotParams params = BotParams.defaults();
         assertNotNull(params.curve("affordability"));
         assertNotNull(params.curve("reserve_margin"));
         assertNotNull(params.curve("set_completion"));
         assertNotNull(params.curve("set_progress"));
         assertNotNull(params.curve("property_roi"));
+    }
+
+    @Test
+    void defaultParamsHaveRequiredBuildCurves() {
+        BotParams params = BotParams.defaults();
+        assertNotNull(params.curve("build_affordability"));
+        assertNotNull(params.curve("build_reserve_margin"));
+        assertNotNull(params.curve("build_group_roi"));
+        assertNotNull(params.curve("build_level_efficiency"));
+        assertTrue(params.weight("build_end_turn_baseline", 0) > 0);
     }
 
     @Test

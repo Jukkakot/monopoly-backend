@@ -2,9 +2,13 @@ package fi.monopoly.server.session;
 
 import fi.monopoly.domain.decision.PendingDecision;
 import fi.monopoly.domain.decision.PropertyPurchaseDecisionPayload;
+import fi.monopoly.domain.session.PlayerSnapshot;
+import fi.monopoly.domain.session.PropertyStateSnapshot;
 import fi.monopoly.domain.session.SessionState;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.server.bot.*;
+import fi.monopoly.types.SpotType;
+import fi.monopoly.types.StreetType;
 import fi.monopoly.utils.RandomSource;
 
 import java.util.Map;
@@ -60,6 +64,12 @@ public final class UtilityStrategy implements BotStrategy {
             if (utilityIntent != null) return utilityIntent;
         }
 
+        // ---- Phase 4.1: handle build decision via utility model -------------
+        if (isBuildOpportunity(state, botId)) {
+            Intent buildIntent = decideBuild(state, botId, memory);
+            if (buildIntent != null) return buildIntent;
+        }
+
         // ---- All other decisions: delegate to PureDomainStrategy -------------
         return delegate.decide(state, botId, memory, rng);
     }
@@ -101,6 +111,65 @@ public final class UtilityStrategy implements BotStrategy {
             return new Intent.BuyProperty(decisionId, propId);
         }
         return new Intent.DeclineProperty(decisionId, propId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Build decision (Phase 4.1)
+    // -------------------------------------------------------------------------
+
+    private static boolean isBuildOpportunity(SessionState state, String botId) {
+        if (state.turn() == null) return false;
+        if (state.turn().phase() != TurnPhase.WAITING_FOR_END_TURN) return false;
+        if (state.tradeState() != null) return false;
+        return botId.equals(state.turn().activePlayerId());
+    }
+
+    private Intent decideBuild(SessionState state, String botId, BotMemory memory) {
+        BotParams params = paramsFor(botId);
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, botId);
+        if (player == null) return null;
+
+        double bestScore = params.weight("build_end_turn_baseline", 0.20);
+        String bestPropId = null;
+
+        for (StreetType group : StrongBotStrategy.completedColorGroups(state, botId)) {
+            int maxLevel = StrongBotStrategy.maxLevelInGroup(state, botId, group);
+            if (maxLevel >= StrongBotConfig.defaults().buildRoundCap()) continue;
+
+            // Estimate cost of one build round for this group
+            PropertyStateSnapshot sampleProp = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()))
+                    .filter(p -> StrongBotStrategy.spotType(p.propertyId()).streetType == group)
+                    .findFirst().orElse(null);
+            if (sampleProp == null) continue;
+
+            int housePrice;
+            try {
+                housePrice = SpotType.valueOf(sampleProp.propertyId()).getIntegerProperty("housePrice");
+            } catch (Exception e) {
+                continue;
+            }
+
+            if (!StrongBotStrategy.canAffordBuildRound(state, player, group,
+                    StrongBotStrategy.dynamicReserve(state, botId, StrongBotConfig.defaults()))) {
+                continue;
+            }
+
+            PropertyStateSnapshot target = StrongBotStrategy.findBuildTarget(state, botId, group);
+            if (target == null) continue;
+
+            CandidateAction buildAction = new CandidateAction.BuildHouses(
+                    target.propertyId(), housePrice, maxLevel);
+            DecisionContext ctx = new DecisionContext(state, botId, memory, params, buildAction);
+            double score = Consideration.combine(BuildConsiderations.BUILD_CONSIDERATIONS, ctx);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestPropId = target.propertyId();
+            }
+        }
+
+        return bestPropId != null ? new Intent.BuildHouses(bestPropId) : null;
     }
 
     // -------------------------------------------------------------------------

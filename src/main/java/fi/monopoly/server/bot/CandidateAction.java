@@ -12,6 +12,8 @@ package fi.monopoly.server.bot;
 public sealed interface CandidateAction permits
         CandidateAction.BuyProperty,
         CandidateAction.DeclineProperty,
+        CandidateAction.BuildHouses,
+        CandidateAction.EndTurn,
         CandidateAction.AuctionBid,
         CandidateAction.AuctionPass {
 
@@ -20,6 +22,18 @@ public sealed interface CandidateAction permits
 
     /** Decline to buy — triggers an auction at the starting bid. */
     record DeclineProperty(String propertyId) implements CandidateAction {}
+
+    /**
+     * Build one house/hotel round on the property in {@code propertyId}'s color group.
+     *
+     * @param propertyId  the specific property to build on
+     * @param buildCost   cost of one house for this group
+     * @param currentMaxLevel maximum current house count in the group (0–5)
+     */
+    record BuildHouses(String propertyId, int buildCost, int currentMaxLevel) implements CandidateAction {}
+
+    /** End the turn without taking a management action. Baseline for end-turn comparisons. */
+    record EndTurn() implements CandidateAction {}
 
     /** Place a bid of {@code amount} in an active auction. */
     record AuctionBid(String propertyId, int amount) implements CandidateAction {}
