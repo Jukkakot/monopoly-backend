@@ -7,6 +7,10 @@ import fi.monopoly.domain.session.AuctionStatus;
 import fi.monopoly.domain.session.PlayerSnapshot;
 import fi.monopoly.domain.session.PropertyStateSnapshot;
 import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.domain.session.TradeOfferState;
+import fi.monopoly.domain.session.TradeSelectionState;
+import fi.monopoly.domain.session.TradeState;
+import fi.monopoly.domain.session.TradeStatus;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.server.bot.*;
 import fi.monopoly.types.SpotType;
@@ -62,8 +66,16 @@ public final class UtilityStrategy implements BotStrategy {
     @Override
     public String name() { return "utility-v1"; }
 
+    private static final int MAX_COUNTERS_PER_TRADE = 2;
+
     @Override
     public Intent decide(SessionState state, String botId, BotMemory memory, RandomSource rng) {
+        // ---- Phase 4.5: handle trade response via utility model --------------
+        if (isTradeResponseOpportunity(state, botId)) {
+            Intent tradeIntent = decideTradeResponseUtility(state, botId, memory);
+            if (tradeIntent != null) return tradeIntent;
+        }
+
         // ---- Phase 3: handle buy-vs-auction via utility model ----------------
         if (isBuyDecision(state, botId)) {
             Intent utilityIntent = decidePurchase(state, botId, memory, rng);
@@ -84,6 +96,55 @@ public final class UtilityStrategy implements BotStrategy {
 
         // ---- All other decisions: delegate to PureDomainStrategy -------------
         return delegate.decide(state, botId, memory, rng);
+    }
+
+    // -------------------------------------------------------------------------
+    // Trade response decision (Phase 4.5)
+    // -------------------------------------------------------------------------
+
+    private static boolean isTradeResponseOpportunity(SessionState state, String botId) {
+        if (state.tradeState() == null) return false;
+        TradeState trade = state.tradeState();
+        // Counter-editing and trade-editing are still delegated to PureDomainStrategy
+        if (trade.status() == TradeStatus.COUNTERED && botId.equals(trade.editingPlayerId())) return false;
+        if (trade.status() == TradeStatus.EDITING && botId.equals(trade.editingPlayerId())) return false;
+        return botId.equals(trade.decisionRequiredFromPlayerId());
+    }
+
+    private Intent decideTradeResponseUtility(SessionState state, String botId, BotMemory memory) {
+        TradeState trade = state.tradeState();
+        TradeOfferState offer = trade.currentOffer();
+        String tradeId = trade.tradeId();
+
+        boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
+        String partnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
+
+        TradeSelectionState myReceiving = botIsRecipient
+                ? offer.offeredToRecipient() : offer.requestedFromRecipient();
+        TradeSelectionState myGiving    = botIsRecipient
+                ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+
+        BotParams params = paramsFor(botId);
+        CandidateAction action = new CandidateAction.AcceptTrade(myReceiving, myGiving, partnerId);
+        DecisionContext ctx = new DecisionContext(state, botId, memory, params, action);
+        double score = Consideration.combine(TradeConsiderations.ACCEPT_CONSIDERATIONS, ctx);
+
+        double acceptBaseline  = params.weight("trade_accept_baseline",  0.40);
+        double counterBaseline = params.weight("trade_counter_baseline", 0.175);
+
+        long counterCount = trade.history().stream()
+                .filter(e -> "COUNTERED".equals(e.actionType())).count();
+
+        if (score >= acceptBaseline) {
+            return new Intent.RespondToTrade(Intent.TradeResponse.ACCEPT, tradeId);
+        }
+        if (score >= counterBaseline && counterCount < MAX_COUNTERS_PER_TRADE) {
+            return new Intent.RespondToTrade(Intent.TradeResponse.COUNTER, tradeId);
+        }
+        for (String propId : myGiving.propertyIds()) {
+            memory.recordDeclinedSwapTarget(botId, propId);
+        }
+        return new Intent.RespondToTrade(Intent.TradeResponse.DECLINE, tradeId);
     }
 
     // -------------------------------------------------------------------------

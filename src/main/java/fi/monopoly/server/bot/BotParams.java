@@ -159,6 +159,38 @@ public record BotParams(
         double bidPassBaseline = 0.08 + (1.0 - p.aggression()) * 0.10;
         w.put("bid_pass_baseline", bidPassBaseline);
 
+        // ---- Trade response decision -----------------------------------------
+        // Veto: can't afford the cash portion of the deal (input = cash - cashGiven)
+        w.put("trade_cash_affordability", 1.0);
+        c.put("trade_cash_affordability", Curve.veto(0.0));
+
+        // Fairness ratio: logistic on received/given value ratio [0,1].
+        // Aggressive bots accept lower ratios (lower midpoint); cautious demand more.
+        double tradeFairMidpoint = 0.65 - p.aggression() * 0.15;  // aggressive≈0.525, balanced≈0.575, cautious≈0.65
+        w.put("trade_fairness_ratio", 1.0);
+        c.put("trade_fairness_ratio", Curve.logistic(tradeFairMidpoint, 6.0));
+
+        // Monopoly completion: neutral when not completing, bonus when we get our missing piece.
+        double tradeCompletionNeutral = 0.40 + p.monopolyAppetite() * 0.15;  // balanced≈0.475
+        w.put("trade_monopoly_completion", 1.0);
+        c.put("trade_monopoly_completion", Curve.step(0.5, tradeCompletionNeutral, 1.0));
+
+        // Gift danger: penalty when giving would complete the opponent's set.
+        // Input: 1.0 = safe, 0.0 = dangerous → curve returns penalty when dangerous.
+        // Aggressive bots tolerate the risk more (higher penalty value = less deterrent).
+        double tradeGiftDangerPenalty = 0.05 + p.aggression() * 0.20;  // aggressive≈0.25, balanced≈0.15, cautious≈0.05
+        w.put("trade_gift_danger", 1.0);
+        c.put("trade_gift_danger", Curve.step(0.5, tradeGiftDangerPenalty, 1.0));
+
+        // Accept threshold: minimum combined score to ACCEPT (not counter or decline).
+        // Liquidity-preferring bots demand higher utility before giving up cash/property.
+        double tradeAcceptBaseline = 0.35 + p.liquidityPreference() * 0.10;  // balanced≈0.40
+        w.put("trade_accept_baseline", tradeAcceptBaseline);
+
+        // Counter threshold: minimum combined score to COUNTER (rather than flat decline).
+        double tradeCounterBaseline = 0.15 + p.liquidityPreference() * 0.05;  // balanced≈0.175
+        w.put("trade_counter_baseline", tradeCounterBaseline);
+
         return new BotParams(id, Map.copyOf(w), Map.copyOf(c), p);
     }
 

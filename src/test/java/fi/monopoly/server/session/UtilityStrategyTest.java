@@ -2,6 +2,11 @@ package fi.monopoly.server.session;
 
 import fi.monopoly.domain.session.AuctionState;
 import fi.monopoly.domain.session.AuctionStatus;
+import fi.monopoly.domain.session.TradeHistoryEntry;
+import fi.monopoly.domain.session.TradeOfferState;
+import fi.monopoly.domain.session.TradeSelectionState;
+import fi.monopoly.domain.session.TradeState;
+import fi.monopoly.domain.session.TradeStatus;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.server.bot.BotMemory;
 import fi.monopoly.server.bot.Intent;
@@ -115,6 +120,104 @@ class UtilityStrategyTest {
         Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
         assertInstanceOf(Intent.PassAuction.class, intent,
                 "bot with 200 € below reserve should pass the auction");
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4.5: trade response
+    // -------------------------------------------------------------------------
+
+    @Test
+    void acceptsFairTradeOffer() {
+        // player-2 offers O1 (face €180) in exchange for O2 (face €200) — nearly fair
+        // Neither property completes either player's orange set (orange has 3 props)
+        var baseState = TestSessionState.twoPlayerGame()
+                .withOwnership("player-1", "O2")
+                .withOwnership("player-2", "O1")
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build();
+
+        TradeOfferState offer = new TradeOfferState(
+                "player-2", "player-1",
+                new TradeSelectionState(0, List.of("O1"), 0),   // offered to player-1
+                new TradeSelectionState(0, List.of("O2"), 0));  // requested from player-1
+
+        TradeState trade = new TradeState(
+                "trade-1", "player-2", "player-1",
+                TradeStatus.SUBMITTED, offer,
+                null, false,
+                "player-1", "player-2",
+                List.of());
+
+        var state = baseState.toBuilder().tradeState(trade).build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+        assertInstanceOf(Intent.RespondToTrade.class, intent,
+                "should respond to trade offer");
+        assertEquals(Intent.TradeResponse.ACCEPT,
+                ((Intent.RespondToTrade) intent).response(),
+                "fair trade (O1 €180 for O2 €200) should be accepted");
+    }
+
+    @Test
+    void declinesGrosslyUnfairTradeOffer() {
+        // player-2 demands B1 (€60) for nothing — value ratio = 0 → decline
+        var baseState = TestSessionState.twoPlayerGame()
+                .withOwnership("player-1", "B1")
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build();
+
+        TradeOfferState offer = new TradeOfferState(
+                "player-2", "player-1",
+                TradeSelectionState.NONE,                       // offers nothing
+                new TradeSelectionState(0, List.of("B1"), 0)); // demands B1
+
+        TradeState trade = new TradeState(
+                "trade-1", "player-2", "player-1",
+                TradeStatus.SUBMITTED, offer,
+                null, false,
+                "player-1", "player-2",
+                List.of());
+
+        var state = baseState.toBuilder().tradeState(trade).build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+        assertInstanceOf(Intent.RespondToTrade.class, intent);
+        assertEquals(Intent.TradeResponse.DECLINE,
+                ((Intent.RespondToTrade) intent).response(),
+                "getting nothing for B1 should be declined");
+    }
+
+    @Test
+    void acceptsWhenTradeCompletesOwnMonopoly() {
+        // player-1 owns B1, player-2 owns B2 — bot gets B2 completing its brown monopoly.
+        // player-2 asks for cash (€50) for B2 (€60 face) — slightly unfair but monopoly bonus pushes it over
+        var baseState = TestSessionState.twoPlayerGame()
+                .withOwnership("player-1", "B1")
+                .withOwnership("player-2", "B2")
+                .withCash("player-1", 1500)
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build();
+
+        TradeOfferState offer = new TradeOfferState(
+                "player-2", "player-1",
+                new TradeSelectionState(0, List.of("B2"), 0),  // offered to player-1
+                new TradeSelectionState(80, List.of(), 0));    // requests €80 cash
+
+        TradeState trade = new TradeState(
+                "trade-1", "player-2", "player-1",
+                TradeStatus.SUBMITTED, offer,
+                null, false,
+                "player-1", "player-2",
+                List.of());
+
+        var state = baseState.toBuilder().tradeState(trade).build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+        assertInstanceOf(Intent.RespondToTrade.class, intent);
+        // score should clear accept_baseline thanks to monopoly completion bonus
+        assertEquals(Intent.TradeResponse.ACCEPT,
+                ((Intent.RespondToTrade) intent).response(),
+                "should accept trade that completes own brown monopoly");
     }
 
     @Test

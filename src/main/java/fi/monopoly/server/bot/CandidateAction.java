@@ -1,5 +1,7 @@
 package fi.monopoly.server.bot;
 
+import fi.monopoly.domain.session.TradeSelectionState;
+
 /**
  * A typed candidate action the utility model scores.
  *
@@ -16,7 +18,8 @@ public sealed interface CandidateAction permits
         CandidateAction.Unmortgage,
         CandidateAction.EndTurn,
         CandidateAction.AuctionBid,
-        CandidateAction.AuctionPass {
+        CandidateAction.AuctionPass,
+        CandidateAction.AcceptTrade {
 
     /** Buy a property at face price from the bank. */
     record BuyProperty(String propertyId, int price) implements CandidateAction {}
@@ -44,4 +47,17 @@ public sealed interface CandidateAction permits
 
     /** Pass this auction round without bidding. */
     record AuctionPass(String propertyId) implements CandidateAction {}
+
+    /**
+     * Score the utility of accepting an incoming trade offer.
+     *
+     * @param receiving    what the bot would receive in this trade
+     * @param giving       what the bot would give away
+     * @param partnerPlayerId the other player in the trade
+     */
+    record AcceptTrade(
+            TradeSelectionState receiving,
+            TradeSelectionState giving,
+            String partnerPlayerId
+    ) implements CandidateAction {}
 }

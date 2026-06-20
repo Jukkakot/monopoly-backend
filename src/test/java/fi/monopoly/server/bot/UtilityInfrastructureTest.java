@@ -214,6 +214,17 @@ class UtilityInfrastructureTest {
     }
 
     @Test
+    void defaultParamsHaveRequiredTradeCurves() {
+        BotParams params = BotParams.defaults();
+        assertNotNull(params.curve("trade_cash_affordability"));
+        assertNotNull(params.curve("trade_fairness_ratio"));
+        assertNotNull(params.curve("trade_monopoly_completion"));
+        assertNotNull(params.curve("trade_gift_danger"));
+        assertTrue(params.weight("trade_accept_baseline", 0) > 0);
+        assertTrue(params.weight("trade_counter_baseline", 0) > 0);
+    }
+
+    @Test
     void aggressiveParamsHaveLowerAuctionBaseline() {
         BotParams aggressive = BotParams.aggressive();
         BotParams cautious   = BotParams.cautious();
