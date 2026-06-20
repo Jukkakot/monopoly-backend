@@ -88,6 +88,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private volatile boolean isFirstTurn = true;
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> tradeDeclinesByPartnerId
             = new java.util.concurrent.ConcurrentHashMap<>();
+    // [Loop fix B] Per-partner set of target properties this partner has refused to give up,
+    // recorded at the bot's OWN decline decision (not inferred from snapshot transitions, so a fast
+    // re-open can't drop the signal). Pass 0/1 skip re-proposing the same (partner, target) — without
+    // abandoning the partner for other deals.
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.Set<String>> declinedSwapTargets
+            = new java.util.concurrent.ConcurrentHashMap<>();
     // Last bot playerId whose WAITING_FOR_ROLL we observed — used to detect turn transitions.
     private volatile String lastBotTurnStartId = null;
     // [Fix 3] Counts bot turns observed since a monopoly last appeared, for stalemate detection.
@@ -680,7 +686,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (botWantsSomething && counterCount < MAX_COUNTERS_PER_TRADE) {
                 publisher.handle(new CounterTradeCommand(sessionId, botId, tradeId));
             } else {
-                publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+                declineReceivedOffer(botId, tradeId, myGiving);
             }
             return;
         }
@@ -688,7 +694,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         // (b) Wildly lopsided ask: the bot is asked to give more than ~3× what it would receive.
         if (valueGiven > 0 && valueReceived * 3 < valueGiven
                 && !completesOwnMonopoly(state, botId, myReceiving)) {
-            publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+            declineReceivedOffer(botId, tradeId, myGiving);
             return;
         }
 
@@ -725,7 +731,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             }
         }
 
-        publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+        declineReceivedOffer(botId, tradeId, myGiving);
     }
 
     // Called when the bot is in COUNTERED editing mode — it rejected the incoming offer terms and is now proposin...
@@ -990,7 +996,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
-            if (findWinWinTargetProperty(state, botId, other.playerId()) != null) {
+            String winWinTarget = findWinWinTargetProperty(state, botId, other.playerId());
+            if (winWinTarget != null
+                    && !declinedSwapTargets.getOrDefault(other.playerId(), java.util.Set.of()).contains(winWinTarget)) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
                 if (result.accepted()) return true;
             }
@@ -1001,7 +1009,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
             String botWantsFromPartner = findCriticalTargetProperty(state, botId, other.playerId());
-            if (botWantsFromPartner != null) {
+            if (botWantsFromPartner != null
+                    && !declinedSwapTargets.getOrDefault(other.playerId(), java.util.Set.of()).contains(botWantsFromPartner)) {
                 CommandResult result = publisher.handle(new OpenTradeCommand(sessionId, botId, other.playerId()));
                 if (result.accepted()) return true;
             }
@@ -1661,6 +1670,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     }
 
     // Records a bot-initiated trade cancellation as a decline for the given partner.
+    // [Loop fix B] Decline a received offer AND record which of the bot's own properties were refused,
+    // recorded at the decision point (reliable regardless of speed/snapshot timing). Pass 0/1 then skip
+    // re-proposing the identical (partner, target) swap, without abandoning the partner for other deals.
+    private void declineReceivedOffer(String botId, String tradeId, TradeSelectionState botGiving) {
+        for (String propId : botGiving.propertyIds()) {
+            declinedSwapTargets
+                    .computeIfAbsent(botId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+                    .add(propId);
+        }
+        publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
+    }
+
     private void recordBotCancelAsDecline(String botId, TradeState trade) {
         if (trade == null) return;
         String partnerId = botId.equals(trade.initiatorPlayerId())
