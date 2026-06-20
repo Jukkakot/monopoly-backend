@@ -18,6 +18,7 @@ import fi.monopoly.types.StreetType;
 import fi.monopoly.utils.RandomSource;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Utility-AI strategy that handles buy/auction, build, and unmortgage decisions via
@@ -45,7 +46,16 @@ import java.util.Map;
 public final class UtilityStrategy implements BotStrategy {
 
     private final PureDomainStrategy delegate;
-    private final BotParams defaultParams;
+    private final ConcurrentHashMap<String, BotParams> paramsCache = new ConcurrentHashMap<>();
+
+    // Ordered archetype pool — each bot gets a distinct one by hashing its ID
+    private static final Personality[] ARCHETYPES = {
+        Personality.balanced(),
+        Personality.aggressive(),
+        Personality.cautious(),
+        Personality.trader(),
+        Personality.hoarder()
+    };
 
     /**
      * Constructs a {@code UtilityStrategy} backed by the given per-player configs.
@@ -55,7 +65,6 @@ public final class UtilityStrategy implements BotStrategy {
      */
     public UtilityStrategy(Map<String, StrongBotConfig> configs) {
         this.delegate = new PureDomainStrategy(configs);
-        this.defaultParams = BotParams.defaults();
     }
 
     /** Convenience constructor — no per-player config override. */
@@ -337,12 +346,20 @@ public final class UtilityStrategy implements BotStrategy {
     }
 
     // -------------------------------------------------------------------------
-    // Per-player params
+    // Per-player params (Phase 5.2 — sampled once per bot, cached for the game)
     // -------------------------------------------------------------------------
 
     private BotParams paramsFor(String botId) {
-        // Phase 5 will load personality-specific params per bot.
-        // For Phase 3, all bots use the same default BotParams.
-        return defaultParams;
+        if (botId == null) return BotParams.defaults();
+        return paramsCache.computeIfAbsent(botId, id -> {
+            // Deterministically pick an archetype and apply ±10 % jitter so each bot
+            // has a consistent but distinct personality for the entire game.
+            int archetypeIdx = Math.abs(id.hashCode()) % ARCHETYPES.length;
+            Personality archetype = ARCHETYPES[archetypeIdx];
+            long seed = id.chars().asLongStream().reduce(0L, Long::sum);
+            RandomSource botRng = RandomSource.seeded(seed);
+            Personality p = Personality.sample(archetype, 0.10, botRng);
+            return BotParams.forPersonality(id, p);
+        });
     }
 }
