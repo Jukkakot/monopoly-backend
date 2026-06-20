@@ -6,6 +6,7 @@ import fi.monopoly.domain.session.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.types.SpotType;
+import fi.monopoly.utils.RandomSource;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -602,9 +603,8 @@ class DomainTurnActionGatewayTest {
     }
 
     private static DomainTurnActionGateway gatewayWithDice(InMemorySessionState store, PropertyPurchaseFlow flow, int die1, int die2) {
-        int[] dice = {die1, die2};
-        int[] idx = {0};
-        return new DomainTurnActionGateway(store, flow, () -> dice[idx[0]++ % 2]);
+        // fixedSequence values are used as nextInt(6) results (0-based), so subtract 1 from face values.
+        return new DomainTurnActionGateway(store, flow, RandomSource.fixedSequence(die1 - 1, die2 - 1));
     }
 
     private static PropertyPurchaseFlow noOpFlow() {

@@ -13,12 +13,13 @@ import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
 import lombok.extern.slf4j.Slf4j;
 
+import fi.monopoly.utils.RandomSource;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -73,6 +74,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final Set<String> botPlayerIds;
     // Per-player bot configs. Falls back to StrongBotConfig.defaults() if absent.
     private final Map<String, StrongBotConfig> configs;
+    private final RandomSource rng;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
     private final AtomicInteger viewerCount = new AtomicInteger(0);
@@ -116,11 +118,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             SessionCommandPublisher publisher,
             String sessionId,
             Set<String> botPlayerIds,
-            Map<String, StrongBotConfig> configs) {
+            Map<String, StrongBotConfig> configs,
+            RandomSource rng) {
         this.publisher = publisher;
         this.sessionId = sessionId;
         this.botPlayerIds = botPlayerIds;
         this.configs = Map.copyOf(configs);
+        this.rng = rng;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("bot-driver-" + sessionId.substring(0, 8), 0).factory());
         // Watchdog: fires every 5 s to recover a bot that has stopped acting even though the game still
@@ -191,7 +195,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return null;
         }
         PureDomainBotDriver driver = new PureDomainBotDriver(
-                publisher, initialState.sessionId(), botIds, configs);
+                publisher, initialState.sessionId(), botIds, configs, RandomSource.threadLocal());
         publisher.addListener(driver);
         log.info("Bot driver registered for session {} — bots: {}",
                 initialState.sessionId().substring(0, 8), botIds);
@@ -1500,7 +1504,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (maxBid >= minBid) {
                 // Jump ~⅓ of remaining headroom toward ceiling with ±40 % random jitter
                 int headroom = maxBid - minBid;
-                double factor = 0.6 + ThreadLocalRandom.current().nextDouble() * 0.8; // 0.6–1.4
+                double factor = 0.6 + rng.nextDouble() * 0.8; // 0.6–1.4
                 int extra = ((int) (headroom / 3.0 * factor) / 10) * 10;
                 int bid = Math.min(maxBid, minBid + Math.max(10, extra));
                 publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), bid));
@@ -1537,7 +1541,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         long floor = speed < 0.15 ? 30L : 200L;  // fast mode: no artificial floor
         long scaled = Math.max(floor, (long) (base * diffMult * speed));
         long jitter = (long) (scaled * 0.20);
-        return scaled + ThreadLocalRandom.current().nextLong(-jitter, jitter + 1);
+        return scaled + rng.nextLong(-jitter, jitter + 1);
     }
 
     private long computeBaseDelay(SessionState state) {
