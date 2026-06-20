@@ -13,6 +13,7 @@ public sealed interface CandidateAction permits
         CandidateAction.BuyProperty,
         CandidateAction.DeclineProperty,
         CandidateAction.BuildHouses,
+        CandidateAction.Unmortgage,
         CandidateAction.EndTurn,
         CandidateAction.AuctionBid,
         CandidateAction.AuctionPass {
@@ -31,6 +32,9 @@ public sealed interface CandidateAction permits
      * @param currentMaxLevel maximum current house count in the group (0–5)
      */
     record BuildHouses(String propertyId, int buildCost, int currentMaxLevel) implements CandidateAction {}
+
+    /** Unmortgage a mortgaged property the bot owns. */
+    record Unmortgage(String propertyId) implements CandidateAction {}
 
     /** End the turn without taking a management action. Baseline for end-turn comparisons. */
     record EndTurn() implements CandidateAction {}

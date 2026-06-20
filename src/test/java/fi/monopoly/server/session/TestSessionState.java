@@ -98,6 +98,18 @@ public final class TestSessionState {
         return this;
     }
 
+    /** Mark a property as mortgaged (owner must already be set via {@link #withOwnership}). */
+    public TestSessionState withMortgaged(String propId) {
+        for (int i = 0; i < properties.size(); i++) {
+            if (properties.get(i).propertyId().equals(propId)) {
+                PropertyStateSnapshot old = properties.get(i);
+                properties.set(i, new PropertyStateSnapshot(propId, old.ownerPlayerId(),
+                        true, old.houseCount(), old.hotelCount()));
+            }
+        }
+        return this;
+    }
+
     /** Set houses on a specific property. */
     public TestSessionState withHouses(String propId, int houses) {
         for (int i = 0; i < properties.size(); i++) {

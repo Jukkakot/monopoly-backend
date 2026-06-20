@@ -104,6 +104,29 @@ public record BotParams(
         double buildBaseline = 0.15 + (1.0 - p.aggression()) * 0.15;
         w.put("build_end_turn_baseline", buildBaseline);
 
+        // ---- Unmortgage decision --------------------------------------------
+        // Veto: can't afford (input = cash_after_unmortgage)
+        w.put("unmortgage_affordability", 1.0);
+        c.put("unmortgage_affordability", Curve.veto(0.0));
+
+        // Veto: must own the full group (input = 1 if full, 0 if not)
+        w.put("unmortgage_group_complete", 1.0);
+        c.put("unmortgage_group_complete", Curve.step(0.5, 0.0, 1.0));
+
+        // ROI rank of the group
+        double unmortgageRoiWeight = 0.3 + p.monopolyAppetite() * 0.3;
+        w.put("unmortgage_group_roi", unmortgageRoiWeight);
+        c.put("unmortgage_group_roi", Curve.linear(1.0, 0.0));
+
+        // Cash comfort (how much headroom remains; conservative bots demand more)
+        double unmortgageComfortSteepness = 1.5 + p.liquidityPreference() * 2.0;
+        w.put("unmortgage_cash_comfort", 1.0);
+        c.put("unmortgage_cash_comfort", Curve.logistic(0.0, unmortgageComfortSteepness));
+
+        // Unmortgage baseline (vs. saving cash / ending turn)
+        double unmortgageBaseline = 0.25 + (1.0 - p.aggression()) * 0.15;
+        w.put("unmortgage_end_turn_baseline", unmortgageBaseline);
+
         return new BotParams(id, Map.copyOf(w), Map.copyOf(c), p);
     }
 

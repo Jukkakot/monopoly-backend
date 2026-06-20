@@ -14,7 +14,7 @@ import fi.monopoly.utils.RandomSource;
 import java.util.Map;
 
 /**
- * Phase 3.3: utility-AI strategy that handles the buy-vs-auction decision via
+ * Utility-AI strategy that handles buy/auction, build, and unmortgage decisions via
  * the IAUS model and delegates everything else to {@link PureDomainStrategy}.
  *
  * <p>This is the entry point for the new bot logic. One decision at a time is migrated
@@ -24,8 +24,12 @@ import java.util.Map;
  * <h3>Buy/auction decision (Phase 3)</h3>
  * <p>When the game is in {@code WAITING_FOR_DECISION} with a property purchase payload,
  * {@link BuyConsiderations} scores the BUY action with the multiplicative+compensation
- * combiner, and compares it to the {@code auction_baseline} threshold. Everything else
- * is delegated.</p>
+ * combiner, and compares it to the {@code auction_baseline} threshold.</p>
+ *
+ * <h3>End-turn management (Phase 4.1–4.2)</h3>
+ * <p>During {@code WAITING_FOR_END_TURN} (no active trade), scores both build and
+ * unmortgage candidates in a single pass and returns the highest-scoring action.
+ * If nothing beats either baseline, delegates to {@code PureDomainStrategy}.</p>
  *
  * <h3>Production default</h3>
  * <p>This strategy is NOT the production default. It runs only when explicitly selected
@@ -64,10 +68,10 @@ public final class UtilityStrategy implements BotStrategy {
             if (utilityIntent != null) return utilityIntent;
         }
 
-        // ---- Phase 4.1: handle build decision via utility model -------------
-        if (isBuildOpportunity(state, botId)) {
-            Intent buildIntent = decideBuild(state, botId, memory);
-            if (buildIntent != null) return buildIntent;
+        // ---- Phase 4.1–4.2: handle build + unmortgage via utility model -------
+        if (isEndTurnManagementOpportunity(state, botId)) {
+            Intent mgmtIntent = decideEndTurnManagement(state, botId, memory);
+            if (mgmtIntent != null) return mgmtIntent;
         }
 
         // ---- All other decisions: delegate to PureDomainStrategy -------------
@@ -114,29 +118,48 @@ public final class UtilityStrategy implements BotStrategy {
     }
 
     // -------------------------------------------------------------------------
-    // Build decision (Phase 4.1)
+    // End-turn management (Phase 4.1–4.2): build + unmortgage in a single pass
     // -------------------------------------------------------------------------
 
-    private static boolean isBuildOpportunity(SessionState state, String botId) {
+    private static boolean isEndTurnManagementOpportunity(SessionState state, String botId) {
         if (state.turn() == null) return false;
         if (state.turn().phase() != TurnPhase.WAITING_FOR_END_TURN) return false;
         if (state.tradeState() != null) return false;
         return botId.equals(state.turn().activePlayerId());
     }
 
-    private Intent decideBuild(SessionState state, String botId, BotMemory memory) {
+    private Intent decideEndTurnManagement(SessionState state, String botId, BotMemory memory) {
         BotParams params = paramsFor(botId);
         PlayerSnapshot player = StrongBotStrategy.findPlayer(state, botId);
         if (player == null) return null;
 
-        double bestScore = params.weight("build_end_turn_baseline", 0.20);
-        String bestPropId = null;
+        double buildBaseline    = params.weight("build_end_turn_baseline", 0.20);
+        double unmortgageBaseline = params.weight("unmortgage_end_turn_baseline", 0.30);
+        double bestScore = Math.max(buildBaseline, unmortgageBaseline);
+        Intent bestIntent = null;
 
+        // ---- Score unmortgage candidates ------------------------------------
+        for (PropertyStateSnapshot prop : state.properties()) {
+            if (!botId.equals(prop.ownerPlayerId())) continue;
+            if (!prop.mortgaged()) continue;
+            StreetType group = StrongBotStrategy.spotType(prop.propertyId()).streetType;
+            if (group == null) continue;
+            if (!StrongBotStrategy.botOwnsFullGroup(state, botId, group)) continue;
+
+            CandidateAction action = new CandidateAction.Unmortgage(prop.propertyId());
+            DecisionContext ctx = new DecisionContext(state, botId, memory, params, action);
+            double score = Consideration.combine(UnmortgageConsiderations.UNMORTGAGE_CONSIDERATIONS, ctx);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIntent = new Intent.Unmortgage(prop.propertyId());
+            }
+        }
+
+        // ---- Score build candidates ----------------------------------------
         for (StreetType group : StrongBotStrategy.completedColorGroups(state, botId)) {
             int maxLevel = StrongBotStrategy.maxLevelInGroup(state, botId, group);
             if (maxLevel >= StrongBotConfig.defaults().buildRoundCap()) continue;
 
-            // Estimate cost of one build round for this group
             PropertyStateSnapshot sampleProp = state.properties().stream()
                     .filter(p -> botId.equals(p.ownerPlayerId()))
                     .filter(p -> StrongBotStrategy.spotType(p.propertyId()).streetType == group)
@@ -162,14 +185,13 @@ public final class UtilityStrategy implements BotStrategy {
                     target.propertyId(), housePrice, maxLevel);
             DecisionContext ctx = new DecisionContext(state, botId, memory, params, buildAction);
             double score = Consideration.combine(BuildConsiderations.BUILD_CONSIDERATIONS, ctx);
-
             if (score > bestScore) {
                 bestScore = score;
-                bestPropId = target.propertyId();
+                bestIntent = new Intent.BuildHouses(target.propertyId());
             }
         }
 
-        return bestPropId != null ? new Intent.BuildHouses(bestPropId) : null;
+        return bestIntent;
     }
 
     // -------------------------------------------------------------------------

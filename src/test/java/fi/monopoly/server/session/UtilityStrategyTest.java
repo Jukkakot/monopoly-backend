@@ -11,7 +11,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Phase 3.3: smoke tests for {@link UtilityStrategy}.
+ * Smoke tests for {@link UtilityStrategy} — buy, build, unmortgage, and delegation.
  */
 class UtilityStrategyTest {
 
@@ -58,6 +58,20 @@ class UtilityStrategyTest {
         Intent a = strategy.decide(state, "player-1", BotMemory.empty(), RandomSource.seeded(7L));
         Intent b = strategy.decide(state, "player-1", BotMemory.empty(), RandomSource.seeded(7L));
         assertEquals(a.getClass(), b.getClass(), "same seed must yield same intent class");
+    }
+
+    @Test
+    void unmortgagesWhenOwnsFullGroupAndHasCash() {
+        // player-1 owns both brown properties (B1, B2); B1 is mortgaged.
+        // With 1 500 € cash and a complete group, utility score should beat the baseline.
+        var state = TestSessionState.twoPlayerGame()
+                .withOwnership("player-1", "B1", "B2")
+                .withMortgaged("B1")
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build();
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+        assertInstanceOf(Intent.Unmortgage.class, intent,
+                "should choose to unmortgage the mortgaged property in a complete group");
     }
 
     @Test

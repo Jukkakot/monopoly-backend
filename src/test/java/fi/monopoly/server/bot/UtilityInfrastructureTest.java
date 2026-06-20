@@ -192,6 +192,16 @@ class UtilityInfrastructureTest {
     }
 
     @Test
+    void defaultParamsHaveRequiredUnmortgageCurves() {
+        BotParams params = BotParams.defaults();
+        assertNotNull(params.curve("unmortgage_affordability"));
+        assertNotNull(params.curve("unmortgage_group_complete"));
+        assertNotNull(params.curve("unmortgage_group_roi"));
+        assertNotNull(params.curve("unmortgage_cash_comfort"));
+        assertTrue(params.weight("unmortgage_end_turn_baseline", 0) > 0);
+    }
+
+    @Test
     void aggressiveParamsHaveLowerAuctionBaseline() {
         BotParams aggressive = BotParams.aggressive();
         BotParams cautious   = BotParams.cautious();
