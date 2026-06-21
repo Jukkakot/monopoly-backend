@@ -822,11 +822,11 @@ components:
         botStrategy:
           type: string
           enum: [pure-domain-v1, utility-v1]
-          default: pure-domain-v1
+          default: utility-v1
           description: |
             Bot strategy to use for all bot seats in this session.
-            `pure-domain-v1` (default) uses the original greedy scoring strategy.
-            `utility-v1` uses the IAUS-based utility strategy (experimental).
+            `utility-v1` (default) uses the IAUS-based utility strategy.
+            `pure-domain-v1` uses the original greedy scoring strategy.
 
     CreateSessionResponse:
       type: object

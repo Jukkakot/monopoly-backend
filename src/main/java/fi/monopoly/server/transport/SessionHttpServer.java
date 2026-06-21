@@ -603,9 +603,9 @@ public final class SessionHttpServer {
         return result;
     }
 
-    /** Returns a validated bot-strategy name, defaulting to null (= pure-domain-v1). */
+    /** Returns a validated bot-strategy name, defaulting to "utility-v1". */
     private static String sanitizeBotStrategy(String raw) {
-        if ("utility-v1".equals(raw)) return "utility-v1";
-        return null;
+        if ("pure-domain-v1".equals(raw)) return "pure-domain-v1";
+        return "utility-v1";
     }
 }

@@ -788,8 +788,8 @@ public final class SessionRegistry {
      */
     private static fi.monopoly.server.bot.BotStrategy buildBotStrategy(
             String name, Map<String, StrongBotConfig> configs) {
-        if ("utility-v1".equals(name)) return new UtilityStrategy(configs);
-        return new PureDomainStrategy(configs);
+        if ("pure-domain-v1".equals(name)) return new PureDomainStrategy(configs);
+        return new UtilityStrategy(configs);
     }
 
     private static Map<String, StrongBotConfig> buildBotConfigs(SessionState state, String sessionId) {
