@@ -108,4 +108,5 @@ final class TradeConsiderations {
                 }).sum();
         return propValue + sel.moneyAmount() + sel.jailCardCount() * 50;
     }
+
 }

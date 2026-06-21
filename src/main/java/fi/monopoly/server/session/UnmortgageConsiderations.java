@@ -81,8 +81,10 @@ final class UnmortgageConsiderations {
             int cost = StrongBotStrategy.unmortgageCost(u.propertyId());
             int reserve = StrongBotStrategy.dynamicReserve(ctx.state(), ctx.botId(),
                     StrongBotConfig.defaults());
-            // Comfort = how much headroom remains above reserve × 2 (requires 2× reserve to feel comfortable)
-            double comfort = reserve > 0 ? (double)(cash - cost - reserve) / reserve : 0.0;
+            double posFactor = StrongBotStrategy.positionFactor(ctx.state(), ctx.botId());
+            int posAdjReserve = Math.max(0, (int)(reserve / posFactor));
+            // Comfort = how much headroom remains above position-adjusted reserve
+            double comfort = posAdjReserve > 0 ? (double)(cash - cost - posAdjReserve) / posAdjReserve : 0.0;
             return ctx.params().curve("unmortgage_cash_comfort").eval(comfort);
         }
     };

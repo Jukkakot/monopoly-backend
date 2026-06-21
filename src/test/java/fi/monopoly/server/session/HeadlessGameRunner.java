@@ -32,7 +32,12 @@ import java.util.stream.IntStream;
 public final class HeadlessGameRunner {
 
     private static final int MAX_CONSECUTIVE_REJECTS = 15;
-    private static final int LOOP_THRESHOLD = 10;
+    // Steps without any property-ownership or development change before we declare stalemate.
+    // This catches genuine bot-logic loops (trade/debt infinite cycling) while allowing
+    // the natural board cycling and small-rent periods that occur in slow Monopoly games.
+    // At 20 000 maxSteps, this means a game must be structurally frozen for 25 %+ of its
+    // budget before we consider it stuck.
+    private static final int MAX_NO_STRUCTURAL_PROGRESS = 5_000;
     private static final List<String> COLOR_PALETTE = List.of(
             "#E63946", "#2A9D8F", "#E9C46A", "#264653", "#F4A261", "#8338EC");
 
@@ -95,9 +100,9 @@ public final class HeadlessGameRunner {
             botRngs.put(pid, rng.derive(pid));
         }
 
-        Map<String, Integer> sigCount = new HashMap<>();
         int steps = 0;
         int consecutiveRejects = 0;
+        int noStructuralProgress = 0;
 
         while (steps < config.maxSteps()) {
             SessionState state = service.currentState();
@@ -128,10 +133,32 @@ public final class HeadlessGameRunner {
                 consecutiveRejects = 0;
                 steps++;
 
-                String sig = stateSignature(service.currentState());
-                int cnt = sigCount.merge(sig, 1, Integer::sum);
-                if (cnt > LOOP_THRESHOLD) {
-                    return new GameResult(-1, steps, Outcome.STALEMATE, true);
+                // Propagate trade outcomes to the proposer's memory.
+                // In the real game, the bot driver receives decline/cancel events through
+                // the SSE stream and updates memory accordingly.  In the headless runner,
+                // each bot only sees its own memory, so we bridge the gap here:
+                // when B declines A's trade, we record the decline in A's memory so
+                // A's tryInitiateTrade() respects MAX_DECLINES_PER_PARTNER and stops looping.
+                if (intent instanceof Intent.RespondToTrade resp
+                        && resp.response() == Intent.TradeResponse.DECLINE
+                        && state.tradeState() != null) {
+                    String proposerId = state.tradeState().initiatorPlayerId();
+                    BotMemory proposerMemory = memories.get(proposerId);
+                    if (proposerMemory != null) proposerMemory.recordDecline(actorId);
+                }
+
+                // Structural-progress loop detection: count steps without any property
+                // ownership or development change.  Board position and cash cycling are
+                // intentionally ignored — they occur naturally and are not stuck loops.
+                // A genuine stuck loop (trade/debt infinite cycle, bot logic bug) will
+                // produce 1 000+ steps with no structural change.
+                SessionState newState = service.currentState();
+                if (hasPropertyProgress(state, newState)) {
+                    noStructuralProgress = 0;
+                } else if (newState.tradeState() == null && newState.auctionState() == null) {
+                    if (++noStructuralProgress > MAX_NO_STRUCTURAL_PROGRESS) {
+                        return new GameResult(-1, steps, Outcome.STALEMATE, true);
+                    }
                 }
             } else {
                 if (++consecutiveRejects > MAX_CONSECUTIVE_REJECTS) break;
@@ -290,28 +317,27 @@ public final class HeadlessGameRunner {
     }
 
     // -------------------------------------------------------------------------
-    // Loop detection — compact state fingerprint
+    // Structural-progress check for loop detection
     // -------------------------------------------------------------------------
 
-    private static String stateSignature(SessionState state) {
-        // Ownership + position + cash buckets: enough to detect stuck loops without being brittle.
-        StringBuilder sb = new StringBuilder();
-        if (state.turn() != null) sb.append(state.turn().activePlayerId()).append(':');
-        for (PlayerSnapshot p : state.players()) {
-            if (p.bankrupt() || p.eliminated()) continue;
-            sb.append(p.playerId(), 0, Math.min(4, p.playerId().length()))
-              .append('=').append(p.boardIndex())
-              .append(',').append(p.cash() / 50);  // $50 cash buckets
-            sb.append(';');
+    /**
+     * Returns true when at least one property changed ownership or development level
+     * between {@code before} and {@code after}.  Board positions and cash are
+     * intentionally ignored — they cycle naturally and are not reliable loop indicators.
+     */
+    private static boolean hasPropertyProgress(SessionState before, SessionState after) {
+        List<PropertyStateSnapshot> bProps = before.properties();
+        List<PropertyStateSnapshot> aProps = after.properties();
+        if (bProps.size() != aProps.size()) return true; // properties added/removed
+        // Properties list order is stable; iterate both lists in parallel.
+        for (int i = 0; i < bProps.size(); i++) {
+            PropertyStateSnapshot b = bProps.get(i);
+            PropertyStateSnapshot a = aProps.get(i);
+            if (!Objects.equals(b.ownerPlayerId(), a.ownerPlayerId())) return true;
+            int bLevel = b.mortgaged() ? -1 : (b.hotelCount() > 0 ? 5 : b.houseCount());
+            int aLevel = a.mortgaged() ? -1 : (a.hotelCount() > 0 ? 5 : a.houseCount());
+            if (bLevel != aLevel) return true;
         }
-        // Property ownership fingerprint
-        state.properties().stream()
-                .filter(p -> p.ownerPlayerId() != null)
-                .sorted(Comparator.comparing(PropertyStateSnapshot::propertyId))
-                .forEach(p -> sb.append(p.propertyId(), 0, 2)
-                        .append(p.ownerPlayerId(), 0, Math.min(2, p.ownerPlayerId().length())));
-        // Trade state identity
-        if (state.tradeState() != null) sb.append('T').append(state.tradeState().tradeId(), 0, 4);
-        return sb.toString();
+        return false;
     }
 }

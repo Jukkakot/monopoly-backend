@@ -33,8 +33,9 @@ final class AuctionConsiderations {
             if (!(ctx.action() instanceof CandidateAction.AuctionBid bid)) return 1.0;
             PlayerSnapshot player = StrongBotStrategy.findPlayer(ctx.state(), ctx.botId());
             int cash = player != null ? player.cash() : 0;
-            int reserve = StrongBotStrategy.dynamicReserve(ctx.state(), ctx.botId(),
-                    StrongBotConfig.defaults());
+            StrongBotConfig cfg = StrongBotConfig.defaults();
+            int reserve = Math.min(StrongBotStrategy.dynamicReserve(ctx.state(), ctx.botId(), cfg),
+                    cfg.dangerCashReserve());
             return ctx.params().curve("bid_affordability").eval(cash - reserve - bid.amount());
         }
     };

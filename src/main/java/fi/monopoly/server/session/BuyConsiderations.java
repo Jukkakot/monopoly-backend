@@ -55,8 +55,14 @@ final class BuyConsiderations {
             int reserve = StrongBotStrategy.dynamicReserve(ctx.state(), ctx.botId(),
                     defaultConfig(ctx));
             int cashAfter = cash - buy.price();
-            // normalised margin: 0 = exactly at reserve, positive = headroom, negative = below
-            double normMargin = reserve > 0 ? (double)(cashAfter - reserve) / reserve : 0.0;
+            // Match pure-domain's set-completion leniency: allow buying up to 100 below reserve
+            // when the purchase would complete a color monopoly.
+            boolean completesSet = StrongBotStrategy.wouldCompleteSet(
+                    ctx.state(), ctx.botId(), buy.propertyId());
+            int effectiveReserve = completesSet ? Math.max(0, reserve - 100) : reserve;
+            // normalised margin: 0 = exactly at threshold, positive = headroom, negative = below
+            double normMargin = effectiveReserve > 0
+                    ? (double)(cashAfter - effectiveReserve) / effectiveReserve : 0.0;
             return ctx.params().curve("reserve_margin").eval(normMargin);
         }
     };
@@ -137,18 +143,21 @@ final class BuyConsiderations {
         StreetType group = spot.streetType;
         if (group == null) return 0.50;
 
-        // Map known group names to ROI rank using the published table ordering
+        // Compressed ROI ranks [0.70, 1.00] — preserves the orange > red > … > brown ordering
+        // but prevents low-ROI groups from dragging the multiplicative product below the buy
+        // threshold.  Even brown monopoly is worth owning; the ranking only modulates bid
+        // ceiling and build priority, not whether to buy at all at list price.
         return switch (group.name()) {
             case "ORANGE"     -> 1.00;
-            case "RED"        -> 0.89;
-            case "YELLOW"     -> 0.78;
-            case "DARK_BLUE"  -> 0.67;
-            case "GREEN"      -> 0.56;
+            case "RED"        -> 0.96;
+            case "YELLOW"     -> 0.92;
+            case "DARK_BLUE"  -> 0.88;
+            case "GREEN"      -> 0.84;
             case "PINK",
-                 "LIGHT_PURPLE" -> 0.44;
-            case "LIGHT_BLUE" -> 0.33;
-            case "BROWN"      -> 0.11;
-            default           -> 0.50; // utilities / railroads: moderate
+                 "LIGHT_PURPLE" -> 0.80;
+            case "LIGHT_BLUE" -> 0.75;
+            case "BROWN"      -> 0.70;
+            default           -> 0.80; // utilities / railroads: moderate
         };
     }
 

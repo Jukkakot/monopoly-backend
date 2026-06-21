@@ -50,30 +50,29 @@ public record BotParams(
         w.put("affordability", 1.0);
         c.put("affordability", Curve.veto(0.0));  // input = cash_after (may be negative)
 
-        // Reserve margin: scored by how much cash remains above the reserve floor.
-        // aggressive bots accept thinner margins; cautious bots need more headroom.
-        double reserveSteepness = 2.0 + (p.riskTolerance() - 0.5) * 2.0;
+        // Reserve margin: hard veto when cash_after < reserve (matches pure-domain's strict hard decline).
+        // A logistic was too lenient and caused over-buying followed by bankruptcy.
         w.put("reserve_margin", 1.0);
-        c.put("reserve_margin", Curve.logistic(0.0, reserveSteepness));  // input = (cash_after - reserve) / reserve
+        c.put("reserve_margin", Curve.veto(0.0));  // input = (cash_after - reserve) / reserve; 0 at threshold passes
 
-        // Set-completion bonus: high value for the last piece in a color group.
-        double completionWeight = 0.5 + p.monopolyAppetite() * 0.8;
-        w.put("set_completion", completionWeight);
-        c.put("set_completion", Curve.step(0.5, 0.0, 1.0));  // input: 1 if completes, 0 otherwise
+        // Set-completion bonus: returns neutral (0.7) for non-completing purchases,
+        // 1.0 when the purchase completes a color monopoly.  Weight stays at 1.0 so
+        // it acts as a pure bonus — NOT a veto — in the multiplicative combiner.
+        w.put("set_completion", 1.0);
+        c.put("set_completion", Curve.step(0.5, 0.7, 1.0));  // input: 1 if completes, 0 otherwise
 
-        // Set progress: partial ownership in a group has growing value.
-        double progressWeight = 0.3 + p.monopolyAppetite() * 0.5;
-        w.put("set_progress", progressWeight);
-        c.put("set_progress", Curve.polynomial(1.5, 1.0, 0.0));  // input = ownedInGroup / groupSize
+        // Set progress: square-root curve so even the first property in a group scores ~0.58+.
+        // Convex (1.5 exponent) was too punishing for early purchases of large groups.
+        w.put("set_progress", 1.0);
+        c.put("set_progress", Curve.polynomial(0.5, 1.0, 0.0));  // input = (owned+1) / groupSize
 
         // Property ROI rank: higher for orange/red groups, lower for brown/utilities.
-        double roiWeight = 0.2 + p.aggression() * 0.4;
-        w.put("property_roi", roiWeight);
+        w.put("property_roi", 1.0);
         c.put("property_roi", Curve.linear(1.0, 0.0));  // input = normalised ROI rank [0,1]
 
-        // Auction-opportunity baseline: score the "decline and go to auction" option.
-        // Aggressive bots prefer direct purchase; cautious ones like the auction floor.
-        double auctionBase = 0.15 + (1.0 - p.aggression()) * 0.25;
+        // Auction-opportunity baseline: how attractive "decline and go to auction" is.
+        // Must stay well below the typical buy score (~0.3–0.6 for good properties).
+        double auctionBase = 0.02 + (1.0 - p.aggression()) * 0.05;
         w.put("auction_baseline", auctionBase);
 
         // Buy threshold: minimum combined utility to trigger BUY over DECLINE.
@@ -91,17 +90,16 @@ public record BotParams(
         w.put("build_reserve_margin", 1.0);
         c.put("build_reserve_margin", Curve.logistic(0.0, buildReserveSteepness));
 
-        // ROI rank of the color group
-        double buildRoiWeight = 0.3 + p.monopolyAppetite() * 0.4;
-        w.put("build_group_roi", buildRoiWeight);
+        // ROI rank of the color group — weight 1.0 so it scales the score linearly
+        w.put("build_group_roi", 1.0);
         c.put("build_group_roi", Curve.linear(1.0, 0.0));
 
         // Level efficiency: input is already normalised [0,1] by BuildConsiderations
         w.put("build_level_efficiency", 1.0);
         c.put("build_level_efficiency", Curve.identity());
 
-        // Baseline for comparing build vs. end-turn (lower → builds more aggressively)
-        double buildBaseline = 0.15 + (1.0 - p.aggression()) * 0.15;
+        // Baseline for comparing build vs. end-turn
+        double buildBaseline = 0.05 + (1.0 - p.aggression()) * 0.08;
         w.put("build_end_turn_baseline", buildBaseline);
 
         // ---- Unmortgage decision --------------------------------------------
@@ -113,9 +111,8 @@ public record BotParams(
         w.put("unmortgage_group_complete", 1.0);
         c.put("unmortgage_group_complete", Curve.step(0.5, 0.0, 1.0));
 
-        // ROI rank of the group
-        double unmortgageRoiWeight = 0.3 + p.monopolyAppetite() * 0.3;
-        w.put("unmortgage_group_roi", unmortgageRoiWeight);
+        // ROI rank of the group — weight 1.0
+        w.put("unmortgage_group_roi", 1.0);
         c.put("unmortgage_group_roi", Curve.linear(1.0, 0.0));
 
         // Cash comfort (how much headroom remains; conservative bots demand more)
@@ -124,7 +121,7 @@ public record BotParams(
         c.put("unmortgage_cash_comfort", Curve.logistic(0.0, unmortgageComfortSteepness));
 
         // Unmortgage baseline (vs. saving cash / ending turn)
-        double unmortgageBaseline = 0.25 + (1.0 - p.aggression()) * 0.15;
+        double unmortgageBaseline = 0.05 + (1.0 - p.aggression()) * 0.08;
         w.put("unmortgage_end_turn_baseline", unmortgageBaseline);
 
         // ---- Auction bid decision -------------------------------------------
@@ -132,9 +129,11 @@ public record BotParams(
         w.put("bid_affordability", 1.0);
         c.put("bid_affordability", Curve.veto(0.0));
 
-        // Value ratio: score rises as bid drops below face price (all weights = 1.0 so curves drive the score)
+        // Value ratio: 0.5 (neutral) at face price, 1.0 at free.  Must NOT return 0 at face price
+        // because that would zero the IAUS product and always pass at face price.
+        // Pure-domain bids up to 1.30× face price; this keeps IAUS positive up to the ceiling.
         w.put("bid_value_ratio", 1.0);
-        c.put("bid_value_ratio", Curve.linear(1.0, 0.0));  // input = 1 - bid/facePrice
+        c.put("bid_value_ratio", Curve.linear(0.5, 0.5));  // input = 1 - bid/facePrice → [0.5, 1.0]
 
         // Set completion: neutral (0.5) when not completing, bonus (1.0) when completing.
         // Personality shifts the curve via the "neutral" value rather than the weight.
@@ -151,8 +150,9 @@ public record BotParams(
         w.put("bid_group_roi", 1.0);
         c.put("bid_group_roi", Curve.linear(1.0, 0.0));
 
-        // Bid aggression multiplier: face_price × bidAggression = bid ceiling
-        double bidAggression = 0.85 + p.aggression() * 0.30 + p.monopolyAppetite() * 0.15;
+        // Bid aggression multiplier: face_price × bidAggression = bid ceiling.
+        // Raised to be competitive with pure-domain's 1.30 ceiling; aggressive/hoarder bots bid higher.
+        double bidAggression = 1.10 + p.aggression() * 0.30 + p.monopolyAppetite() * 0.20;
         w.put("bid_aggression", bidAggression);
 
         // Bid pass baseline: minimum combined score required to place any bid

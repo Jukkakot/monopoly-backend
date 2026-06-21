@@ -13,6 +13,7 @@ import fi.monopoly.domain.session.TradeState;
 import fi.monopoly.domain.session.TradeStatus;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.server.bot.*;
+import fi.monopoly.types.PlaceType;
 import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
 import fi.monopoly.utils.RandomSource;
@@ -75,8 +76,6 @@ public final class UtilityStrategy implements BotStrategy {
     @Override
     public String name() { return "utility-v1"; }
 
-    private static final int MAX_COUNTERS_PER_TRADE = 2;
-
     @Override
     public Intent decide(SessionState state, String botId, BotMemory memory, RandomSource rng) {
         // ---- Phase 4.5: handle trade response via utility model --------------
@@ -85,22 +84,10 @@ public final class UtilityStrategy implements BotStrategy {
             if (tradeIntent != null) return tradeIntent;
         }
 
-        // ---- Phase 3: handle buy-vs-auction via utility model ----------------
-        if (isBuyDecision(state, botId)) {
-            Intent utilityIntent = decidePurchase(state, botId, memory, rng);
-            if (utilityIntent != null) return utilityIntent;
-        }
-
         // ---- Phase 4.1–4.2: handle build + unmortgage via utility model -------
         if (isEndTurnManagementOpportunity(state, botId)) {
             Intent mgmtIntent = decideEndTurnManagement(state, botId, memory);
             if (mgmtIntent != null) return mgmtIntent;
-        }
-
-        // ---- Phase 4.4: handle auction bidding via utility model -------------
-        if (isAuctionOpportunity(state, botId)) {
-            Intent auctionIntent = decideAuction(state, botId, memory, rng);
-            if (auctionIntent != null) return auctionIntent;
         }
 
         // ---- All other decisions: delegate to PureDomainStrategy -------------
@@ -138,22 +125,14 @@ public final class UtilityStrategy implements BotStrategy {
         DecisionContext ctx = new DecisionContext(state, botId, memory, params, action);
         double score = Consideration.combine(TradeConsiderations.ACCEPT_CONSIDERATIONS, ctx);
 
-        double acceptBaseline  = params.weight("trade_accept_baseline",  0.40);
-        double counterBaseline = params.weight("trade_counter_baseline", 0.175);
-
-        long counterCount = trade.history().stream()
-                .filter(e -> "COUNTERED".equals(e.actionType())).count();
+        double acceptBaseline = params.weight("trade_accept_baseline", 0.40);
 
         if (score >= acceptBaseline) {
             return new Intent.RespondToTrade(Intent.TradeResponse.ACCEPT, tradeId);
         }
-        if (score >= counterBaseline && counterCount < MAX_COUNTERS_PER_TRADE) {
-            return new Intent.RespondToTrade(Intent.TradeResponse.COUNTER, tradeId);
-        }
-        for (String propId : myGiving.propertyIds()) {
-            memory.recordDeclinedSwapTarget(botId, propId);
-        }
-        return new Intent.RespondToTrade(Intent.TradeResponse.DECLINE, tradeId);
+        // Delegate COUNTER/DECLINE to PureDomainStrategy — it manages memory correctly
+        // and avoids repeated state signatures from counter-loops (which trip loop detection).
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -251,8 +230,9 @@ public final class UtilityStrategy implements BotStrategy {
                 continue;
             }
 
-            if (!StrongBotStrategy.canAffordBuildRound(state, player, group,
-                    StrongBotStrategy.dynamicReserve(state, botId, StrongBotConfig.defaults()))) {
+            int rawReserve = StrongBotStrategy.dynamicReserve(state, botId, StrongBotConfig.defaults());
+            int posAdjReserve = (int)(rawReserve / StrongBotStrategy.positionFactor(state, botId));
+            if (!StrongBotStrategy.canAffordBuildRound(state, player, group, posAdjReserve)) {
                 continue;
             }
 
@@ -296,7 +276,9 @@ public final class UtilityStrategy implements BotStrategy {
         BotParams params  = paramsFor(botId);
         PlayerSnapshot player = StrongBotStrategy.findPlayer(state, botId);
         int cash = player != null ? player.cash() : 0;
-        int reserve = StrongBotStrategy.dynamicReserve(state, botId, StrongBotConfig.defaults());
+        StrongBotConfig cfg = StrongBotConfig.defaults();
+        int reserve = Math.min(StrongBotStrategy.dynamicReserve(state, botId, cfg),
+                cfg.dangerCashReserve());
 
         // Score at the minimum bid to determine whether we're willing to bid at all
         CandidateAction bidAction = new CandidateAction.AuctionBid(propId, minBid);
@@ -310,8 +292,21 @@ public final class UtilityStrategy implements BotStrategy {
 
         // Ceiling is personality-based (how far above face price we'll go), not score-based.
         // Score already determined we want to bid; aggression sets the price limit.
+        // Add set-completion and opponent-blocking bonuses matching pure-domain's ceiling formula.
         double aggression = params.weight("bid_aggression", 1.0);
         int ceiling = (int)(facePrice * aggression);
+        int completionBonus = cfg.auctionSetCompletionBonus();
+        if (StrongBotStrategy.wouldCompleteSet(state, botId, propId)) {
+            ceiling += completionBonus;
+        }
+        StreetType bidGroup = StrongBotStrategy.spotType(propId).streetType;
+        if (bidGroup != null && bidGroup.placeType == PlaceType.STREET) {
+            int bSize = StrongBotStrategy.setSize(bidGroup);
+            boolean wouldBlock = bSize > 1 && state.players().stream()
+                    .filter(p -> !p.playerId().equals(botId) && !p.bankrupt() && !p.eliminated())
+                    .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), bidGroup) == bSize - 1);
+            if (wouldBlock) ceiling += completionBonus;
+        }
         int maxAffordable = cash - reserve;
         int maxBid = Math.min(ceiling, maxAffordable);
 

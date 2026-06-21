@@ -59,8 +59,10 @@ final class BuildConsiderations {
             int cash = player != null ? player.cash() : 0;
             int reserve = StrongBotStrategy.dynamicReserve(ctx.state(), ctx.botId(),
                     StrongBotConfig.defaults());
-            double normMargin = reserve > 0
-                    ? (double)(cash - build.buildCost() - reserve) / reserve : 0.0;
+            double posFactor = StrongBotStrategy.positionFactor(ctx.state(), ctx.botId());
+            int posAdjReserve = Math.max(0, (int)(reserve / posFactor));
+            double normMargin = posAdjReserve > 0
+                    ? (double)(cash - build.buildCost() - posAdjReserve) / posAdjReserve : 0.0;
             return ctx.params().curve("build_reserve_margin").eval(normMargin);
         }
     };
