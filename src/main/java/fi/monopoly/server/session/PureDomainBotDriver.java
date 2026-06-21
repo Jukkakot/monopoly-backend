@@ -128,6 +128,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // Access is single-threaded (all dispatch happens on the scheduler thread).
     private final java.util.concurrent.ConcurrentHashMap<String, Integer> lastTradeOpenedAtTurn
             = new java.util.concurrent.ConcurrentHashMap<>();
+    // When a trade was last COMPLETED (accepted) by this bot. Used for post-trade cooldown so bots
+    // don't immediately chain into another trade right after closing one.
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> lastTradeCompletedAtTurn
+            = new java.util.concurrent.ConcurrentHashMap<>();
     // Global monotonic turn counter — incremented whenever any bot enters WAITING_FOR_ROLL.
     private final java.util.concurrent.atomic.AtomicInteger globalTurnCounter = new java.util.concurrent.atomic.AtomicInteger(0);
 
@@ -731,6 +735,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeOfferState offer = trade.currentOffer();
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
 
+        // Post-trade cooldown: if this bot just completed a trade recently, decline incoming offers.
+        // This prevents the cascade where one completed trade immediately spawns another.
+        if (botIsRecipient) {
+            int lastCompleted = lastTradeCompletedAtTurn.getOrDefault(botId, -100);
+            if (globalTurnCounter.get() - lastCompleted < POST_TRADE_COOLDOWN_TURNS) {
+                declineReceivedOffer(botId, tradeId, null);
+                return;
+            }
+        }
+
         String tradePartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
 
         TradeSelectionState myReceiving = botIsRecipient ? offer.offeredToRecipient() : offer.requestedFromRecipient();
@@ -848,6 +862,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         if (valueReceived >= valueGiven - fairnessTolerance - strategicDiscount + requiredPremium + cashSalePremium) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
+            lastTradeCompletedAtTurn.put(botId, globalTurnCounter.get());
             return;
         }
 
@@ -1116,9 +1131,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         publisher.handle(new SubmitTradeOfferCommand(sessionId, botId, tradeId));
     }
 
-    // How many global turns must pass between the bot opening a trade and trying again
-    // (for non-monopoly-completing trades). Win-win and critical monopoly completions are exempt.
-    private static final int TRADE_COOLDOWN_TURNS = 3;
+    // How many global turns must pass between the bot opening a trade and trying again.
+    // Applies to all passes (including win-win and critical). With 6 bots, 6 global turns ≈ 1 full round.
+    private static final int TRADE_COOLDOWN_TURNS = 6;
+    // How many global turns must pass after a trade COMPLETES before this bot opens or accepts another.
+    // Prevents cascade effect where one completed trade immediately triggers the next.
+    private static final int POST_TRADE_COOLDOWN_TURNS = 8;
 
     // STRONG bot tries to open a trade to acquire a property that advances a color group it already partially owns.
     // Trades are only initiated when there is a clear monopoly goal — either completing our own set or helping
@@ -1130,9 +1148,17 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         int currentTurn = globalTurnCounter.get();
 
+        // Post-completion cooldown: don't open a new trade too soon after the last one closed.
+        // This is the main guard against bot-vs-bot trade cascade in multi-player games.
+        int lastCompleted = lastTradeCompletedAtTurn.getOrDefault(botId, -100);
+        if (currentTurn - lastCompleted < POST_TRADE_COOLDOWN_TURNS) return false;
+
+        // Per-bot open cooldown: applies to all passes (including win-win and critical).
+        int lastOpened = lastTradeOpenedAtTurn.getOrDefault(botId, -100);
+        if (currentTurn - lastOpened < TRADE_COOLDOWN_TURNS) return false;
+
         // Pass 0 (win-win): a partner holds a piece the bot needs AND the bot holds a piece that completes the
         // PARTNER's set — both sides gain a monopoly benefit. These are high-value goal-oriented trades.
-        // Win-win skips the cooldown because they are rare and mutually beneficial.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
@@ -1148,7 +1174,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // Pass 1: bot is one property away from completing a monopoly and the partner holds the missing piece.
-        // This is a high-urgency goal — skip cooldown but apply the normal per-partner decline limit.
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (tradeDeclinesByPartnerId.getOrDefault(other.playerId(), 0) >= MAX_DECLINES_PER_PARTNER) continue;
@@ -1165,9 +1190,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         // Pass 2: near-monopoly acquisition — bot owns n-2 of a group (i.e., needs 2 more) and the partner has one.
         // Only fire when there is a genuine path to completing the set (partner owns 2+ of the same group or
-        // the remaining pieces are mostly in one player's hands). Apply cooldown to avoid constant attempts.
-        int lastTrade = lastTradeOpenedAtTurn.getOrDefault(botId, -100);
-        if (currentTurn - lastTrade < TRADE_COOLDOWN_TURNS) return false;
+        // the remaining pieces are mostly in one player's hands).
 
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
@@ -1876,10 +1899,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // recorded at the decision point (reliable regardless of speed/snapshot timing). Pass 0/1 then skip
     // re-proposing the identical (partner, target) swap, without abandoning the partner for other deals.
     private void declineReceivedOffer(String botId, String tradeId, TradeSelectionState botGiving) {
-        for (String propId : botGiving.propertyIds()) {
-            declinedSwapTargets
-                    .computeIfAbsent(botId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet())
-                    .add(propId);
+        if (botGiving != null) {
+            for (String propId : botGiving.propertyIds()) {
+                declinedSwapTargets
+                        .computeIfAbsent(botId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+                        .add(propId);
+            }
         }
         publisher.handle(new DeclineTradeCommand(sessionId, botId, tradeId));
     }
