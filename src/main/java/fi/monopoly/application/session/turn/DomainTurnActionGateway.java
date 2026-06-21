@@ -12,9 +12,9 @@ import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
 import lombok.extern.slf4j.Slf4j;
 
+import fi.monopoly.utils.RandomSource;
+
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
 
 /**
@@ -52,18 +52,17 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
     private final SessionStateStore store;
     private final PropertyPurchaseFlow propertyPurchaseFlow;
-    private final IntSupplier singleDieSupplier;
+    private final RandomSource randomSource;
     private TurnContinuationState pendingPostPurchaseContinuation;
 
     public DomainTurnActionGateway(SessionStateStore store, PropertyPurchaseFlow propertyPurchaseFlow) {
-        this(store, propertyPurchaseFlow, () -> 1 + ThreadLocalRandom.current().nextInt(6));
+        this(store, propertyPurchaseFlow, RandomSource.threadLocal());
     }
 
-    /** Package-private constructor for testing with controlled dice. */
-    DomainTurnActionGateway(SessionStateStore store, PropertyPurchaseFlow propertyPurchaseFlow, IntSupplier singleDieSupplier) {
+    public DomainTurnActionGateway(SessionStateStore store, PropertyPurchaseFlow propertyPurchaseFlow, RandomSource randomSource) {
         this.store = store;
         this.propertyPurchaseFlow = propertyPurchaseFlow;
-        this.singleDieSupplier = singleDieSupplier;
+        this.randomSource = randomSource;
     }
 
     // -------------------------------------------------------------------------
@@ -81,9 +80,9 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
 
         int[] diceOverride = state.nextDiceOverride();
         int die1 = (diceOverride != null && diceOverride.length >= 2)
-                ? Math.max(1, Math.min(6, diceOverride[0])) : singleDieSupplier.getAsInt();
+                ? Math.max(1, Math.min(6, diceOverride[0])) : 1 + randomSource.nextInt(6);
         int die2 = (diceOverride != null && diceOverride.length >= 2)
-                ? Math.max(1, Math.min(6, diceOverride[1])) : singleDieSupplier.getAsInt();
+                ? Math.max(1, Math.min(6, diceOverride[1])) : 1 + randomSource.nextInt(6);
         int total = die1 + die2;
         boolean isDoubles = die1 == die2;
         int newConsecutive = isDoubles ? state.turn().consecutiveDoubles() + 1 : 0;
@@ -727,7 +726,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     private void ensureDecksInitialized() {
         store.update(s -> {
             if (s.chanceDeck() != null && s.communityDeck() != null) return s;
-            Random rng = ThreadLocalRandom.current();
+            Random rng = randomSource.toJavaRandom();
             List<String> chance = s.chanceDeck() != null ? s.chanceDeck() : CardDeckLoader.buildDeck("chance", rng);
             List<String> community = s.communityDeck() != null ? s.communityDeck() : CardDeckLoader.buildDeck("community", rng);
             return s.toBuilder().chanceDeck(chance).communityDeck(community).build();

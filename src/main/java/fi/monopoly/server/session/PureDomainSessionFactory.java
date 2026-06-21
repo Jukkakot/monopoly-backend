@@ -12,6 +12,7 @@ import fi.monopoly.application.session.trade.DomainTradeGateway;
 import fi.monopoly.application.session.turn.DomainTurnActionGateway;
 import fi.monopoly.application.session.turn.DomainTurnContinuationGateway;
 import fi.monopoly.application.session.turn.CardDeckLoader;
+import fi.monopoly.utils.RandomSource;
 import fi.monopoly.domain.session.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
@@ -50,6 +51,17 @@ public final class PureDomainSessionFactory {
     }
 
     public static SessionApplicationService create(String sessionId, InMemorySessionState store) {
+        return create(sessionId, store, RandomSource.threadLocal());
+    }
+
+    /**
+     * Creates a wired {@link SessionApplicationService} with an injected {@link RandomSource}.
+     *
+     * <p>Using a seeded source (via {@link RandomSource#seeded(long)}) makes the game fully
+     * deterministic: same seed → same dice sequence → byte-identical play-through. This is the
+     * entry point used by the evaluation harness.</p>
+     */
+    public static SessionApplicationService create(String sessionId, InMemorySessionState store, RandomSource randomSource) {
         OverlaySessionStateStore overlay = new OverlaySessionStateStore(store::get);
 
         SessionApplicationService service = new SessionApplicationService(sessionId, overlay);
@@ -62,7 +74,8 @@ public final class PureDomainSessionFactory {
         DomainTurnActionGateway turnActionGateway = new DomainTurnActionGateway(
                 store,
                 (playerId, propertyId, displayName, price, message, continuation) ->
-                        service.openPropertyPurchaseDecision(playerId, propertyId, displayName, price, message, continuation)
+                        service.openPropertyPurchaseDecision(playerId, propertyId, displayName, price, message, continuation),
+                randomSource
         );
         service.configureTurnActionFlow(turnActionGateway);
         service.configurePostPropertyPurchasePause(turnActionGateway::pauseAfterPropertyPurchase);

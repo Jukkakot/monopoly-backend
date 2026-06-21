@@ -819,6 +819,14 @@ components:
           maximum: 6
           default: 4
           description: Number of seat slots to create (lobby mode only).
+        botStrategy:
+          type: string
+          enum: [pure-domain-v1, utility-v1]
+          default: pure-domain-v1
+          description: |
+            Bot strategy to use for all bot seats in this session.
+            `pure-domain-v1` (default) uses the original greedy scoring strategy.
+            `utility-v1` uses the IAUS-based utility strategy (experimental).
 
     CreateSessionResponse:
       type: object

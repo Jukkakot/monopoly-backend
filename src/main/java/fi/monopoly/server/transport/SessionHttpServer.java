@@ -279,11 +279,12 @@ public final class SessionHttpServer {
             List<String> names = stringList(request, "names");
             List<String> colors = stringList(request, "colors");
             boolean lobbyMode = request.path("lobbyMode").asBoolean(false);
+            String botStrategy = sanitizeBotStrategy(request.path("botStrategy").textValue());
             if (lobbyMode) {
                 String hostName = request.path("hostName").asText("Pelaaja").trim();
                 if (hostName.isEmpty()) hostName = "Pelaaja";
                 String hostColor = request.path("hostColor").textValue();
-                var result = registry.createLobby(hostName, hostColor);
+                var result = registry.createLobby(hostName, hostColor, botStrategy);
                 ctx.status(201).json(Map.of(
                         "sessionId", result.sessionId(),
                         "hostToken", result.hostToken(),
@@ -303,7 +304,7 @@ public final class SessionHttpServer {
                         catch (IllegalArgumentException e) { return fi.monopoly.domain.session.SeatKind.HUMAN; }
                     }).toList();
 
-            var result = registry.create(names, colors, seatKinds);
+            var result = registry.create(names, colors, seatKinds, botStrategy);
             Map<String, Object> resp = new java.util.LinkedHashMap<>();
             resp.put("sessionId", result.sessionId());
             if (result.hostToken() != null) resp.put("hostToken", result.hostToken());
@@ -600,5 +601,11 @@ public final class SessionHttpServer {
         List<String> result = new ArrayList<>();
         arr.forEach(n -> result.add(n.asText()));
         return result;
+    }
+
+    /** Returns a validated bot-strategy name, defaulting to null (= pure-domain-v1). */
+    private static String sanitizeBotStrategy(String raw) {
+        if ("utility-v1".equals(raw)) return "utility-v1";
+        return null;
     }
 }

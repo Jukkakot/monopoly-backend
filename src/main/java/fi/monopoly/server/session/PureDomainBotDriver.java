@@ -13,12 +13,13 @@ import fi.monopoly.types.SpotType;
 import fi.monopoly.types.StreetType;
 import lombok.extern.slf4j.Slf4j;
 
+import fi.monopoly.utils.RandomSource;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -27,6 +28,10 @@ import java.util.concurrent.atomic.AtomicLong;
 // Server-side greedy bot driver for pure-domain sessions.
 @Slf4j
 public final class PureDomainBotDriver implements ClientSessionListener {
+
+    // When true, dispatchGreedy routes through PureDomainStrategy + BotExecutor instead of the
+    // inline greedy logic. Off by default until Phase 1.4 validation is complete.
+    static final boolean USE_NEW_STRATEGY = Boolean.getBoolean("monopoly.bot.use.strategy");
 
     // Fallback delay used when situational logic cannot determine a better value.
     private static final long DEFAULT_BOT_DELAY_MS = 900L;
@@ -73,6 +78,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final Set<String> botPlayerIds;
     // Per-player bot configs. Falls back to StrongBotConfig.defaults() if absent.
     private final Map<String, StrongBotConfig> configs;
+    private final RandomSource rng;
+    // Strategy path: routes through BotStrategy.decide() + BotExecutor.
+    // Active when USE_NEW_STRATEGY is set OR when a non-PD strategy is injected (e.g. UtilityStrategy).
+    private final fi.monopoly.server.bot.BotStrategy strategy;
+    private final boolean alwaysUseStrategy;
+    private final BotExecutor executor;
+    private final Map<String, fi.monopoly.server.bot.BotMemory> memories;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
     private final AtomicInteger viewerCount = new AtomicInteger(0);
@@ -116,11 +128,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             SessionCommandPublisher publisher,
             String sessionId,
             Set<String> botPlayerIds,
-            Map<String, StrongBotConfig> configs) {
+            Map<String, StrongBotConfig> configs,
+            RandomSource rng,
+            fi.monopoly.server.bot.BotStrategy strategyOverride) {
         this.publisher = publisher;
         this.sessionId = sessionId;
         this.botPlayerIds = botPlayerIds;
         this.configs = Map.copyOf(configs);
+        this.rng = rng;
+        this.strategy = strategyOverride != null ? strategyOverride : new PureDomainStrategy(configs);
+        this.alwaysUseStrategy = USE_NEW_STRATEGY || !(this.strategy instanceof PureDomainStrategy);
+        this.executor = new BotExecutor(publisher, sessionId);
+        var mem = new java.util.concurrent.ConcurrentHashMap<String, fi.monopoly.server.bot.BotMemory>();
+        for (String id : botPlayerIds) mem.put(id, fi.monopoly.server.bot.BotMemory.empty());
+        this.memories = java.util.Collections.unmodifiableMap(mem);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("bot-driver-" + sessionId.substring(0, 8), 0).factory());
         // Watchdog: fires every 5 s to recover a bot that has stopped acting even though the game still
@@ -181,17 +202,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }, 5, 5, TimeUnit.SECONDS);
     }
 
-    // Creates and registers a {@link PureDomainBotDriver} for any BOT seats in the given state.
+    // Creates and registers a bot driver using the given strategy.
     static PureDomainBotDriver createAndRegisterIfNeeded(
             SessionCommandPublisher publisher,
             SessionState initialState,
-            Map<String, StrongBotConfig> configs) {
+            Map<String, StrongBotConfig> configs,
+            fi.monopoly.server.bot.BotStrategy strategy) {
         Set<String> botIds = collectBotPlayerIds(initialState);
-        if (botIds.isEmpty()) {
-            return null;
-        }
+        if (botIds.isEmpty()) return null;
         PureDomainBotDriver driver = new PureDomainBotDriver(
-                publisher, initialState.sessionId(), botIds, configs);
+                publisher, initialState.sessionId(), botIds, configs, RandomSource.threadLocal(), strategy);
         publisher.addListener(driver);
         log.info("Bot driver registered for session {} — bots: {}",
                 initialState.sessionId().substring(0, 8), botIds);
@@ -206,6 +226,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             driver.onSnapshotChanged(initialSnap);
         }
         return driver;
+    }
+
+    // Convenience overload: uses PureDomainStrategy with given configs.
+    static PureDomainBotDriver createAndRegisterIfNeeded(
+            SessionCommandPublisher publisher,
+            SessionState initialState,
+            Map<String, StrongBotConfig> configs) {
+        return createAndRegisterIfNeeded(publisher, initialState, configs, new PureDomainStrategy(configs));
     }
 
     static PureDomainBotDriver createAndRegisterIfNeeded(
@@ -322,6 +350,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 turnsSinceMonopolyChange = 0;
                 lastMonopolyCount = monopolyCount;
             }
+            // Keep BotMemory stalemate tracking in sync (all bots share the same global count)
+            for (fi.monopoly.server.bot.BotMemory m : memories.values()) {
+                m.updateMonopolyTracking(monopolyCount);
+            }
         }
 
         // Track when bot-initiated trades are declined to avoid re-proposing to the same partner.
@@ -333,6 +365,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             TradeState cur = state.tradeState();
             if (cur == null || !prevId.equals(cur.tradeId())) {
                 counterEditAttempts.remove(prevId);
+                for (fi.monopoly.server.bot.BotMemory m : memories.values()) {
+                    m.clearCounterEdits(prevId);
+                }
             }
         }
         if (prevTrade != null && state.tradeState() == null
@@ -345,6 +380,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     tradeDeclinesByPartnerId.get(partner));
             // Record what was offered so we require a strictly better offer next time
             TradeOfferState lastOffer = prevTrade.currentOffer();
+            String declinedPropId = null;
+            int declinedAmount = 0;
             if (lastOffer != null) {
                 boolean botIsProposer = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId());
                 TradeSelectionState botWanted = botIsProposer
@@ -352,12 +389,21 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 TradeSelectionState botGave = botIsProposer
                         ? lastOffer.offeredToRecipient() : lastOffer.requestedFromRecipient();
                 if (!botWanted.propertyIds().isEmpty()) {
-                    String propId = botWanted.propertyIds().get(0);
+                    declinedPropId = botWanted.propertyIds().get(0);
+                    declinedAmount = botGave.moneyAmount();
                     lastDeclinedOfferAmount
                             .computeIfAbsent(partner, k -> new java.util.concurrent.ConcurrentHashMap<>())
-                            .put(propId, botGave.moneyAmount());
+                            .put(declinedPropId, declinedAmount);
                     log.debug("Recorded declined offer: partner={} prop={} amount={}",
-                            partner, propId, botGave.moneyAmount());
+                            partner, declinedPropId, declinedAmount);
+                }
+            }
+            // Mirror updates to BotMemory for the strategy path
+            fi.monopoly.server.bot.BotMemory botMem = memories.get(prevTrade.openedByPlayerId());
+            if (botMem != null) {
+                botMem.recordDecline(partner);
+                if (declinedPropId != null) {
+                    botMem.recordDeclinedAmount(partner, declinedPropId, declinedAmount);
                 }
             }
         }
@@ -459,6 +505,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             consecutiveDispatchCount = 1;
         }
 
+        if (alwaysUseStrategy) {
+            dispatchViaStrategy(state);
+            return;
+        }
+
         // Trade actions may involve a player other than the active turn player — handle first.
         if (state.tradeState() != null) {
             TradeState trade = state.tradeState();
@@ -498,6 +549,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             case WAITING_FOR_AUCTION -> handleAuction(state);
             default -> log.debug("Bot driver: unhandled phase {} for player {}", phase, activeId);
         }
+    }
+
+    private void dispatchViaStrategy(SessionState state) {
+        String activeId = resolveActorId(state);
+        if (activeId == null) return;
+        fi.monopoly.server.bot.BotMemory memory =
+                memories.getOrDefault(activeId, fi.monopoly.server.bot.BotMemory.empty());
+        fi.monopoly.server.bot.Intent intent = strategy.decide(state, activeId, memory, rng);
+        executor.execute(intent, activeId);
     }
 
     private void handleDecision(SessionState state, String activeId) {
@@ -1500,7 +1560,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             if (maxBid >= minBid) {
                 // Jump ~⅓ of remaining headroom toward ceiling with ±40 % random jitter
                 int headroom = maxBid - minBid;
-                double factor = 0.6 + ThreadLocalRandom.current().nextDouble() * 0.8; // 0.6–1.4
+                double factor = 0.6 + rng.nextDouble() * 0.8; // 0.6–1.4
                 int extra = ((int) (headroom / 3.0 * factor) / 10) * 10;
                 int bid = Math.min(maxBid, minBid + Math.max(10, extra));
                 publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), bid));
@@ -1537,7 +1597,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         long floor = speed < 0.15 ? 30L : 200L;  // fast mode: no artificial floor
         long scaled = Math.max(floor, (long) (base * diffMult * speed));
         long jitter = (long) (scaled * 0.20);
-        return scaled + ThreadLocalRandom.current().nextLong(-jitter, jitter + 1);
+        return scaled + rng.nextLong(-jitter, jitter + 1);
     }
 
     private long computeBaseDelay(SessionState state) {
