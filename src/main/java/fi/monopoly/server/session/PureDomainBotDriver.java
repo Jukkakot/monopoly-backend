@@ -745,13 +745,13 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int giftPenalty   = monopolyGiftPenalty(state, tradePartnerId, myGiving);
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false) + giftPenalty;
 
-        // When selling properties for cash only with no monopoly-gift penalty already applied,
-        // demand a 15% premium: properties are worth more than equivalent cash in Monopoly
-        // (they earn rent, can be mortgaged, and can complete future monopolies).
+        // When selling properties for cash only, demand a 15% premium — but only from humans.
+        // Bot-vs-bot cash offers use symmetric face-price logic; the premium would just block all such trades.
         boolean sellsPropertyForCash = !myGiving.propertyIds().isEmpty()
                 && myReceiving.propertyIds().isEmpty()
                 && myReceiving.jailCardCount() == 0;
-        int cashSalePremium = (sellsPropertyForCash && giftPenalty == 0)
+        boolean partnerIsHuman = !botPlayerIds.contains(tradePartnerId);
+        int cashSalePremium = (partnerIsHuman && sellsPropertyForCash && giftPenalty == 0)
                 ? Math.max(40, (int)(myGiving.propertyIds().stream()
                         .mapToInt(id -> SpotType.valueOf(id).getIntegerProperty("price"))
                         .sum() * 0.15))
