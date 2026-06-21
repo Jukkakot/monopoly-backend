@@ -98,8 +98,26 @@ public final class TurnActionCommandHandler {
         if (!isCurrentActor(command.sessionId(), command.actorPlayerId())) {
             return rejected("WRONG_TURN_ACTOR", "Only the active player can buy buildings");
         }
-        if (isTurnActionBlocked(currentStateSupplier.get().turn().phase())) {
+        SessionState state = currentStateSupplier.get();
+        if (isTurnActionBlocked(state.turn().phase())) {
             return rejected("BUILD_ROUND_FAILED", "Buildings cannot be bought in the current phase");
+        }
+        PropertyStateSnapshot prop = state.properties().stream()
+                .filter(p -> command.propertyId().equals(p.propertyId()))
+                .findFirst().orElse(null);
+        if (prop != null) {
+            boolean wouldBeHotel = prop.houseCount() >= 4;
+            if (wouldBeHotel) {
+                int totalHotels = state.properties().stream().mapToInt(PropertyStateSnapshot::hotelCount).sum();
+                if (totalHotels >= DomainTurnActionGateway.BANK_HOTEL_SUPPLY) {
+                    return rejected("BANK_SUPPLY_EXHAUSTED", "No hotels left in the bank");
+                }
+            } else {
+                int totalHouses = state.properties().stream().mapToInt(PropertyStateSnapshot::houseCount).sum();
+                if (totalHouses >= DomainTurnActionGateway.BANK_HOUSE_SUPPLY) {
+                    return rejected("BANK_SUPPLY_EXHAUSTED", "No houses left in the bank");
+                }
+            }
         }
         if (!gateway.buyBuildingRound(command.propertyId())) {
             return rejected("BUILD_ROUND_FAILED", "Building round purchase failed");

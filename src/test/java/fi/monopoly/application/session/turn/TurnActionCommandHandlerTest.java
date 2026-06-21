@@ -238,6 +238,41 @@ class TurnActionCommandHandlerTest {
     }
 
     @Test
+    void rejectsBuyBuildingWhenBankHouseSupplyExhausted() {
+        FakeGateway gateway = new FakeGateway();
+        // O1 has 0 houses; 8 other properties each have 4 houses = 32 total (bank limit)
+        List<PropertyStateSnapshot> props = new java.util.ArrayList<>();
+        props.add(new PropertyStateSnapshot(SpotType.O1.name(), "player-1", false, 0, 0));
+        SpotType[] fullHouseProps = {SpotType.O2, SpotType.O3, SpotType.B1, SpotType.B2, SpotType.G1, SpotType.G2, SpotType.Y1, SpotType.Y2};
+        for (SpotType s : fullHouseProps) props.add(new PropertyStateSnapshot(s.name(), "player-1", false, 4, 0));
+        SessionState state = sessionStateWithProps(TurnPhase.WAITING_FOR_END_TURN, props, 1500);
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session", () -> state, gateway);
+
+        var result = handler.handle(new BuyBuildingRoundCommand("local-session", "player-1", SpotType.O1.name()));
+        assertFalse(result.accepted(), "Should reject when bank has no houses left");
+        assertEquals("BANK_SUPPLY_EXHAUSTED", result.rejections().getFirst().code());
+        assertFalse(gateway.boughtBuildingRound);
+    }
+
+    @Test
+    void rejectsBuyBuildingWhenBankHotelSupplyExhausted() {
+        FakeGateway gateway = new FakeGateway();
+        // O1 has 4 houses (next buy would be a hotel); 12 other properties each have 1 hotel = 12 total (bank limit)
+        List<PropertyStateSnapshot> props = new java.util.ArrayList<>();
+        props.add(new PropertyStateSnapshot(SpotType.O1.name(), "player-1", false, 4, 0));
+        SpotType[] fullHotelProps = {SpotType.O2, SpotType.O3, SpotType.B1, SpotType.B2, SpotType.G1, SpotType.G2,
+                SpotType.Y1, SpotType.Y2, SpotType.Y3, SpotType.R1, SpotType.R2, SpotType.R3};
+        for (SpotType s : fullHotelProps) props.add(new PropertyStateSnapshot(s.name(), "player-1", false, 0, 1));
+        SessionState state = sessionStateWithProps(TurnPhase.WAITING_FOR_END_TURN, props, 1500);
+        TurnActionCommandHandler handler = new TurnActionCommandHandler("local-session", () -> state, gateway);
+
+        var result = handler.handle(new BuyBuildingRoundCommand("local-session", "player-1", SpotType.O1.name()));
+        assertFalse(result.accepted(), "Should reject when bank has no hotels left");
+        assertEquals("BANK_SUPPLY_EXHAUSTED", result.rejections().getFirst().code());
+        assertFalse(gateway.boughtBuildingRound);
+    }
+
+    @Test
     void rejectsMortgageOfStreetWhenColorGroupHasBuildings() {
         FakeGateway gateway = new FakeGateway();
         // B1 has 1 house, B2 has no house; player has plenty of cash
@@ -252,6 +287,16 @@ class TurnActionCommandHandlerTest {
         assertFalse(result.accepted(), "Should reject mortgage when color group has buildings");
         assertEquals("BUILDINGS_PRESENT", result.rejections().getFirst().code());
         assertFalse(gateway.toggledMortgage);
+    }
+
+    private SessionState sessionStateWithProps(TurnPhase phase, List<PropertyStateSnapshot> props, int playerCash) {
+        return new SessionState(
+                "local-session", 0L, SessionStatus.IN_PROGRESS,
+                List.of(new SeatState("seat-1", 0, "player-1", SeatKind.BOT, ControlMode.MANUAL, "Bot", "STRONG", "#FFC0CB")),
+                List.of(new PlayerSnapshot("player-1", "seat-1", "Bot", playerCash, SpotType.GO_SPOT.ordinal(), false, false, false, 0, 0, List.of())),
+                props,
+                new TurnState("player-1", phase, false, true),
+                null, null, null, null, null);
     }
 
     private SessionState sessionState(TurnPhase phase) {
