@@ -58,10 +58,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // monopoly and the bot does not — getting our own set becomes urgent, accept worse deals.
     private static final double CATCHUP_DISCOUNT = 0.40;
 
-    // Version-lag throttle is effectively disabled: client presence is now gated on recent acks
-    // (see viewerPresent), which pauses a dead/stalled client without throttling a watched bot
-    // mid-trade. The client queues snapshots and drains them in order, so the bot may run ahead.
-    private static final int MAX_CLIENT_LAG_VERSIONS = Integer.MAX_VALUE;
+    // Bot pauses when the client is more than this many versions behind its latest ACK.
+    // Keeps the backend from running more than ~1 full bot turn ahead of what the client
+    // has received, so the animation queue never grows unboundedly.
+    private static final int MAX_CLIENT_LAG_VERSIONS = 3;
 
     // A client ack within this window counts as "a viewer is present", independent of the SSE
     // connect counter — which misses viewers that connected during the lobby, before the driver
