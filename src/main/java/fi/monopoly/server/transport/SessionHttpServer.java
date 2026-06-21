@@ -308,6 +308,9 @@ public final class SessionHttpServer {
             Map<String, Object> resp = new java.util.LinkedHashMap<>();
             resp.put("sessionId", result.sessionId());
             if (result.hostToken() != null) resp.put("hostToken", result.hostToken());
+            if (result.hostPlayerId() != null) resp.put("playerId", result.hostPlayerId());
+            if (result.hostPlayerToken() != null) resp.put("playerToken", result.hostPlayerToken());
+            if (!result.allPlayerTokens().isEmpty()) resp.put("playerTokens", result.allPlayerTokens());
             ctx.status(201).json(resp);
         } catch (fi.monopoly.server.session.SessionLimitExceededException e) {
             ctx.status(503).json(Map.of("error", e.errorCode(), "message", e.getMessage()));

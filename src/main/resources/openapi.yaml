@@ -838,6 +838,18 @@ components:
           type: string
           format: uuid
           description: Secret token granting host/admin privileges (e.g. AbortGame). Store in localStorage.
+        playerId:
+          type: string
+          description: Player ID for the first human seat. Absent for all-bot sessions. Store in sessionStorage and localStorage.
+        playerToken:
+          type: string
+          format: uuid
+          description: Authentication token for the first human player. Required when sending commands. Store in sessionStorage and localStorage.
+        playerTokens:
+          type: object
+          description: Map of playerId → playerToken for all human seats. Use this when driving a multi-human quick-create session (e.g. in tests). Single-human clients can use the top-level playerId/playerToken instead.
+          additionalProperties:
+            type: string
 
     SessionSummary:
       type: object

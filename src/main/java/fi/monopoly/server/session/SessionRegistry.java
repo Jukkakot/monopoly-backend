@@ -49,7 +49,11 @@ public final class SessionRegistry {
             Double.parseDouble(System.getProperty("monopoly.session.cpu.threshold", "0.95"));
     private static final long LOAD_LOG_INTERVAL_SECONDS = 30L;
 
-    public record CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken) {}
+    public record CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken, Map<String, String> allPlayerTokens) {
+        public CreateResult(String sessionId, String hostToken, String hostPlayerId, String hostPlayerToken) {
+            this(sessionId, hostToken, hostPlayerId, hostPlayerToken, Map.of());
+        }
+    }
     public record JoinResult(SeatState seat, String playerToken) {}
 
     private record Entry(
@@ -110,10 +114,26 @@ public final class SessionRegistry {
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, botConfigs, strategy);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
-        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, new ConcurrentHashMap<>(), botStrategyName));
+        // Generate player tokens for all human seats so that commands can be authenticated.
+        // Player IDs are deterministic: "player-" + (inputIndex + 1).
+        ConcurrentHashMap<String, String> playerTokens = new ConcurrentHashMap<>();
+        String firstHumanPlayerId = null;
+        String firstHumanPlayerToken = null;
+        for (int i = 0; i < seatKinds.size(); i++) {
+            if (seatKinds.get(i) == SeatKind.HUMAN) {
+                String pid = "player-" + (i + 1);
+                String token = UUID.randomUUID().toString();
+                playerTokens.put(pid, token);
+                if (firstHumanPlayerId == null) {
+                    firstHumanPlayerId = pid;
+                    firstHumanPlayerToken = token;
+                }
+            }
+        }
+        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, playerTokens, botStrategyName));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
-        return new CreateResult(sessionId, hostToken, null, null);
+        return new CreateResult(sessionId, hostToken, firstHumanPlayerId, firstHumanPlayerToken, Map.copyOf(playerTokens));
     }
 
     // -------------------------------------------------------------------------

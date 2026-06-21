@@ -14,7 +14,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -60,6 +63,8 @@ class HttpApiE2EGameTest {
         if (registry != null) registry.shutdown();
     }
 
+    private record SessionData(String sessionId, Map<String, String> playerTokens) {}
+
     // -------------------------------------------------------------------------
     // E2E game runs
     // -------------------------------------------------------------------------
@@ -67,9 +72,9 @@ class HttpApiE2EGameTest {
     @Test
     @Timeout(value = 60, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void twoHumanPlayerGameProgressesViaHttpApi() throws Exception {
-        String sessionId = createSession(List.of("Alice", "Bob"), List.of("#E63946", "#2A9D8F"),
+        SessionData sd = createSession(List.of("Alice", "Bob"), List.of("#E63946", "#2A9D8F"),
                 List.of("HUMAN", "HUMAN"), List.of());
-        DriveResult result = driveGame(sessionId);
+        DriveResult result = driveGame(sd);
 
         assertFalse(result.stalled(),
                 "HTTP-driven game stalled after " + result.steps() + " steps — possible transport deadlock");
@@ -81,11 +86,11 @@ class HttpApiE2EGameTest {
     @Test
     @Timeout(value = 60, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void threeHumanPlayerGameProgressesViaHttpApi() throws Exception {
-        String sessionId = createSession(
+        SessionData sd = createSession(
                 List.of("Alice", "Bob", "Carol"),
                 List.of("#E63946", "#2A9D8F", "#E9C46A"),
                 List.of("HUMAN", "HUMAN", "HUMAN"), List.of());
-        DriveResult result = driveGame(sessionId);
+        DriveResult result = driveGame(sd);
 
         assertFalse(result.stalled(),
                 "3-player HTTP game stalled after " + result.steps() + " steps");
@@ -96,13 +101,14 @@ class HttpApiE2EGameTest {
     @Test
     @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void snapshotVersionIncreasesAfterEachAcceptedCommand() throws Exception {
-        String sessionId = createSession(List.of("Alice", "Bob"), List.of(), List.of(), List.of());
+        SessionData sd = createSession(List.of("Alice", "Bob"), List.of(), List.of(), List.of());
+        String sessionId = sd.sessionId();
 
         long versionBefore = snapshotVersion(sessionId);
         JsonNode snap = snapshot(sessionId);
         String activeId = snap.at("/state/turn/activePlayerId").asText();
 
-        String rollJson = buildRollDice(sessionId, activeId);
+        String rollJson = buildRollDice(sessionId, activeId, sd.playerTokens());
         HttpResponse<String> result = postCommand(sessionId, rollJson);
         assertEquals(200, result.statusCode());
         assertTrue(result.body().contains("\"accepted\":true"), "RollDice should be accepted");
@@ -116,7 +122,8 @@ class HttpApiE2EGameTest {
     @Test
     @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void commandIdempotencyPreventsDuplicateEffect() throws Exception {
-        String sessionId = createSession(List.of("Alice", "Bob"), List.of(), List.of(), List.of());
+        SessionData sd = createSession(List.of("Alice", "Bob"), List.of(), List.of(), List.of());
+        String sessionId = sd.sessionId();
         String activeId = snapshot(sessionId).at("/state/turn/activePlayerId").asText();
         long versionBefore = snapshotVersion(sessionId);
 
@@ -144,7 +151,9 @@ class HttpApiE2EGameTest {
     // Greedy game driver
     // -------------------------------------------------------------------------
 
-    private DriveResult driveGame(String sessionId) throws Exception {
+    private DriveResult driveGame(SessionData sd) throws Exception {
+        String sessionId = sd.sessionId();
+        Map<String, String> tokens = sd.playerTokens();
         int steps = 0;
         int turnSwitches = 0;
         int rejectedConsecutive = 0;
@@ -166,7 +175,7 @@ class HttpApiE2EGameTest {
                 lastActivePlayer = activeId;
             }
 
-            String commandJson = buildCommand(sessionId, snap, phase, activeId);
+            String commandJson = buildCommand(sessionId, snap, phase, activeId, tokens);
             if (commandJson == null) {
                 if (rejectedConsecutive < 3) System.err.println("[DEBUG] step=" + steps + " phase=" + phase + " activeId=" + activeId + " => null command");
                 rejectedConsecutive++;
@@ -190,21 +199,25 @@ class HttpApiE2EGameTest {
         return new DriveResult(steps, turnSwitches, false, false);
     }
 
-    private String buildCommand(String sessionId, JsonNode snap, String phase, String activeId) {
+    private String buildCommand(String sessionId, JsonNode snap, String phase, String activeId, Map<String, String> tokens) {
         if (activeId == null || activeId.isEmpty()) return null;
         return switch (phase) {
-            case "WAITING_FOR_ROLL"      -> buildRollDice(sessionId, activeId);
-            case "WAITING_FOR_CARD_ACK"  -> json("AcknowledgeCard", sessionId, activeId, "");
-            case "WAITING_FOR_END_TURN"  -> buildEndTurn(sessionId, activeId);
-            case "WAITING_FOR_DECISION"  -> buildDecisionCommand(sessionId, snap, activeId);
-            case "RESOLVING_DEBT"        -> buildDebtCommand(sessionId, snap);
-            case "WAITING_FOR_AUCTION"   -> buildAuctionCommand(sessionId, snap);
+            case "WAITING_FOR_ROLL"      -> buildRollDice(sessionId, activeId, tokens);
+            case "WAITING_FOR_CARD_ACK"  -> json("AcknowledgeCard", sessionId, activeId, "", tokens);
+            case "WAITING_FOR_END_TURN"  -> buildEndTurn(sessionId, activeId, tokens);
+            case "WAITING_FOR_DECISION"  -> buildDecisionCommand(sessionId, snap, activeId, tokens);
+            case "RESOLVING_DEBT"        -> buildDebtCommand(sessionId, snap, tokens);
+            case "WAITING_FOR_AUCTION"   -> buildAuctionCommand(sessionId, snap, tokens);
             default -> null;
         };
     }
 
+    private String buildRollDice(String sessionId, String activeId, Map<String, String> tokens) {
+        return json("RollDice", sessionId, activeId, "", tokens);
+    }
+
     private String buildRollDice(String sessionId, String activeId) {
-        return json("RollDice", sessionId, activeId, "");
+        return json("RollDice", sessionId, activeId, "", Map.of());
     }
 
     private String buildRollDiceWithCommandId(String sessionId, String activeId, String commandId) {
@@ -212,13 +225,17 @@ class HttpApiE2EGameTest {
                 .formatted(sessionId, activeId, commandId);
     }
 
-    private String buildEndTurn(String sessionId, String activeId) {
-        return json("EndTurn", sessionId, activeId, "");
+    private String buildEndTurn(String sessionId, String activeId, Map<String, String> tokens) {
+        return json("EndTurn", sessionId, activeId, "", tokens);
     }
 
-    private String buildDecisionCommand(String sessionId, JsonNode snap, String activeId) {
+    private String buildEndTurn(String sessionId, String activeId) {
+        return json("EndTurn", sessionId, activeId, "", Map.of());
+    }
+
+    private String buildDecisionCommand(String sessionId, JsonNode snap, String activeId, Map<String, String> tokens) {
         JsonNode decision = snap.at("/state/pendingDecision");
-        if (decision.isMissingNode() || decision.isNull()) return buildEndTurn(sessionId, activeId);
+        if (decision.isMissingNode() || decision.isNull()) return buildEndTurn(sessionId, activeId, tokens);
 
         String decisionId  = decision.at("/decisionId").asText("");
         String propertyId  = decision.at("/payload/propertyId").asText("");
@@ -227,12 +244,13 @@ class HttpApiE2EGameTest {
                 ? findPlayerCash(snap, activeId) : 0;
 
         String type = cash >= price ? "BuyProperty" : "DeclineProperty";
-        return ("{\"type\":\"%s\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+        String tok = tokenField(activeId, tokens);
+        return ("{\"type\":\"%s\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,"
                 + "\"decisionId\":\"%s\",\"propertyId\":\"%s\"}")
-                .formatted(type, sessionId, activeId, decisionId, propertyId);
+                .formatted(type, sessionId, activeId, tok, decisionId, propertyId);
     }
 
-    private String buildDebtCommand(String sessionId, JsonNode snap) {
+    private String buildDebtCommand(String sessionId, JsonNode snap, Map<String, String> tokens) {
         JsonNode debt     = snap.at("/state/activeDebt");
         if (debt.isMissingNode() || debt.isNull()) return null;
         String debtId     = debt.at("/debtId").asText("");
@@ -240,32 +258,33 @@ class HttpApiE2EGameTest {
         int    cash       = debt.at("/currentCash").asInt(0);
         int    amount     = debt.at("/amountRemaining").asInt(Integer.MAX_VALUE);
         String actions    = debt.at("/allowedActions").toString();
+        String tok = tokenField(debtorId, tokens);
 
         if (actions.contains("PAY_DEBT_NOW") && cash >= amount) {
-            return "{\"type\":\"PayDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\",\"debtId\":\"%s\"}"
-                    .formatted(sessionId, debtorId, debtId);
+            return "{\"type\":\"PayDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,\"debtId\":\"%s\"}"
+                    .formatted(sessionId, debtorId, tok, debtId);
         }
         if (actions.contains("SELL_BUILDING")) {
             String propId = findSellableBuilding(snap, debtorId);
             if (propId != null) {
-                return ("{\"type\":\"SellBuildingForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+                return ("{\"type\":\"SellBuildingForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,"
                         + "\"debtId\":\"%s\",\"propertyId\":\"%s\",\"count\":1}")
-                        .formatted(sessionId, debtorId, debtId, propId);
+                        .formatted(sessionId, debtorId, tok, debtId, propId);
             }
         }
         if (actions.contains("MORTGAGE_PROPERTY")) {
             String propId = findUnmortgagedProperty(snap, debtorId);
             if (propId != null) {
-                return ("{\"type\":\"MortgagePropertyForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+                return ("{\"type\":\"MortgagePropertyForDebt\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,"
                         + "\"debtId\":\"%s\",\"propertyId\":\"%s\"}")
-                        .formatted(sessionId, debtorId, debtId, propId);
+                        .formatted(sessionId, debtorId, tok, debtId, propId);
             }
         }
-        return "{\"type\":\"DeclareBankruptcy\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\",\"debtId\":\"%s\"}"
-                .formatted(sessionId, debtorId, debtId);
+        return "{\"type\":\"DeclareBankruptcy\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,\"debtId\":\"%s\"}"
+                .formatted(sessionId, debtorId, tok, debtId);
     }
 
-    private String buildAuctionCommand(String sessionId, JsonNode snap) {
+    private String buildAuctionCommand(String sessionId, JsonNode snap, Map<String, String> tokens) {
         JsonNode auction = snap.at("/state/auctionState");
         if (auction.isMissingNode()) return null;
 
@@ -281,24 +300,35 @@ class HttpApiE2EGameTest {
 
         int minBid = auction.at("/minimumNextBid").asInt(Integer.MAX_VALUE);
         int cash   = findPlayerCash(snap, bidderId);
+        String tok = tokenField(bidderId, tokens);
 
         if (cash >= minBid && minBid > 0) {
-            return ("{\"type\":\"PlaceAuctionBid\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\","
+            return ("{\"type\":\"PlaceAuctionBid\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,"
                     + "\"auctionId\":\"%s\",\"amount\":%d}")
-                    .formatted(sessionId, bidderId, auctionId, minBid);
+                    .formatted(sessionId, bidderId, tok, auctionId, minBid);
         }
-        return "{\"type\":\"PassAuction\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\",\"auctionId\":\"%s\"}"
-                .formatted(sessionId, bidderId, auctionId);
+        return "{\"type\":\"PassAuction\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s,\"auctionId\":\"%s\"}"
+                .formatted(sessionId, bidderId, tok, auctionId);
     }
 
     // -------------------------------------------------------------------------
     // JSON helpers
     // -------------------------------------------------------------------------
 
+    /** Returns {@code ,"playerToken":"<token>"} if a token is known for this player, else {@code ""}. */
+    private String tokenField(String actorId, Map<String, String> tokens) {
+        String tok = tokens.get(actorId);
+        return tok != null ? ",\"playerToken\":\"" + tok + "\"" : "";
+    }
+
+    private String json(String type, String sessionId, String actorId, String extra, Map<String, String> tokens) {
+        String tok = tokenField(actorId, tokens);
+        return "{\"type\":\"%s\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s%s}"
+                .formatted(type, sessionId, actorId, tok, extra.isEmpty() ? "" : "," + extra);
+    }
+
     private String json(String type, String sessionId, String actorId, String extra) {
-        String base = "{\"type\":\"%s\",\"sessionId\":\"%s\",\"actorPlayerId\":\"%s\"%s}"
-                .formatted(type, sessionId, actorId, extra.isEmpty() ? "" : "," + extra);
-        return base;
+        return json(type, sessionId, actorId, extra, Map.of());
     }
 
     private int findPlayerCash(JsonNode snap, String playerId) {
@@ -335,8 +365,8 @@ class HttpApiE2EGameTest {
     // HTTP helpers
     // -------------------------------------------------------------------------
 
-    private String createSession(List<String> names, List<String> colors,
-                                  List<String> seatKinds, List<String> difficulties) throws Exception {
+    private SessionData createSession(List<String> names, List<String> colors,
+                                      List<String> seatKinds, List<String> difficulties) throws Exception {
         String namesJson   = toJsonArray(names);
         String colorsJson  = toJsonArray(colors);
         String kindsJson   = toJsonArray(seatKinds);
@@ -346,7 +376,18 @@ class HttpApiE2EGameTest {
 
         HttpResponse<String> resp = post("/sessions", body);
         assertEquals(201, resp.statusCode(), "createSession must return 201");
-        return mapper.readTree(resp.body()).at("/sessionId").asText();
+        JsonNode root = mapper.readTree(resp.body());
+        String sessionId = root.at("/sessionId").asText();
+        Map<String, String> playerTokens = new HashMap<>();
+        JsonNode tokensNode = root.at("/playerTokens");
+        if (!tokensNode.isMissingNode() && tokensNode.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = tokensNode.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> e = fields.next();
+                playerTokens.put(e.getKey(), e.getValue().asText());
+            }
+        }
+        return new SessionData(sessionId, playerTokens);
     }
 
     private JsonNode snapshot(String sessionId) throws Exception {
