@@ -571,4 +571,71 @@ final class StrongBotStrategy {
                 .average()
                 .orElse(200.0);
     }
+
+    // -------------------------------------------------------------------------
+    // Monopoly progress scoring — used for net-delta trade evaluation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Weighted monopoly-progress score for {@code playerId} across all STREET color groups,
+     * after applying a set of properties transferred in and out.
+     *
+     * <p>Scoring per group (capped at group size):
+     * <ul>
+     *   <li>Complete monopoly (owned == groupSize): 3 pts × groupStrength</li>
+     *   <li>One short (owned == groupSize − 1):      1 pt  × groupStrength</li>
+     *   <li>Otherwise:                               0 pts</li>
+     * </ul>
+     *
+     * <p>Only STREET groups count (railroads/utilities have no building bonus in Monopoly
+     * and are excluded to avoid distorting the delta).</p>
+     */
+    static double monopolyProgressScore(SessionState state, String playerId,
+                                        List<String> transferredIn, List<String> transferredOut) {
+        double total = 0.0;
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+
+            long current = state.properties().stream()
+                    .filter(p -> playerId.equals(p.ownerPlayerId())
+                            && spotType(p.propertyId()).streetType == group)
+                    .count();
+            long gained = transferredIn.stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            long lost = transferredOut.stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            long after = Math.max(0, Math.min(groupSize, current + gained - lost));
+
+            double strength = streetStrengthScore(group);
+            if (after == groupSize) {
+                total += 3.0 * strength;
+            } else if (after == groupSize - 1) {
+                total += 1.0 * strength;
+            }
+        }
+        return total;
+    }
+
+    /**
+     * Net monopoly delta for a proposed trade, from the bot's perspective.
+     *
+     * <p>Returns {@code (myNewScore - myOldScore) - (partnerNewScore - partnerOldScore)}.
+     * Positive values mean the bot gains more monopoly progress than the partner;
+     * negative values mean the partner gains more.</p>
+     *
+     * @param botId     the evaluating bot's player ID
+     * @param partnerId the trade counterpart's player ID
+     * @param receiving property IDs the bot would receive
+     * @param giving    property IDs the bot would give away
+     */
+    static double tradeMonopolyNetDelta(SessionState state, String botId, String partnerId,
+                                        List<String> receiving, List<String> giving) {
+        double myOld     = monopolyProgressScore(state, botId,     List.of(), List.of());
+        double myNew     = monopolyProgressScore(state, botId,     receiving, giving);
+        double partnerOld = monopolyProgressScore(state, partnerId, List.of(), List.of());
+        double partnerNew = monopolyProgressScore(state, partnerId, giving, receiving);
+        return (myNew - myOld) - (partnerNew - partnerOld);
+    }
 }

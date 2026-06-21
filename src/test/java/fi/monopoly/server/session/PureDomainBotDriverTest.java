@@ -971,6 +971,93 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Net monopoly delta: bot gains 2 groups, partner gains 1 — should accept
+    // (regression for the old hard veto that blocked this as "opponent gains monopoly")
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botAcceptsTradeWhenGainingTwoMonopoliesVsOpponentGainingOne() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O1, O2 (2/3 ORANGE) and B1 (1/2 BROWN).
+        // Human owns O3 (1/3 ORANGE) and B2 (1/2 BROWN).
+        // Trade: bot gives B1 and receives O3.
+        // Result: bot completes ORANGE (monopoly); human completes BROWN (monopoly).
+        // netDelta = bot gains 1 monopoly, opponent gains 1 monopoly… but bot's ORANGE group
+        // is stronger (streetStrengthScore=5 vs BROWN=2), so net delta is positive.
+        // The old hard veto would have blocked this because "partner gains a monopoly".
+        PropertyStateSnapshot o1 = new PropertyStateSnapshot("O1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o2 = new PropertyStateSnapshot("O2", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot b1 = new PropertyStateSnapshot("B1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o3 = new PropertyStateSnapshot("O3", HUMAN_PLAYER, false, 0, 0);
+        PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", HUMAN_PLAYER, false, 0, 0);
+
+        // Human proposes: bot gives B1, bot receives O3
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(0, List.of("O3"), 0),  // offered to bot: O3
+                new TradeSelectionState(0, List.of("B1"), 0)); // requested from bot: B1
+        TradeState trade = new TradeState(
+                "trade-two-monopolies", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, HUMAN_PLAYER, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(o1, o2, b1, o3, b2));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof DeclineTradeCommand),
+                "Bot must NOT decline a trade where it gains more monopoly progress than the opponent "
+                + "(ORANGE > BROWN in value); got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot should accept when net monopoly delta is positive (gains ORANGE, concedes BROWN); "
+                + "got: " + recorder.commands);
+    }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botDeclinesTradeWhenOpponentGainsMoreMonopolyProgressThanBot() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns B2 (1/2 BROWN). Human owns B1 (1/2 BROWN).
+        // Human offers 50€ for B2 — this would give human the BROWN monopoly while bot gains nothing.
+        // netDelta: bot loses BROWN progress, human gains BROWN monopoly → netDelta negative → decline.
+        // This verifies the net-delta logic still rejects bad deals (replacing the old hard veto).
+        PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot b1 = new PropertyStateSnapshot("B1", HUMAN_PLAYER, false, 0, 0);
+
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(50, List.of(), 0),     // offered: 50€ cash
+                new TradeSelectionState(0, List.of("B2"), 0)); // requested: B2 (completes human's BROWN)
+        TradeState trade = new TradeState(
+                "trade-net-delta-negative", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, HUMAN_PLAYER, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(b1, b2));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot must not accept a trade where opponent gains a monopoly and bot gains none "
+                + "(negative net monopoly delta); got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
