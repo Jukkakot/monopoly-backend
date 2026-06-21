@@ -40,9 +40,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * If nothing beats either baseline, delegates to {@code PureDomainStrategy}.</p>
  *
  * <h3>Production default</h3>
- * <p>This strategy is NOT the production default. It runs only when explicitly selected
- * via the harness or a per-session flag (see {@link PureDomainBotDriver#USE_NEW_STRATEGY}).
- * The gauntlet must show parity with {@code pure-domain-v1} before promotion.</p>
+ * <p>This strategy is the production default. {@code pure-domain-v1} remains available
+ * as an explicit opt-in via the {@code botStrategy} API field.</p>
  */
 public final class UtilityStrategy implements BotStrategy {
 
