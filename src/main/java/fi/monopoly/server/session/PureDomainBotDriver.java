@@ -735,15 +735,6 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeOfferState offer = trade.currentOffer();
         boolean botIsRecipient = botId.equals(offer.recipientPlayerId());
 
-        // Post-trade cooldown: if this bot just completed a trade recently, decline incoming offers.
-        // This prevents the cascade where one completed trade immediately spawns another.
-        if (botIsRecipient) {
-            int lastCompleted = lastTradeCompletedAtTurn.getOrDefault(botId, -100);
-            if (globalTurnCounter.get() - lastCompleted < POST_TRADE_COOLDOWN_TURNS) {
-                declineReceivedOffer(botId, tradeId, null);
-                return;
-            }
-        }
 
         String tradePartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
 
@@ -1447,18 +1438,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         return false;
     }
 
-    // Fix 1 (win-win): finds a partner who holds a property the bot needs to complete a monopoly AND who needs a...
+    // Fix 1 (win-win): finds a partner who holds a property the bot needs to complete a monopoly AND who needs a
+    // monopoly-completing piece back. Both sides must gain critical (n-1) or monopoly progress — if the bot only
+    // reaches n-2, it's not a win-win and the partner should not give up monopoly value for so little in return.
     private String findWinWinTargetProperty(SessionState state, String botId, String partnerId) {
-        // Does the bot hold something that completes the PARTNER's set? That's the sweetener that makes the partner s...
+        // Does the bot hold something that completes the PARTNER's set? That's the sweetener that makes the partner sell.
         boolean botCanCompletePartner = state.properties().stream()
                 .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
                         && p.houseCount() == 0 && p.hotelCount() == 0)
                 .anyMatch(p -> wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()));
         if (!botCanCompletePartner) return null;
-        // The bot wants something back.
-        String botWants = findCriticalTargetProperty(state, botId, partnerId);
-        if (botWants == null) botWants = findStrategicTargetProperty(state, botId, partnerId);
-        return botWants;
+        // The bot must also get a critical property (n-1 → monopoly) in return.
+        // Restricting to critical-only ensures both sides make decisive monopoly progress.
+        return findCriticalTargetProperty(state, botId, partnerId);
     }
 
     // Fix 8 (bundling): if completing the bot's monopoly in the group of {@code primaryTarget} requires more than...
