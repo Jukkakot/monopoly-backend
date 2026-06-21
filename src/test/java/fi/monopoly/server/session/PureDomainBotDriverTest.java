@@ -793,6 +793,184 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Trade goal-orientation: bot must not accept property-only trades that don't
+    // advance any monopoly goal (regression for aimless property-shuffling).
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botDeclinesPurePropertySwapWithNoMonopolyBenefit() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O1 (ORANGE), human wants to swap it for R1 (RED).
+        // Bot has zero other RED or ORANGE properties → receiving R1 advances no group.
+        // This is a pure property shuffle — bot should decline.
+        PropertyStateSnapshot o1 = new PropertyStateSnapshot("O1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot r1 = new PropertyStateSnapshot("R1", HUMAN_PLAYER, false, 0, 0);
+
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(0, List.of("R1"), 0),    // offered to bot: R1
+                new TradeSelectionState(0, List.of("O1"), 0));   // requested from bot: O1
+        TradeState trade = new TradeState(
+                "trade-shuffle", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, HUMAN_PLAYER, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(o1, r1));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot must not accept a property swap that advances no monopoly goal; got: " + recorder.commands);
+    }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botDeclinesTradeThatCompletesOpponentMonopolyWithoutExtraordinaryCompensation() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Human owns B1 and needs B2 to complete BROWN monopoly.
+        // Human offers just 50€ for B2 (face price 60, mortgage value 30).
+        // Giving away B2 completes the opponent's monopoly — must be vetoed.
+        PropertyStateSnapshot b2 = new PropertyStateSnapshot("B2", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot b1 = new PropertyStateSnapshot("B1", HUMAN_PLAYER, false, 0, 0);
+
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(50, List.of(), 0),     // offered: 50€
+                new TradeSelectionState(0, List.of("B2"), 0)); // requested: B2 (completes human's BROWN)
+        TradeState trade = new TradeState(
+                "trade-monopoly-gift", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, HUMAN_PLAYER, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(b1, b2));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot must not accept a trade that completes the opponent's monopoly for modest cash; got: " + recorder.commands);
+    }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botDoesNotInitiateTradeForIsolatedProperty() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O1 (ORANGE 1 of 3), human owns R1 (RED 1 of 3).
+        // Neither player has more than 1 property in any group → no near-monopoly.
+        // The bot should NOT initiate a foothold-only trade — it has no clear goal.
+        PropertyStateSnapshot o1 = new PropertyStateSnapshot("O1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot r1 = new PropertyStateSnapshot("R1", HUMAN_PLAYER, false, 0, 0);
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(o1, r1));
+        // Give bot plenty of cash so the cash-guard doesn't prevent trade initiation
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 800, 1, false, false, false, 0, 0, List.of("O1")),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 1, false, false, false, 0, 0, List.of("R1"))
+                ))
+                .build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof OpenTradeCommand),
+                "Bot must not initiate a trade when neither player has a near-monopoly position; got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof EndTurnCommand),
+                "Bot should end turn when there is no strategic trade opportunity; got: " + recorder.commands);
+    }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botInitiatesTradeWhenNearMonopoly() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O1 + O2 (2 of 3 ORANGE properties = n-1 → critical).
+        // Human owns O3. Bot should immediately initiate a trade to complete the ORANGE monopoly.
+        PropertyStateSnapshot o1 = new PropertyStateSnapshot("O1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o2 = new PropertyStateSnapshot("O2", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o3 = new PropertyStateSnapshot("O3", HUMAN_PLAYER, false, 0, 0);
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(o1, o2, o3));
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 600, 1, false, false, false, 0, 0, List.of("O1","O2")),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 1, false, false, false, 0, 0, List.of("O3"))
+                ))
+                .build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c ->
+                        c instanceof OpenTradeCommand o
+                                && BOT_PLAYER.equals(o.actorPlayerId())
+                                && HUMAN_PLAYER.equals(o.recipientPlayerId())),
+                "Bot should initiate trade when 1 step from completing ORANGE monopoly; got: " + recorder.commands);
+    }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botAcceptsTradeWhenReceivingPropertyAdvancesMonopoly() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O1 (ORANGE), human offers O2 for 60€ cash.
+        // Bot receiving O2 advances its ORANGE set (already has O1 → foothold).
+        // This is a goal-oriented trade — bot should accept if price is fair.
+        PropertyStateSnapshot o1 = new PropertyStateSnapshot("O1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o2 = new PropertyStateSnapshot("O2", HUMAN_PLAYER, false, 0, 0);
+
+        // Human offers O2 for free (no cash requested) — an outright gift.
+        // evaluateSelectionContextual: receiving O2 advances O group (1+1=2 of 3, so partial bonus).
+        // myGiving: nothing. Should accept because valueReceived >= 0 and advancing a monopoly.
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(0, List.of("O2"), 0),  // offered: O2
+                new TradeSelectionState(0, List.of(), 0));     // requested: nothing
+        TradeState trade = new TradeState(
+                "trade-advance", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, HUMAN_PLAYER, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(o1, o2));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot should accept free property that advances its ORANGE monopoly; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
