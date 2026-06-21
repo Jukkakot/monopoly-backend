@@ -51,12 +51,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private static final double MONOPOLY_SALE_PREMIUM = 1.6;
 
     // relaxes its monopoly-gift caution by this factor so deals can finally happen.
-    private static final double STALEMATE_GIFT_RELIEF = 0.5;
+    private static final double STALEMATE_GIFT_RELIEF = 0.75;
     // [Fix 3] How many bot turns without any new monopoly before stalemate easing kicks in.
     private static final int STALEMATE_TURN_THRESHOLD = 12;
 
     // monopoly and the bot does not — getting our own set becomes urgent, accept worse deals.
-    private static final double CATCHUP_DISCOUNT = 0.40;
+    private static final double CATCHUP_DISCOUNT = 0.25;
 
     // Bot pauses when the client is more than this many versions behind its latest ACK.
     // Keeps the backend from running more than ~1 full bot turn ahead of what the client
@@ -737,8 +737,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         TradeSelectionState myGiving    = botIsRecipient ? offer.requestedFromRecipient() : offer.offeredToRecipient();
 
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
-        int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false)
-                          + monopolyGiftPenalty(state, tradePartnerId, myGiving);
+        int giftPenalty   = monopolyGiftPenalty(state, tradePartnerId, myGiving);
+        int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false) + giftPenalty;
+
+        // When selling properties for cash only with no monopoly-gift penalty already applied,
+        // demand a 15% premium: properties are worth more than equivalent cash in Monopoly
+        // (they earn rent, can be mortgaged, and can complete future monopolies).
+        boolean sellsPropertyForCash = !myGiving.propertyIds().isEmpty()
+                && myReceiving.propertyIds().isEmpty()
+                && myReceiving.jailCardCount() == 0;
+        int cashSalePremium = (sellsPropertyForCash && giftPenalty == 0)
+                ? Math.max(40, (int)(myGiving.propertyIds().stream()
+                        .mapToInt(id -> SpotType.valueOf(id).getIntegerProperty("price"))
+                        .sum() * 0.15))
+                : 0;
 
         // ── SANITY CHECKS ────────────────────────────────────────────────────────────────── These guard against deg...
 
@@ -834,7 +846,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             requiredPremium = 0; // never demand a premium when closing our own set
         }
 
-        if (valueReceived >= valueGiven - fairnessTolerance - strategicDiscount + requiredPremium) {
+        if (valueReceived >= valueGiven - fairnessTolerance - strategicDiscount + requiredPremium + cashSalePremium) {
             publisher.handle(new AcceptTradeCommand(sessionId, botId, tradeId));
             return;
         }
@@ -907,9 +919,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 return;
             }
             // Ask the partner to pay for the property.
-            double margin = 1.05 + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20;
+            // Monopoly-completing sales already carry a large gift penalty in valueGiven, so use 1.05.
+            // Regular property sales use 1.15 to ensure the bot demands a fair premium over face value.
             boolean completesBuyerSet = myGiving.propertyIds().stream()
                     .anyMatch(id -> wouldCompletePartnerMonopoly(state, counterPartnerId, id));
+            double margin = (completesBuyerSet ? 1.05 : 1.15) + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20;
             if (completesBuyerSet) margin *= MONOPOLY_SALE_PREMIUM;
             int askingPrice = (int) (valueGiven * margin);
             PlayerSnapshot partnerSnap = findPlayer(state, counterPartnerId);
@@ -1650,26 +1664,47 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             }
             int maxBid = Math.min(ceiling, cash - reserve);
 
-            // Budget-aware: if no remaining bidder can realistically outbid, just bid minimum
+            // Budget-aware: model each competitor's effective bid ceiling.
+            // Competitors keep ~$100 reserve; anything above that is biddable.
+            // If winning the property would complete their street set, they'd bid up to 130% of face.
             java.util.Set<String> activeBidders = new java.util.HashSet<>(auction.eligiblePlayerIds());
             activeBidders.removeAll(auction.passedPlayerIds());
             activeBidders.remove(bidderId);
-            boolean noEffectiveCompetition = activeBidders.isEmpty() || activeBidders.stream()
-                    .allMatch(id -> {
+            int competitorBidCeiling = activeBidders.stream()
+                    .mapToInt(id -> {
                         PlayerSnapshot p = findPlayer(state, id);
-                        return p == null || p.cash() < 2 * minBid;
-                    });
+                        if (p == null) return 0;
+                        int theirUsableCash = Math.max(0, p.cash() - 100);
+                        int theirPropValue = facePrice;
+                        if (propId != null) {
+                            StreetType aGroup2 = StrongBotStrategy.spotType(propId).streetType;
+                            if (aGroup2.placeType == PlaceType.STREET
+                                    && StrongBotStrategy.wouldCompleteSet(state, id, propId)) {
+                                theirPropValue = (int)(facePrice * 1.3);
+                            }
+                        }
+                        return Math.min(theirUsableCash, theirPropValue);
+                    })
+                    .max().orElse(0);
+            boolean noEffectiveCompetition = activeBidders.isEmpty() || competitorBidCeiling < minBid;
             if (noEffectiveCompetition && maxBid >= minBid) {
                 publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), minBid));
                 return;
             }
 
             if (maxBid >= minBid) {
-                // Jump ~⅓ of remaining headroom toward ceiling with ±40 % random jitter
-                int headroom = maxBid - minBid;
-                double factor = 0.6 + rng.nextDouble() * 0.8; // 0.6–1.4
-                int extra = ((int) (headroom / 3.0 * factor) / 10) * 10;
-                int bid = Math.min(maxBid, minBid + Math.max(10, extra));
+                int bid;
+                if (competitorBidCeiling < maxBid) {
+                    // Price competitors out: bid just above their ceiling (rounded to nearest 10)
+                    int targetBid = ((competitorBidCeiling / 10) + 1) * 10;
+                    bid = Math.min(maxBid, Math.max(minBid, targetBid));
+                } else {
+                    // Tough competition (ceiling ≥ our max): bid aggressively with ⅓ headroom
+                    int headroom = maxBid - minBid;
+                    double factor = 0.6 + rng.nextDouble() * 0.8; // 0.6–1.4
+                    int extra = ((int)(headroom / 3.0 * factor) / 10) * 10;
+                    bid = Math.min(maxBid, minBid + Math.max(10, extra));
+                }
                 publisher.handle(new PlaceAuctionBidCommand(sessionId, bidderId, auction.auctionId(), bid));
             } else {
                 // Bid at least the mortgage value — any winning bid below it is free value for the opponent
