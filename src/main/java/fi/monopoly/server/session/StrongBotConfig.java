@@ -325,9 +325,9 @@ public record StrongBotConfig(
                 .utilityWeight(0.28)
                 .liquidityPenaltyWeight(1.71)
                 .preferJailLateGame(true)
-                .houseBuildAggression(1.38)
+                .houseBuildAggression(1.73)        // was 1.38 — ablation: +25% gives +18.7 pp
                 .hotelAversion(6.53)
-                .developmentBias(2.5)
+                .developmentBias(3.1)              // was 2.5 — ablation: +25% gives +14.7 pp
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1.0)
                 .buildReservePerOpponentMonopoly(44)
@@ -366,9 +366,9 @@ public record StrongBotConfig(
                 .opponentLeaderPressure(1)
                 .railroadCompletionWeight(30)
                 .utilityCompletionWeight(20)
-                .houseBuildAggression(1.85)        // was 1.54 — build faster (key signal from humanlike test)
+                .houseBuildAggression(1.97)        // was 1.85; ablation +18.7pp signal, capped near max 2.0
                 .hotelAversion(3.5)                // was 6.06 — build hotels more freely
-                .developmentBias(2.5)
+                .developmentBias(3.1)              // was 2.5 — ablation: +25% gives +14.7 pp
                 .buildRoundCap(5)
                 .buildReservePerOpponentMonopoly(44)
                 .postMonopolyCashBuffer(75)
@@ -529,9 +529,9 @@ public record StrongBotConfig(
                 .utilityWeight(0.35)
                 .liquidityPenaltyWeight(1.69)
                 .preferJailLateGame(false)
-                .houseBuildAggression(1.38)        // less aggressive — cash matters more than houses in 3p
+                .houseBuildAggression(1.73)        // was 1.38; ablation signal applies in 3p too
                 .hotelAversion(6.53)               // evolution: avoid hotels, keep cash liquid in 3p
-                .developmentBias(2.8)
+                .developmentBias(3.1)              // was 2.8 — ablation: +14.7pp for +25%
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1.2)
                 .buildReservePerOpponentMonopoly(56) // larger buffer when opponent has monopoly
