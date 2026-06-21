@@ -131,13 +131,22 @@ public final class UtilityStrategy implements BotStrategy {
         DecisionContext ctx = new DecisionContext(state, botId, memory, params, action);
         double score = Consideration.combine(TradeConsiderations.ACCEPT_CONSIDERATIONS, ctx);
 
-        double acceptBaseline = params.weight("trade_accept_baseline", 0.40);
+        double acceptBaseline  = params.weight("trade_accept_baseline", 0.40);
+        double counterBaseline = params.weight("trade_counter_baseline", 0.175);
 
         if (score >= acceptBaseline) {
             return new Intent.RespondToTrade(Intent.TradeResponse.ACCEPT, tradeId);
         }
-        // Delegate COUNTER/DECLINE to PureDomainStrategy — it manages memory correctly
-        // and avoids repeated state signatures from counter-loops (which trip loop detection).
+        // If the score is also below the counter baseline the deal is too bad to negotiate.
+        // Force DECLINE here so PureDomainStrategy cannot override with its own, more lenient
+        // acceptance logic (PD scales fairness tolerance by positionFactor when losing, which
+        // can cause it to accept trades the IAUS model correctly scored as unprofitable).
+        if (score < counterBaseline) {
+            return new Intent.RespondToTrade(Intent.TradeResponse.DECLINE, tradeId);
+        }
+        // Middle range [counter_baseline, accept_baseline): IAUS thinks a counter might make
+        // sense but isn't confident — delegate to PureDomainStrategy which manages the
+        // counter-offer state machine and loop-detection memory correctly.
         return null;
     }
 

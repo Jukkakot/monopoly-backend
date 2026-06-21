@@ -193,7 +193,11 @@ public record BotParams(
         w.put("trade_accept_baseline", tradeAcceptBaseline);
 
         // Counter threshold: minimum combined score to COUNTER (rather than flat decline).
-        double tradeCounterBaseline = 0.15 + p.liquidityPreference() * 0.05;  // balanced≈0.175
+        // Trades scoring below this are so unfair the bot won't even negotiate — explicitly
+        // declined to prevent PureDomainStrategy (which scales fairness tolerance with
+        // positionFactor) from accepting them on the bot's behalf.
+        // ~0.057 = "€50 for €350 property" with balanced personality, safely below 0.09.
+        double tradeCounterBaseline = 0.06 + p.liquidityPreference() * 0.03;  // balanced≈0.075
         w.put("trade_counter_baseline", tradeCounterBaseline);
 
         return new BotParams(id, Map.copyOf(w), Map.copyOf(c), p);
