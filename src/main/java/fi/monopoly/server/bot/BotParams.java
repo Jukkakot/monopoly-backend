@@ -80,6 +80,11 @@ public record BotParams(
         double buyThreshold = 0.20 + p.liquidityPreference() * 0.15;
         w.put("buy_threshold", buyThreshold);
 
+        // Game-phase gate: step(0.5, 0, 1) — input=0 vetoes, input=1 is neutral pass-through.
+        // Mirrors PD's phase-aware buyThreshold — blocks late/mid-game standalone purchases.
+        w.put("buy_game_phase", 1.0);
+        c.put("buy_game_phase", Curve.step(0.5, 0.0, 1.0));
+
         // ---- Build-houses decision ------------------------------------------
         // Veto: can't afford → 0
         w.put("build_affordability", 1.0);

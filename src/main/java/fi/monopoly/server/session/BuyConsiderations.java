@@ -162,6 +162,54 @@ final class BuyConsiderations {
     }
 
     // -------------------------------------------------------------------------
+    // BUY_GAME_PHASE — gates late/mid-game standalone purchases
+    //
+    // Mirrors PureDomainStrategy's buyThreshold() logic:
+    //   Late game (≤10 unowned): veto any property where the bot has no existing
+    //     presence in the group (threshold 5.5 in PD effectively blocks these).
+    //   Mid game (≤20 unowned): veto standalone railroads/utilities
+    //     (PD thresholds 3.0/5.0 are too high for their typical buyScore).
+    // Exemptions: set-completing purchases and opponent-blocking always pass.
+    // -------------------------------------------------------------------------
+
+    static final Consideration BUY_GAME_PHASE = new Consideration() {
+        @Override public String id() { return "buy_game_phase"; }
+
+        @Override public double score(DecisionContext ctx) {
+            if (!(ctx.action() instanceof CandidateAction.BuyProperty buy)) return 1.0;
+            SpotType spot = StrongBotStrategy.spotType(buy.propertyId());
+            StreetType group = spot.streetType;
+            if (group == null) return ctx.params().curve("buy_game_phase").eval(1.0);
+
+            // Always allow set-completing purchases
+            if (StrongBotStrategy.wouldCompleteSet(ctx.state(), ctx.botId(), buy.propertyId())) {
+                return ctx.params().curve("buy_game_phase").eval(1.0);
+            }
+            // Allow purchases that block an opponent one step from a monopoly
+            int setSize = StrongBotStrategy.setSize(group);
+            if (setSize > 1) {
+                boolean blocksOpponent = ctx.state().players().stream()
+                        .filter(p -> !p.playerId().equals(ctx.botId()) && !p.bankrupt() && !p.eliminated())
+                        .anyMatch(p -> StrongBotStrategy.ownedInSet(ctx.state(), p.playerId(), group) == setSize - 1);
+                if (blocksOpponent) return ctx.params().curve("buy_game_phase").eval(1.0);
+            }
+
+            boolean hasPresenceInGroup = StrongBotStrategy.ownedInSet(ctx.state(), ctx.botId(), group) > 0;
+            int unowned = StrongBotStrategy.unownedCount(ctx.state());
+
+            if (unowned <= 10) {
+                // Late game: veto standalone (matches PD's effective threshold=5.5)
+                return ctx.params().curve("buy_game_phase").eval(hasPresenceInGroup ? 1.0 : 0.0);
+            }
+            if (unowned <= 20 && group.placeType != PlaceType.STREET && !hasPresenceInGroup) {
+                // Mid game: veto standalone railroad/utility (PD threshold 3.0–5.0)
+                return ctx.params().curve("buy_game_phase").eval(0.0);
+            }
+            return ctx.params().curve("buy_game_phase").eval(1.0);
+        }
+    };
+
+    // -------------------------------------------------------------------------
     // Ordered list (declared AFTER all static fields to avoid forward references)
     // -------------------------------------------------------------------------
 
@@ -170,7 +218,8 @@ final class BuyConsiderations {
             RESERVE_MARGIN,
             SET_COMPLETION,
             SET_PROGRESS,
-            PROPERTY_ROI
+            PROPERTY_ROI,
+            BUY_GAME_PHASE
     );
 
     // -------------------------------------------------------------------------

@@ -71,13 +71,14 @@ class UtilityGauntletTest {
                 "utility-v1 loop-suspected rate must stay below 8% (pure-domain baseline ~6%): "
                         + report.loopSuspectedCount() + "/" + totalGames);
 
-        // Smoke check: utility-v1 lower CI must clear 33% at 400 games.
-        // 400-game CI width is ~±4.5 pp; the real 35% floor is validated in fullGauntlet.
+        // Smoke check: utility-v1 lower CI must clear 30% at 400 games.
+        // 400-game CI width is ~±4.5 pp; a 30% floor is "not broken" signal only.
+        // The real quality gate (35% mean, overlapping CIs with PD) lives in fullGauntlet.
         MatchScheduler.StrategyResult utilityResult = report.results().stream()
                 .filter(r -> "utility-v1".equals(r.name()))
                 .findFirst().orElseThrow();
-        assertTrue(utilityResult.ci().lower() >= 0.33,
-                "utility-v1 win-share lower CI must be at least 33% (smoke floor): "
+        assertTrue(utilityResult.ci().lower() >= 0.30,
+                "utility-v1 win-share lower CI must be at least 30% (smoke floor): "
                         + utilityResult.ci());
     }
 

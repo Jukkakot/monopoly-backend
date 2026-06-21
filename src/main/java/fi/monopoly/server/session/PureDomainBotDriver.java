@@ -79,8 +79,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // Per-player bot configs. Falls back to StrongBotConfig.defaults() if absent.
     private final Map<String, StrongBotConfig> configs;
     private final RandomSource rng;
-    // Phase 1.4: strategy + executor path (active when USE_NEW_STRATEGY == true)
-    private final PureDomainStrategy strategy;
+    // Strategy path: routes through BotStrategy.decide() + BotExecutor.
+    // Active when USE_NEW_STRATEGY is set OR when a non-PD strategy is injected (e.g. UtilityStrategy).
+    private final fi.monopoly.server.bot.BotStrategy strategy;
+    private final boolean alwaysUseStrategy;
     private final BotExecutor executor;
     private final Map<String, fi.monopoly.server.bot.BotMemory> memories;
     private final ScheduledExecutorService scheduler;
@@ -127,13 +129,15 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             String sessionId,
             Set<String> botPlayerIds,
             Map<String, StrongBotConfig> configs,
-            RandomSource rng) {
+            RandomSource rng,
+            fi.monopoly.server.bot.BotStrategy strategyOverride) {
         this.publisher = publisher;
         this.sessionId = sessionId;
         this.botPlayerIds = botPlayerIds;
         this.configs = Map.copyOf(configs);
         this.rng = rng;
-        this.strategy = new PureDomainStrategy(configs);
+        this.strategy = strategyOverride != null ? strategyOverride : new PureDomainStrategy(configs);
+        this.alwaysUseStrategy = USE_NEW_STRATEGY || !(this.strategy instanceof PureDomainStrategy);
         this.executor = new BotExecutor(publisher, sessionId);
         var mem = new java.util.concurrent.ConcurrentHashMap<String, fi.monopoly.server.bot.BotMemory>();
         for (String id : botPlayerIds) mem.put(id, fi.monopoly.server.bot.BotMemory.empty());
@@ -198,17 +202,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }, 5, 5, TimeUnit.SECONDS);
     }
 
-    // Creates and registers a {@link PureDomainBotDriver} for any BOT seats in the given state.
+    // Creates and registers a bot driver using the given strategy.
     static PureDomainBotDriver createAndRegisterIfNeeded(
             SessionCommandPublisher publisher,
             SessionState initialState,
-            Map<String, StrongBotConfig> configs) {
+            Map<String, StrongBotConfig> configs,
+            fi.monopoly.server.bot.BotStrategy strategy) {
         Set<String> botIds = collectBotPlayerIds(initialState);
-        if (botIds.isEmpty()) {
-            return null;
-        }
+        if (botIds.isEmpty()) return null;
         PureDomainBotDriver driver = new PureDomainBotDriver(
-                publisher, initialState.sessionId(), botIds, configs, RandomSource.threadLocal());
+                publisher, initialState.sessionId(), botIds, configs, RandomSource.threadLocal(), strategy);
         publisher.addListener(driver);
         log.info("Bot driver registered for session {} — bots: {}",
                 initialState.sessionId().substring(0, 8), botIds);
@@ -223,6 +226,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             driver.onSnapshotChanged(initialSnap);
         }
         return driver;
+    }
+
+    // Convenience overload: uses PureDomainStrategy with given configs.
+    static PureDomainBotDriver createAndRegisterIfNeeded(
+            SessionCommandPublisher publisher,
+            SessionState initialState,
+            Map<String, StrongBotConfig> configs) {
+        return createAndRegisterIfNeeded(publisher, initialState, configs, new PureDomainStrategy(configs));
     }
 
     static PureDomainBotDriver createAndRegisterIfNeeded(
@@ -494,7 +505,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             consecutiveDispatchCount = 1;
         }
 
-        if (USE_NEW_STRATEGY) {
+        if (alwaysUseStrategy) {
             dispatchViaStrategy(state);
             return;
         }

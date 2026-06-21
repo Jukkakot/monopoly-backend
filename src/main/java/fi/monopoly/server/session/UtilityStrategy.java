@@ -78,6 +78,12 @@ public final class UtilityStrategy implements BotStrategy {
 
     @Override
     public Intent decide(SessionState state, String botId, BotMemory memory, RandomSource rng) {
+        // ---- Phase 3: buy/decline via IAUS (game-phase gate prevents over-buying) ---
+        if (isBuyDecision(state, botId)) {
+            Intent buyIntent = decidePurchase(state, botId, memory, rng);
+            if (buyIntent != null) return buyIntent;
+        }
+
         // ---- Phase 4.5: handle trade response via utility model --------------
         if (isTradeResponseOpportunity(state, botId)) {
             Intent tradeIntent = decideTradeResponseUtility(state, botId, memory);
