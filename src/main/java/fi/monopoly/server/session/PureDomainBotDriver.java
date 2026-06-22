@@ -783,42 +783,31 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
 
-        // (c) Net monopoly delta check: evaluate who gains more from the property transfers.
-        // A trade is strategically acceptable when the bot's net monopoly progress improvement
-        // is at least as good as the partner's — replacing the old hard "never if partner gains
-        // a monopoly" veto which blocked clearly beneficial trades like "I gain 2 groups, you gain 1".
+        // (c) Net monopoly delta check: only relevant when the bot is RECEIVING properties.
+        // When selling for cash (myReceiving has no properties), the partner necessarily gains
+        // monopoly progress while the bot gets compensated with money — that is expected and
+        // acceptable. monopolyGiftPenalty already inflates valueGiven for monopoly-completing
+        // pieces, so the final fairness threshold handles the strategic-value compensation.
         //
-        // netDelta > 0  → bot gains more monopoly progress than the partner → accept (strategically good)
-        // netDelta == 0 → equal progress swap → allow only when cash sweetener is clearly in bot's favour
-        // netDelta < 0  → partner gains more → decline (strategically bad regardless of cash)
-        //
-        // The monopolyGiftPenalty already inflates valueGiven in the overall fairness check for
-        // the case where we give a property but receive only modest cash and no monopoly benefit.
-        // The delta check here ensures we never accept a trade where the opponent ends up with
-        // proportionally more monopoly leverage than we do.
-        if (!myGiving.propertyIds().isEmpty() || !myReceiving.propertyIds().isEmpty()) {
+        // For property-for-property swaps (both sides have properties), we check who gains more:
+        //   netDelta > 0  → bot gains more monopoly progress → accept if otherwise fair
+        //   netDelta == 0 → equal swap → allow unless bot is also paying cash
+        //   netDelta < 0  → partner gains more monopoly leverage → decline
+        if (!myReceiving.propertyIds().isEmpty()) {
             double netDelta = StrongBotStrategy.tradeMonopolyNetDelta(
                     state, botId, tradePartnerId,
                     myReceiving.propertyIds(), myGiving.propertyIds());
             if (netDelta < 0) {
-                // Partner gains more monopoly progress than we do → strategically harmful
                 declineReceivedOffer(botId, tradeId, myGiving);
                 return;
             }
             if (netDelta == 0.0) {
-                // Equal monopoly swap: only accept if the cash portion clearly favours the bot
-                // (i.e. we receive meaningfully more cash than we pay, covering at least the
-                // mortgage value of what we give minus what we receive in property terms).
                 int botCashNet = myReceiving.moneyAmount() - myGiving.moneyAmount();
                 if (botCashNet < 0) {
-                    // Bot is paying out cash on an equal-progress swap — decline
                     declineReceivedOffer(botId, tradeId, myGiving);
                     return;
                 }
-                // netDelta == 0 and botCashNet >= 0: property values are roughly equal and we're
-                // not losing cash — fall through to the normal fairness check below.
             }
-            // netDelta > 0: bot gains more monopoly progress — fall through to accept if fair on value
         }
 
         // (d) Goal-orientation check: if the bot receives only properties (no significant cash) and those
