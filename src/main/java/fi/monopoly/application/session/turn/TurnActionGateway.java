@@ -9,7 +9,7 @@ public interface TurnActionGateway {
 
     boolean sellBuildingRound(String propertyId);
 
-    boolean toggleMortgage(String propertyId);
+    boolean toggleMortgage(String actorPlayerId, String propertyId);
 
     boolean useGetOutOfJailCard();
 

@@ -182,7 +182,7 @@ public final class TurnActionCommandHandler {
                 }
             }
         }
-        if (!gateway.toggleMortgage(command.propertyId())) {
+        if (!gateway.toggleMortgage(command.actorPlayerId(), command.propertyId())) {
             return rejected("MORTGAGE_TOGGLE_FAILED", "Mortgage action failed");
         }
         return accepted("MortgageToggled", command.propertyId());

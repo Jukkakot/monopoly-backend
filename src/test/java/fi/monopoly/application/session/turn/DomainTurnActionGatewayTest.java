@@ -526,7 +526,7 @@ class DomainTurnActionGatewayTest {
                 List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 0, 0)));
         DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 2);
 
-        gateway.toggleMortgage("B1");
+        gateway.toggleMortgage(PLAYER_1, "B1");
 
         assertTrue(propertyById(store.get(), "B1").mortgaged());
         assertEquals(1500 + mortgageValue, playerById(store.get(), PLAYER_1).cash());
@@ -540,7 +540,7 @@ class DomainTurnActionGatewayTest {
                 List.of(new PropertyStateSnapshot("B1", PLAYER_1, true, 0, 0)));
         DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 2);
 
-        gateway.toggleMortgage("B1");
+        gateway.toggleMortgage(PLAYER_1, "B1");
 
         assertFalse(propertyById(store.get(), "B1").mortgaged());
         assertEquals(1500 - unmortgageCost, playerById(store.get(), PLAYER_1).cash());
@@ -552,7 +552,7 @@ class DomainTurnActionGatewayTest {
                 List.of(new PropertyStateSnapshot("B1", PLAYER_1, true, 0, 0)));
         DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 2);
 
-        gateway.toggleMortgage("B1");
+        gateway.toggleMortgage(PLAYER_1, "B1");
 
         assertTrue(propertyById(store.get(), "B1").mortgaged()); // still mortgaged
     }

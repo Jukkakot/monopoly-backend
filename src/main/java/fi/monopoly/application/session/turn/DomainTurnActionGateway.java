@@ -390,7 +390,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     }
 
     @Override
-    public boolean toggleMortgage(String propertyId) {
+    public boolean toggleMortgage(String actorPlayerId, String propertyId) {
         try {
             SpotType.valueOf(propertyId);
         } catch (IllegalArgumentException e) {
@@ -398,37 +398,34 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
         }
 
         store.update(state -> {
-            String activePlayerId = state.turn().activePlayerId();
-            if (activePlayerId == null) return state;
-
             PropertyStateSnapshot property = findProperty(state, propertyId);
-            if (property == null || !activePlayerId.equals(property.ownerPlayerId())) return state;
+            if (property == null || !actorPlayerId.equals(property.ownerPlayerId())) return state;
 
             int mortgageValue = SpotType.valueOf(propertyId).getIntegerProperty("price") / 2;
 
             if (property.mortgaged()) {
                 int unmortgageCost = mortgageValue + (int) (mortgageValue * 0.1);
-                PlayerSnapshot player = findPlayer(state, activePlayerId);
+                PlayerSnapshot player = findPlayer(state, actorPlayerId);
                 if (player == null || player.cash() < unmortgageCost) return state;
                 return appendEvents(
                         state.toBuilder()
                                 .properties(replaceProperty(state.properties(), propertyId,
                                         new PropertyStateSnapshot(property.propertyId(), property.ownerPlayerId(),
                                                 false, property.houseCount(), property.hotelCount())))
-                                .players(updateCash(state.players(), activePlayerId, -unmortgageCost))
+                                .players(updateCash(state.players(), actorPlayerId, -unmortgageCost))
                                 .build(),
-                        ev("REDEEMED", activePlayerId, Map.of("property", propertyId)),
-                        evMoney(activePlayerId, "", unmortgageCost, "lunastus"));
+                        ev("REDEEMED", actorPlayerId, Map.of("property", propertyId)),
+                        evMoney(actorPlayerId, "", unmortgageCost, "lunastus"));
             } else {
                 return appendEvents(
                         state.toBuilder()
                                 .properties(replaceProperty(state.properties(), propertyId,
                                         new PropertyStateSnapshot(property.propertyId(), property.ownerPlayerId(),
                                                 true, property.houseCount(), property.hotelCount())))
-                                .players(updateCash(state.players(), activePlayerId, mortgageValue))
+                                .players(updateCash(state.players(), actorPlayerId, mortgageValue))
                                 .build(),
-                        ev("MORTGAGED", activePlayerId, Map.of("property", propertyId)),
-                        evMoney("", activePlayerId, mortgageValue, "kiinnitys"));
+                        ev("MORTGAGED", actorPlayerId, Map.of("property", propertyId)),
+                        evMoney("", actorPlayerId, mortgageValue, "kiinnitys"));
             }
         });
         return true;

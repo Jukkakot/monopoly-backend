@@ -403,7 +403,7 @@ class TurnActionCommandHandlerTest {
         }
 
         @Override
-        public boolean toggleMortgage(String propertyId) {
+        public boolean toggleMortgage(String actorPlayerId, String propertyId) {
             toggledMortgage = SpotType.RR1.name().equals(propertyId);
             return toggledMortgage;
         }
