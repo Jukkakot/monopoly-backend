@@ -465,6 +465,47 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Regression: bot must NOT sell 2/3 of a color group to a human who already owns the 3rd,
+    // for a cash sum near face value — that hands the human a monopoly. The human offers 200€
+    // (≈ face value of LB1+LB2) for the bot's two light-blue deeds while owning LB3.
+    // Accepting completes the human's LIGHT_BLUE monopoly, so the bot must decline/counter.
+    // -------------------------------------------------------------------------
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botRejectsSellingTwoOfThreeWhenHumanOwnsThirdAndGainsMonopoly() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns LB1+LB2 (2/3 light blue); human owns LB3. LB prices: 100,100,120.
+        PropertyStateSnapshot lb1 = new PropertyStateSnapshot("LB1", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot lb2 = new PropertyStateSnapshot("LB2", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot lb3 = new PropertyStateSnapshot("LB3", HUMAN_PLAYER, false, 0, 0);
+
+        // Human (proposer) offers 200€ for the bot's LB1+LB2 → completes human's monopoly.
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(200, List.of(), 0),            // offered to bot: 200€
+                new TradeSelectionState(0, List.of("LB1", "LB2"), 0)); // requested from bot: LB1+LB2
+        TradeState trade = new TradeState(
+                "trade-1", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, null, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(HUMAN_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(lb1, lb2, lb3));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot must not sell 2/3 of a group for near-face cash when it hands the human a monopoly, got: "
+                        + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
     // Regression: STRONG bot must build counter-offer, not decline, when status=COUNTERED.
     // Bug: handleCounter() sets decisionRequiredFromPlayerId=bot, causing dispatchGreedy to
     // call handleTradeDecision (which declines) instead of handleCounterEditing.
