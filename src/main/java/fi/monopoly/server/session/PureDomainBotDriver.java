@@ -1366,6 +1366,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             } else if (group.placeType == PlaceType.RAILROAD && partnerOwns + inGiving == groupSize - 1) {
                 // Partner reaches 3 railroads (rent: 100€) — strong synergy boost even without full set
                 penalty += groupPriceSum / 2;
+            } else if (group.placeType == PlaceType.STREET && groupSize >= 3
+                    && partnerOwns + inGiving == groupSize - 1) {
+                // Partner reaches n-1 in a 3-property street group — one more trade away from monopoly
+                penalty += groupPriceSum / 3;
             }
         }
         return penalty;
@@ -1501,6 +1505,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 .filter(p -> requestedGroup == null || spotType(p.propertyId()).streetType != requestedGroup)
                 .filter(p -> StrongBotStrategy.debtMortgagePriority(state, botId, p) <= 3)
                 .filter(p -> !wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
+                .filter(p -> !wouldAdvancePartnerToNearMonopoly(state, partnerId, p.propertyId()))
                 .max(java.util.Comparator.comparingDouble(
                         p -> deadweightScore(state, botId, p.propertyId())))
                 .map(PropertyStateSnapshot::propertyId)
@@ -1528,6 +1533,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 .filter(p -> partnerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .count();
         return partnerOwns >= groupSize - 1;
+    }
+
+    // Returns true if giving this property to the partner would place them at n-1 in a 3+ property group,
+    // i.e., one more acquisition would complete their monopoly. Used to prevent the bot from offering
+    // innocuous-looking sweeteners that enable a sequential-trade monopoly path.
+    private boolean wouldAdvancePartnerToNearMonopoly(SessionState state, String partnerId, String propId) {
+        StreetType group = spotType(propId).streetType;
+        if (group == null || group.placeType != PlaceType.STREET) return false;
+        Integer groupSize = SpotType.getNumberOfSpots(group);
+        if (groupSize == null || groupSize < 3) return false; // 2-property groups handled by wouldCompletePartnerMonopoly
+        long partnerOwns = state.properties().stream()
+                .filter(p -> partnerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                .count();
+        return partnerOwns + 1 >= groupSize - 1; // for size-3: fires when partnerOwns >= 1
     }
 
     private static int evaluateSelectionValue(TradeSelectionState selection) {
