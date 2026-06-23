@@ -1342,7 +1342,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         int penalty = 0;
         StrongBotConfig cfg = configFor(partnerId); // use same weights as the receiving-side bonus
         for (StreetType group : StreetType.values()) {
-            if (group.placeType != PlaceType.STREET) continue;
+            if (group.placeType != PlaceType.STREET && group.placeType != PlaceType.RAILROAD
+                    && group.placeType != PlaceType.UTILITY) continue;
             Integer groupSize = SpotType.getNumberOfSpots(group);
             if (groupSize == null || groupSize == 0) continue;
             long inGiving = giving.propertyIds().stream()
@@ -1351,16 +1352,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             long partnerOwns = state.properties().stream()
                     .filter(p -> partnerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                     .count();
+            int groupPriceSum = (int) state.properties().stream()
+                    .filter(p -> spotType(p.propertyId()).streetType == group)
+                    .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
+                    .sum();
             if (partnerOwns + inGiving >= groupSize) {
-                int groupPriceSum = (int) state.properties().stream()
-                        .filter(p -> spotType(p.propertyId()).streetType == group)
-                        .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
-                        .sum();
                 int rawPenalty = groupPriceSum + cfg.tradeSetCompletionWeight();
-                // [Fix 3] If the game is stalemated (no monopolies yet and many turns have passed), halve the penalty so the...
+                // [Fix 3] If the game is stalemated (no monopolies yet and many turns have passed), halve the penalty so the
+                // bots are nudged into completing groups and breaking the deadlock.
                 boolean stalemate = noMonopoliesExist(state)
                         && turnsSinceMonopolyChange >= STALEMATE_TURN_THRESHOLD;
                 penalty += stalemate ? (int)(rawPenalty * STALEMATE_GIFT_RELIEF) : rawPenalty;
+            } else if (group.placeType == PlaceType.RAILROAD && partnerOwns + inGiving == groupSize - 1) {
+                // Partner reaches 3 railroads (rent: 100€) — strong synergy boost even without full set
+                penalty += groupPriceSum / 2;
             }
         }
         return penalty;
@@ -1621,6 +1626,54 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     value += groupPriceSum * 2 + setWeight; // destroying own monopoly: huge cost
                 } else if (botOwns == groupSize - 1 && inSelection >= 1) {
                     value += groupPriceSum / 2 + setWeight / 3;
+                }
+            }
+        }
+
+        // Railroad/utility synergy: rent multiplies with each additional unit, so the 2nd/3rd/4th
+        // railroad is worth far more than face price alone. Streets above handle PlaceType.STREET;
+        // here we add analogous synergy bonuses for RAILROAD and UTILITY groups.
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.RAILROAD && group.placeType != PlaceType.UTILITY) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+
+            long inSelection = selection.propertyIds().stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            if (inSelection == 0) continue;
+
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+
+            int groupPriceSum = (int) state.properties().stream()
+                    .filter(p -> spotType(p.propertyId()).streetType == group)
+                    .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
+                    .sum();
+            int setWeight = cfg.tradeSetCompletionWeight();
+
+            if (receiving) {
+                long afterReceive = botOwns + inSelection;
+                if (afterReceive >= groupSize) {
+                    // Full railroad set (4/4) or utility pair (2/2)
+                    value += groupPriceSum + setWeight;
+                } else if (group.placeType == PlaceType.RAILROAD && afterReceive == 3) {
+                    // 3 railroads: rent is 100€, strong synergy toward the 4th
+                    value += groupPriceSum / 2 + setWeight / 4;
+                } else if (group.placeType == PlaceType.RAILROAD && afterReceive == 2 && botOwns >= 1) {
+                    // 2 railroads from owning 1: rent doubles to 50€
+                    value += groupPriceSum / 4;
+                }
+            } else {
+                // Giving away: cost of losing synergy from our existing collection
+                if (botOwns >= groupSize) {
+                    value += groupPriceSum + setWeight; // losing full set
+                } else if (group.placeType == PlaceType.RAILROAD && botOwns == 3) {
+                    // Dropping from 3 to 2 railroads: our rent halves (100→50€)
+                    value += groupPriceSum / 2;
+                } else if (group.placeType == PlaceType.RAILROAD && botOwns == 2) {
+                    // Dropping from 2 to 1 railroad: rent halves (50→25€)
+                    value += groupPriceSum / 4;
                 }
             }
         }
