@@ -581,7 +581,7 @@ public final class SessionRegistry {
         SessionState current = entry.baseStore().get();
         if (current.status() != SessionStatus.LOBBY) return;
 
-        List<SeatState> lobbySeats = sanitizeColors(current.seats());
+        List<SeatState> lobbySeats = PureDomainSessionFactory.sanitizeColors(current.seats());
         String hostPlayerId = current.hostPlayerId();
 
         SessionState gameState = PureDomainSessionFactory.initialGameStateFromSeats(sessionId, lobbySeats, hostPlayerId);
@@ -711,31 +711,6 @@ public final class SessionRegistry {
      *       (configurable via {@code -Dmonopoly.session.cpu.threshold=0.75}).</li>
      * </ol>
      */
-    /** Ensures no two seats share the same tokenColorHex. Duplicate/null colors are replaced
-     *  with the next unused palette entry. First occurrence of each color wins; later
-     *  duplicates are reassigned in seat order. */
-    private static List<SeatState> sanitizeColors(List<SeatState> seats) {
-        Set<String> usedColors = new HashSet<>();
-        List<SeatState> result = new ArrayList<>(seats.size());
-        List<String> palette = PureDomainSessionFactory.SEAT_COLORS;
-        for (SeatState seat : seats) {
-            String color = seat.tokenColorHex();
-            String key = (color != null && !color.isBlank()) ? color.toUpperCase() : null;
-            if (key == null || !usedColors.add(key)) {
-                // Duplicate or missing — pick the next unused palette color
-                color = palette.stream()
-                        .filter(c -> !usedColors.contains(c.toUpperCase()))
-                        .findFirst()
-                        .orElse(palette.get(result.size() % palette.size()));
-                usedColors.add(color.toUpperCase());
-            }
-            result.add(new SeatState(seat.seatId(), seat.seatIndex(), seat.playerId(),
-                    seat.seatKind(), seat.controlMode(), seat.displayName(),
-                    seat.controllerProfileId(), color, seat.joined(), seat.ready()));
-        }
-        return result;
-    }
-
     private static void validateNoDuplicateNames(List<String> names) {
         Set<String> seen = new HashSet<>();
         for (String name : names) {

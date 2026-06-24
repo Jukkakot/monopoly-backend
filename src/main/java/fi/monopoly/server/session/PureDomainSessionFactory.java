@@ -19,8 +19,10 @@ import fi.monopoly.domain.turn.TurnState;
 import fi.monopoly.types.SpotType;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 
 /**
  * Creates a {@link SessionApplicationService} wired with pure domain gateway implementations.
@@ -145,6 +147,7 @@ public final class PureDomainSessionFactory {
             seats.add(new SeatState(seatId, seatIndex, playerId, kind, ControlMode.MANUAL, name, profile, color, true));
             players.add(new PlayerSnapshot(playerId, seatId, name, 1500, 0, false, false, false, 0, 0, List.of()));
         }
+        seats = sanitizeColors(seats);
 
         String firstPlayerId = players.get(0).playerId();
         List<String> chanceDeck = CardDeckLoader.buildDeck("chance", rng);
@@ -294,6 +297,31 @@ public final class PureDomainSessionFactory {
                 .properties(properties)
                 .turn(new TurnState(null, TurnPhase.WAITING_FOR_ROLL, false, false, 0))
                 .build();
+    }
+
+    /**
+     * Ensures no two seats share the same tokenColorHex. Duplicate/null colors are replaced
+     * with the next unused entry from {@link #SEAT_COLORS}. First occurrence of each color wins.
+     * Package-private so {@code SessionRegistry} can share this implementation.
+     */
+    static List<SeatState> sanitizeColors(List<SeatState> seats) {
+        Set<String> usedColors = new HashSet<>();
+        List<SeatState> result = new ArrayList<>(seats.size());
+        for (SeatState seat : seats) {
+            String color = seat.tokenColorHex();
+            String key = (color != null && !color.isBlank()) ? color.toUpperCase() : null;
+            if (key == null || !usedColors.add(key)) {
+                color = SEAT_COLORS.stream()
+                        .filter(c -> !usedColors.contains(c.toUpperCase()))
+                        .findFirst()
+                        .orElse(SEAT_COLORS.get(result.size() % SEAT_COLORS.size()));
+                usedColors.add(color.toUpperCase());
+            }
+            result.add(new SeatState(seat.seatId(), seat.seatIndex(), seat.playerId(),
+                    seat.seatKind(), seat.controlMode(), seat.displayName(),
+                    seat.controllerProfileId(), color, seat.joined(), seat.ready()));
+        }
+        return result;
     }
 
     /**
