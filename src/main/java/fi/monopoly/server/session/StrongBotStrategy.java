@@ -49,8 +49,11 @@ final class StrongBotStrategy {
             case RAILROAD -> cfg.railroadWeight() + ownedInSet * cfg.railroadCompletionWeight() / 10.0;
             case UTILITY  -> cfg.utilityWeight()  + ownedInSet * cfg.utilityCompletionWeight()  / 10.0;
             case STREET   -> {
+                // Threshold chosen so that Orange (cheapest at $180) is treated as "high-value"
+                // alongside Red/Yellow/Green/Dark Blue. Brown/Light Blue/Pink remain "low-value".
+                // colorGroupWeight (applied below) further refines the per-group strategic preference.
                 int price = st.getIntegerProperty("price");
-                yield price >= 200 ? 1.5 : 0.5;
+                yield price >= 170 ? 1.5 : 0.5;
             }
             default -> 0;
         };
@@ -152,8 +155,11 @@ final class StrongBotStrategy {
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .anyMatch(p -> opponentLandingDanger(state, playerId, p) > 0);
         if (opponentApproaching) score += 3.0;
-        // Local danger: hold off if the bot itself is 3–8 steps from an opponent's heavy property
-        if (botApproachingDangerRent(state, playerId) > 0) score -= 4.0;
+        // Local danger: hold off if the bot itself is 3–8 steps from an opponent's hotel/4-house.
+        // Scale penalty by the actual rent danger (not a flat binary signal): approaching a $1000
+        // hotel is far more dangerous than approaching a $100 property, so spend proportionally less.
+        int approachingDanger = botApproachingDangerRent(state, playerId);
+        if (approachingDanger > 0) score -= Math.min(8.0, approachingDanger / 100.0);
         score *= cfg.houseBuildAggression();
         score *= cfg.colorGroupWeight(group);
         return score;
@@ -249,6 +255,15 @@ final class StrongBotStrategy {
         int selfCash = self != null ? self.cash() : 0;
         if (dangerScore > 0 && selfCash < dangerScore * 2) {
             dynamic += (int) Math.round(dangerScore * 0.5 * cfg.bankruptcyAversion());
+        }
+
+        // Sole-monopoly acceleration: when the bot is the ONLY player with a color monopoly,
+        // it can build much more aggressively — opponents can't charge it rent. Reduce reserve by 20%
+        // to free up cash for building and close the game faster.
+        boolean botHasMonopoly = completedColorGroupsCount(state, playerId) > 0;
+        boolean opponentHasMonopoly = opponentMonopolyCount(state, playerId) > 0;
+        if (botHasMonopoly && !opponentHasMonopoly) {
+            dynamic = (int)(dynamic * 0.80);
         }
 
         int raw      = Math.max(baseReserve, dynamic);
@@ -496,15 +511,24 @@ final class StrongBotStrategy {
     }
 
     /**
-     * Estimates a player's net worth: cash + sum of owned property face prices.
-     * Does not include building value (conservative estimate — buildings are illiquid).
+     * Estimates a player's net worth: cash + property face prices + building sell value (50% of cost).
+     * Buildings are included at half their construction cost (their sell/liquidation value), which
+     * avoids over-counting illiquid assets while correctly identifying a player with many hotels as
+     * "leading" for position factor and threat score calculations.
      */
     static int estimateNetWorth(SessionState state, String playerId) {
         PlayerSnapshot p = findPlayer(state, playerId);
         int cash = p != null ? p.cash() : 0;
         return cash + state.properties().stream()
                 .filter(prop -> playerId.equals(prop.ownerPlayerId()))
-                .mapToInt(prop -> SpotType.valueOf(prop.propertyId()).getIntegerProperty("price"))
+                .mapToInt(prop -> {
+                    int facePrice = SpotType.valueOf(prop.propertyId()).getIntegerProperty("price");
+                    Integer housePrice = SpotType.valueOf(prop.propertyId()).getIntegerProperty("housePrice");
+                    int buildingUnits = prop.houseCount() + prop.hotelCount() * 5;
+                    int buildingValue = (housePrice != null && buildingUnits > 0)
+                            ? buildingUnits * housePrice / 2 : 0;
+                    return facePrice + buildingValue;
+                })
                 .sum();
     }
 

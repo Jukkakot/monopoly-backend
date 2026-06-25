@@ -129,12 +129,8 @@ import java.util.*;
  *   Config tuning only goes so far. The bot strategy code itself (StrongBotStrategy,
  *   BotTournament dispatch) has structural limitations that no config value can fix:
  *
- *   - preferJailLateGame / jailExitThreshold / bankruptcyAversion / jailCardHoldBias
- *     are in the config but NOT WIRED INTO ANY STRATEGY CODE — changing them has zero effect.
- *     (Marked in StrongBotConfig Javadoc.)
- *
  *   - Trade logic is simple: offer one property + cash. No property-for-property swaps.
- *   - Auction logic ignores other players' cash levels.
+ *   - Auction logic in BotTournament does not model opponents' cash levels (only PureDomainBotDriver does).
  *   - Debt logic always sells the cheapest asset first.
  *
  *   Fixing these requires code changes in StrongBotStrategy / BotTournament — that's
@@ -286,7 +282,7 @@ class BotEvolutionTest {
      * Each generation takes ~25s on an 8-core machine.
      */
     @Test
-    @Disabled("Long (~8 min, 20 gens) — run manually; kill early to use partial results")
+    @Disabled("Long (~37 min, 20 gens) — run manually; kill early to use partial results")
     void evolveSmallGame() {
         int pop = 16, gens = 20, games = 40;
         long seed = 77777L;

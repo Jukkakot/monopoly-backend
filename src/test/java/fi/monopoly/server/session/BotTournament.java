@@ -505,7 +505,7 @@ public final class BotTournament {
         if (phase == null) return reject("null-phase", state);
 
         return switch (phase) {
-            case WAITING_FOR_ROLL     -> service.handle(new RollDiceCommand(state.sessionId(), activeId));
+            case WAITING_FOR_ROLL     -> dispatchRoll(service, state, activeId, cfg);
             case WAITING_FOR_CARD_ACK -> service.handle(new AcknowledgeCardCommand(state.sessionId(), activeId));
             case WAITING_FOR_END_TURN -> dispatchEndTurn(service, state, activeId, cfg, cfgByPlayer);
             case WAITING_FOR_DECISION -> dispatchDecision(service, state, activeId, cfg);
@@ -513,6 +513,33 @@ public final class BotTournament {
             case WAITING_FOR_AUCTION  -> dispatchAuction(service, state, cfg, cfgByPlayer);
             default -> reject("unhandled-phase:" + phase, state);
         };
+    }
+
+    private static final int JAIL_FINE = 50;
+
+    private static CommandResult dispatchRoll(SessionApplicationService service, SessionState state,
+                                               String activeId, StrongBotConfig cfg) {
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, activeId);
+        if (player == null || !player.inJail()) {
+            return service.handle(new RollDiceCommand(state.sessionId(), activeId));
+        }
+        int danger = StrongBotStrategy.boardDangerScore(state, activeId);
+        boolean preferStay = cfg.preferJailLateGame() && danger >= cfg.jailExitThreshold();
+        if (preferStay) {
+            return service.handle(new RollDiceCommand(state.sessionId(), activeId));
+        }
+        int reserve = StrongBotStrategy.dynamicReserve(state, activeId, cfg);
+        boolean hasCard = player.getOutOfJailCards() > 0;
+        boolean canAffordFine = player.cash() - JAIL_FINE >= reserve;
+        boolean hoardCard = cfg.jailCardHoldBias() >= 1.5;
+        if (hasCard && (!hoardCard || !canAffordFine)) {
+            return service.handle(new UseGetOutOfJailCardCommand(state.sessionId(), activeId));
+        } else if (canAffordFine) {
+            return service.handle(new PayJailFineCommand(state.sessionId(), activeId));
+        } else if (hasCard) {
+            return service.handle(new UseGetOutOfJailCardCommand(state.sessionId(), activeId));
+        }
+        return service.handle(new RollDiceCommand(state.sessionId(), activeId));
     }
 
     private static CommandResult dispatchEndTurn(SessionApplicationService service, SessionState state,
@@ -544,7 +571,14 @@ public final class BotTournament {
                                                 PlayerSnapshot player, int reserve) {
         PropertyStateSnapshot candidate = state.properties().stream()
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && p.mortgaged())
-                .filter(p -> StrongBotStrategy.botOwnsFullGroup(state, playerId, StrongBotStrategy.spotType(p.propertyId()).streetType))
+                .filter(p -> {
+                    fi.monopoly.types.SpotType st = StrongBotStrategy.spotType(p.propertyId());
+                    // Railroads: allow unmortgaging when 3+ are owned (rent $50→$100 at 3rd railroad).
+                    if (st.streetType.placeType == fi.monopoly.types.PlaceType.RAILROAD) {
+                        return StrongBotStrategy.ownedInSet(state, playerId, st.streetType) >= 3;
+                    }
+                    return StrongBotStrategy.botOwnsFullGroup(state, playerId, st.streetType);
+                })
                 .filter(p -> player.cash() - StrongBotStrategy.unmortgageCost(p.propertyId()) >= reserve)
                 .max(Comparator.comparingDouble(p -> StrongBotStrategy.unmortgageScore(p, state, cfg)))
                 .orElse(null);
@@ -667,6 +701,8 @@ public final class BotTournament {
         if (minBid <= 0) return service.handle(new PassAuctionCommand(state.sessionId(), bidderId, auction.auctionId()));
 
         int reserve = StrongBotStrategy.dynamicReserve(state, bidderId, bidderCfg);
+        double posFactor = StrongBotStrategy.positionFactor(state, bidderId);
+        reserve = Math.max(bidderCfg.minCashReserve(), (int)(reserve / posFactor));
         String propId = auction.propertyId();
         int facePrice = propId != null ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;
         int ceiling = Math.min(facePrice, (int)(facePrice * bidderCfg.auctionAggression()));
@@ -677,11 +713,19 @@ public final class BotTournament {
             StreetType aGroup = StrongBotStrategy.spotType(propId).streetType;
             if (aGroup.placeType == PlaceType.STREET) {
                 int aSize = StrongBotStrategy.setSize(aGroup);
-                boolean wouldBlockOpponent = aSize > 1 && state.players().stream()
-                        .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
-                        .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1);
-                if (wouldBlockOpponent) {
-                    ceiling += (int)(facePrice * bidderCfg.auctionSetCompletionBonus());
+                if (aSize > 1) {
+                    double blockThreat = state.players().stream()
+                            .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
+                            .filter(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1)
+                            .mapToDouble(p -> {
+                                double t = StrongBotStrategy.threatScore(state, p.playerId());
+                                return StrongBotStrategy.isLeadingThreat(state, p.playerId())
+                                        ? t * bidderCfg.opponentLeaderPressure() : t;
+                            })
+                            .max().orElse(0.0);
+                    if (blockThreat > 0) {
+                        ceiling += (int)(facePrice * bidderCfg.auctionSetCompletionBonus() * Math.min(1.0, blockThreat));
+                    }
                 }
             }
         }
@@ -709,6 +753,37 @@ public final class BotTournament {
 
         int valueReceived = evaluateTradeSelection(state, botId, myReceiving, true, cfg);
         int valueGiven    = evaluateTradeSelection(state, botId, myGiving,    false, cfg);
+
+        // Extra penalty when giving would complete partner's street monopoly, scaled by partner's
+        // ability to develop the set (cash-rich partner = bigger threat = higher penalty).
+        String partnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
+        for (String propId : myGiving.propertyIds()) {
+            StreetType group = StrongBotStrategy.spotType(propId).streetType;
+            if (group.placeType != PlaceType.STREET) continue;
+            int gs = StrongBotStrategy.setSize(group);
+            int partnerOwns = StrongBotStrategy.ownedInSet(state, partnerId, group);
+            long inGiving = myGiving.propertyIds().stream()
+                    .filter(id -> StrongBotStrategy.spotType(id).streetType == group).count();
+            if (partnerOwns + inGiving >= gs) {
+                int groupPriceSum = state.properties().stream()
+                        .filter(p -> StrongBotStrategy.spotType(p.propertyId()).streetType == group)
+                        .mapToInt(p -> SpotType.valueOf(p.propertyId()).getIntegerProperty("price"))
+                        .sum();
+                PlayerSnapshot partner = StrongBotStrategy.findPlayer(state, partnerId);
+                int partnerCash = partner != null ? partner.cash() : 0;
+                int buildRound = state.properties().stream()
+                        .filter(p -> StrongBotStrategy.spotType(p.propertyId()).streetType == group)
+                        .mapToInt(p -> {
+                            Integer hp = SpotType.valueOf(p.propertyId()).getIntegerProperty("housePrice");
+                            return hp != null ? hp : 0;
+                        }).sum();
+                double buildFactor = buildRound <= 0 ? 1.0
+                        : partnerCash >= buildRound * 2 ? 1.25
+                        : partnerCash >= buildRound     ? 1.0
+                        : partnerCash >= buildRound / 2 ? 0.8 : 0.6;
+                valueGiven += (int)(groupPriceSum * buildFactor);
+            }
+        }
 
         // Accept if within fairness tolerance or if it completes a monopoly
         boolean monopolyGain = myReceiving.propertyIds().stream()

@@ -42,7 +42,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // Minimum delay even in "fast" mode — prevents server overload from rapid-fire bot games.
     private static final long MIN_FAST_DELAY_MS = 50L;
 
-    private static final int MAX_DECLINES_PER_PARTNER = 2;
+    // After this many declines from a partner, stop proposing trades to them for the rest of the game.
+    // 3 allows for "early lowball → counter → final offer" negotiation cycles before giving up.
+    private static final int MAX_DECLINES_PER_PARTNER = 3;
     // Max counter-offers the bot will make within a single trade before it must accept or decline.
     // Applies to every partner equally; guarantees a trade negotiation always terminates.
     private static final int MAX_COUNTERS_PER_TRADE = 2;
@@ -606,8 +608,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         }
 
         // Otherwise leave as cheaply as sensible so the bot can move and acquire property.
+        int reserve = StrongBotStrategy.dynamicReserve(state, activeId, cfg);
         boolean hasCard = player.getOutOfJailCards() > 0;
-        boolean canAffordFine = player.cash() >= JAIL_FINE;
+        // Check we can afford the fine AND still stay above our cash reserve after paying.
+        boolean canAffordFine = player.cash() - JAIL_FINE >= reserve;
         // jailCardHoldBias ≥ 1.5 → hoard the card (pay cash if we can); otherwise spend it freely.
         boolean hoardCard = cfg.jailCardHoldBias() >= 1.5;
 
@@ -1811,7 +1815,10 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (minBid > 0) {
             StrongBotConfig cfg = configFor(bidderId);
             // Auction reserve is capped at dangerCashReserve — the full dynamic reserve (which can exceed 500 late game)...
+            // Position-adjusted: trailing bots bid more aggressively (lower effective reserve) — same as build/unmortgage.
             int reserve = Math.min(dynamicReserve(state, bidderId), cfg.dangerCashReserve());
+            double posFactor = StrongBotStrategy.positionFactor(state, bidderId);
+            reserve = Math.max(cfg.minCashReserve(), (int)(reserve / posFactor));
             String propId = auction.propertyId();
             int facePrice = propId != null
                     ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;
@@ -2024,7 +2031,16 @@ public final class PureDomainBotDriver implements ClientSessionListener {
 
         PropertyStateSnapshot candidate = state.properties().stream()
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && p.mortgaged())
-                .filter(p -> StrongBotStrategy.botOwnsFullGroup(state, playerId, StrongBotStrategy.spotType(p.propertyId()).streetType))
+                .filter(p -> {
+                    SpotType st = StrongBotStrategy.spotType(p.propertyId());
+                    // For streets: only unmortgage when the bot owns the full group (can then build).
+                    // For railroads: allow unmortgaging when the bot owns 3+ — rent jumps from $50→$100
+                    // when re-activating the 3rd railroad, a strong return on the unmortgage cost.
+                    if (st.streetType.placeType == PlaceType.RAILROAD) {
+                        return StrongBotStrategy.ownedInSet(state, playerId, st.streetType) >= 3;
+                    }
+                    return StrongBotStrategy.botOwnsFullGroup(state, playerId, st.streetType);
+                })
                 .filter(p -> player.cash() - StrongBotStrategy.unmortgageCost(p.propertyId()) >= posAdjustedReserve)
                 .max(java.util.Comparator.comparingDouble(p -> StrongBotStrategy.unmortgageScore(p, state, cfg)))
                 .orElse(null);
