@@ -33,10 +33,12 @@ class AuctionFlowTest {
     private static final String SESSION_ID = "test-auction-session";
     private static final String HUMAN = "human";
     private static final String BOT = "bot";
-    // O1 = Hermanni, face price €180. STRONG default auctionAggression=1.1 → ceiling=(int)(180*1.1)=198.
+    // O1 = Hermanni, face price €180. The base auction ceiling is hard-capped at face price for a
+    // property the bot has no strategic interest in (no monopoly completion / opponent blocking),
+    // so the bot must never bid above €180 here regardless of its auctionAggression preset.
     private static final String PROPERTY = "O1";
     private static final int FACE_PRICE = 180;
-    private static final int CEILING = (int) (FACE_PRICE * 1.1); // 198
+    private static final int CEILING = FACE_PRICE; // base ceiling capped at face price
 
     @BeforeAll
     static void noThinkDelay() {
@@ -61,6 +63,7 @@ class AuctionFlowTest {
         String auctionId = store.get().auctionState().auctionId();
         List<String> log = new ArrayList<>();
         int botBidCount = 0;
+        int maxBotBid = 0;
         boolean botPassed = false;
 
         for (int round = 0; round < 40; round++) {
@@ -77,6 +80,7 @@ class AuctionFlowTest {
                 log.add("bot:" + botResult);
                 if (botResult.startsWith("bid:")) {
                     botBidCount++;
+                    maxBotBid = Math.max(maxBotBid, Integer.parseInt(botResult.substring("bid:".length())));
                 } else {
                     botPassed = true;
                     break;
@@ -90,28 +94,29 @@ class AuctionFlowTest {
         assertTrue(botBidCount >= 1,
                 "Bot should have bid at least once before yielding. Rounds: " + log);
         assertTrue(botPassed,
-                "Bot should eventually pass when minimum exceeds ceiling=" + CEILING + ". Rounds: " + log);
+                "Bot should eventually pass rather than overpay above face price=" + CEILING + ". Rounds: " + log);
         assertEquals(AuctionStatus.WON_PENDING_RESOLUTION, final_.status(),
                 "Auction should be in WON_PENDING_RESOLUTION after bot passes. Rounds: " + log);
         assertEquals(HUMAN, final_.winningPlayerId(),
                 "Human should win (always bid, bot passed). Rounds: " + log);
 
-        // Verify the last bot pass happened at/above the ceiling
-        int winningBid = final_.winningBid();
-        assertTrue(winningBid >= CEILING,
-                "Winning bid (" + winningBid + ") should be at or above bot ceiling " + CEILING + ". Rounds: " + log);
+        // Core regression: the bot must never bid above face price for a property it has no
+        // strategic interest in — paying more at auction than the direct purchase price is irrational.
+        assertTrue(maxBotBid <= FACE_PRICE,
+                "Bot must never bid above face price=" + FACE_PRICE + "; max bot bid was " + maxBotBid + ". Rounds: " + log);
     }
 
     /**
-     * Bot bids when human bids exactly the face price.
+     * Bot passes rather than overpay once the human has bid the face price.
      *
-     * <p>Regression for auctionAggression=1.0 bug: old ceiling equaled face price,
-     * so any bid at face price pushed minimumNextBid above the ceiling and the bot
-     * passed immediately. With aggression=1.1, ceiling=198 > minimumNextBid=190.</p>
+     * <p>Regression for the user-reported bug: the bot paid more at auction for a property than
+     * its direct purchase price. The base auction ceiling is now hard-capped at face price, so once
+     * the human bids the face price (€180) the next minimum (€190) exceeds the ceiling and the bot
+     * must yield — it should never bid above face for a property with no strategic value.</p>
      */
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void botBidsAfterHumanBidsFacePrice() throws InterruptedException {
+    void botPassesRatherThanBidAboveFacePrice() throws InterruptedException {
         InMemorySessionState store = buildStore();
         AuctionCommandHandler handler = buildHandler(store);
         startAuction(store, handler);
@@ -122,27 +127,30 @@ class AuctionFlowTest {
         applyCmd(handler, new PlaceAuctionBidCommand(SESSION_ID, HUMAN, auctionId, 10));
         String botOpenResponse = driveBot(store, handler);
 
-        // Now human bids the face price (or minimum if bot already bid above it)
+        // Now human bids exactly the face price → next minimum = €190 > face ceiling €180.
         int currentMin = store.get().auctionState().minimumNextBid();
         int humanFaceBid = Math.max(FACE_PRICE, currentMin); // ensure bid is valid
         applyCmd(handler, new PlaceAuctionBidCommand(SESSION_ID, HUMAN, auctionId, humanFaceBid));
 
-        // Bot now faces minimumNextBid = humanFaceBid + 10.
-        // If humanFaceBid=180 → minBid=190 ≤ ceiling=198 → bot MUST bid.
-        // If humanFaceBid>180 (bot was aggressive) → still ≤ ceiling unless already above.
         int minForBot = store.get().auctionState().minimumNextBid();
         String botFaceResponse = driveBot(store, handler);
 
         assertEquals("bid", botOpenResponse.split(":")[0],
                 "Bot should bid on opening (human bid €10)");
 
-        if (minForBot <= CEILING) {
-            assertEquals("bid", botFaceResponse.split(":")[0],
-                    "Bot should still bid when minimumNextBid=" + minForBot + " ≤ ceiling=" + CEILING
-                            + " (human bid face price=" + humanFaceBid + ")");
+        // The bot opened at or below face price.
+        if (botOpenResponse.startsWith("bid:")) {
+            int openBid = Integer.parseInt(botOpenResponse.substring("bid:".length()));
+            assertTrue(openBid <= FACE_PRICE,
+                    "Opening bot bid (" + openBid + ") must not exceed face price " + FACE_PRICE);
         }
-        // If minForBot > CEILING the human already overbid before reaching face price — that's fine,
-        // the test still verified the opening bid was placed correctly.
+
+        // Once the minimum exceeds the face-price ceiling, the bot must pass — never overpay.
+        assertTrue(minForBot > FACE_PRICE,
+                "Setup precondition: minimum next bid (" + minForBot + ") should exceed face price " + FACE_PRICE);
+        assertEquals("pass", botFaceResponse,
+                "Bot must pass rather than bid above face price (minimumNextBid=" + minForBot
+                        + " > face=" + FACE_PRICE + "); got: " + botFaceResponse);
     }
 
     /**

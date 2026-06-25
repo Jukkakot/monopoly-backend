@@ -33,6 +33,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     // inline greedy logic. Off by default until Phase 1.4 validation is complete.
     static final boolean USE_NEW_STRATEGY = Boolean.getBoolean("monopoly.bot.use.strategy");
 
+    // Cost to buy your way out of jail (must match GET_OUT_OF_JAIL_FEE in DomainTurnActionGateway).
+    private static final int JAIL_FINE = 50;
+
     // Fallback delay used when situational logic cannot determine a better value.
     private static final long DEFAULT_BOT_DELAY_MS = 900L;
 
@@ -548,7 +551,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         if (activeId == null) return;
 
         switch (phase) {
-            case WAITING_FOR_ROLL -> publisher.handle(new RollDiceCommand(sessionId, activeId));
+            case WAITING_FOR_ROLL -> handleRollOrJail(state, activeId);
             case WAITING_FOR_CARD_ACK -> publisher.handle(new AcknowledgeCardCommand(sessionId, activeId));
             case WAITING_FOR_END_TURN -> {
                 if (tryUnmortgageGreedy(state, activeId)) return;
@@ -560,6 +563,63 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             case RESOLVING_DEBT -> handleDebt(state);
             case WAITING_FOR_AUCTION -> handleAuction(state);
             default -> log.debug("Bot driver: unhandled phase {} for player {}", phase, activeId);
+        }
+    }
+
+    /**
+     * Decides what to do when it is the bot's turn to roll. If the bot is in jail, it first
+     * decides whether to buy its way out (pay the €50 fine or use a get-out-of-jail card) or
+     * stay put and just roll.
+     *
+     * <p>Optimal Monopoly jail strategy is board-state dependent:
+     * <ul>
+     *   <li><b>Early / safe board</b> (low {@code boardDangerScore}): get out fast to keep moving
+     *       and acquire unowned properties.</li>
+     *   <li><b>Late / dangerous board</b> (opponents own developed monopolies): stay jailed. The
+     *       jail square is a safe haven — sitting still avoids landing on hotels and paying rent,
+     *       while the bot still collects rent on its own properties.</li>
+     * </ul>
+     *
+     * <p>Wired via {@link StrongBotConfig#preferJailLateGame()} (must be enabled for the bot to
+     * ever choose to stay) and {@link StrongBotConfig#jailExitThreshold()} (board-danger level at
+     * or above which staying is preferred). {@link StrongBotConfig#jailCardHoldBias()} controls
+     * whether a held card is spent or hoarded when the bot does decide to leave.
+     */
+    private void handleRollOrJail(SessionState state, String activeId) {
+        PlayerSnapshot player = findPlayer(state, activeId);
+        if (player == null || !player.inJail()) {
+            publisher.handle(new RollDiceCommand(sessionId, activeId));
+            return;
+        }
+
+        StrongBotConfig cfg = configFor(activeId);
+        int danger = StrongBotStrategy.boardDangerScore(state, activeId);
+
+        // Stay in jail only when the board is genuinely dangerous AND the preset opts into it.
+        // Just rolling (without paying) keeps the bot jailed unless it rolls doubles — the
+        // desired "safe haven" behaviour late game. On the final jail round the engine forces
+        // release anyway, so no separate handling is needed here.
+        boolean preferStay = cfg.preferJailLateGame() && danger >= cfg.jailExitThreshold();
+        if (preferStay) {
+            publisher.handle(new RollDiceCommand(sessionId, activeId));
+            return;
+        }
+
+        // Otherwise leave as cheaply as sensible so the bot can move and acquire property.
+        boolean hasCard = player.getOutOfJailCards() > 0;
+        boolean canAffordFine = player.cash() >= JAIL_FINE;
+        // jailCardHoldBias ≥ 1.5 → hoard the card (pay cash if we can); otherwise spend it freely.
+        boolean hoardCard = cfg.jailCardHoldBias() >= 1.5;
+
+        if (hasCard && (!hoardCard || !canAffordFine)) {
+            publisher.handle(new UseGetOutOfJailCardCommand(sessionId, activeId));
+        } else if (canAffordFine) {
+            publisher.handle(new PayJailFineCommand(sessionId, activeId));
+        } else if (hasCard) {
+            publisher.handle(new UseGetOutOfJailCardCommand(sessionId, activeId));
+        } else {
+            // Can't afford to leave and hold no card — just roll and hope for doubles.
+            publisher.handle(new RollDiceCommand(sessionId, activeId));
         }
     }
 
@@ -1358,6 +1418,14 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     .sum();
             if (partnerOwns + inGiving >= groupSize) {
                 int rawPenalty = groupPriceSum + cfg.tradeSetCompletionWeight();
+                // Buildability: a completed STREET monopoly is dangerous mostly because the partner
+                // can build houses on it. A cash-poor partner who can't fund a build round is far
+                // less of an immediate threat than a cash-rich one who will quickly raise rents, so
+                // scale the penalty by the partner's ability to actually develop the set.
+                // (Railroads/utilities have fixed rent — no buildings — so they're not scaled.)
+                if (group.placeType == PlaceType.STREET) {
+                    rawPenalty = (int)(rawPenalty * partnerBuildabilityFactor(state, partnerId, group));
+                }
                 // [Fix 3] If the game is stalemated (no monopolies yet and many turns have passed), halve the penalty so the
                 // bots are nudged into completing groups and breaking the deadlock.
                 boolean stalemate = noMonopoliesExist(state)
@@ -1373,6 +1441,32 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             }
         }
         return penalty;
+    }
+
+    /**
+     * Scales how threatening it is to hand {@code partnerId} a completed street monopoly in
+     * {@code group}, based on whether they can actually afford to develop it. A partner who cannot
+     * fund even half a build round is a much weaker threat (factor 0.6) than one sitting on enough
+     * cash for several rounds (factor 1.25). Used by {@link #monopolyGiftPenalty} so the bot is far
+     * more reluctant to complete a rich opponent's set than a broke one's — directly modelling the
+     * opponent's cash situation in the trade decision.
+     */
+    private double partnerBuildabilityFactor(SessionState state, String partnerId, StreetType group) {
+        PlayerSnapshot partner = findPlayer(state, partnerId);
+        int cash = partner != null ? partner.cash() : 0;
+        // Cost of one even build round (one house on each property in the group).
+        int buildRound = java.util.Arrays.stream(SpotType.values())
+                .filter(s -> s.streetType == group)
+                .mapToInt(s -> {
+                    Integer hp = s.getIntegerProperty("housePrice");
+                    return hp != null ? hp : 0;
+                })
+                .sum();
+        if (buildRound <= 0) return 1.0;
+        if (cash >= buildRound * 2) return 1.25;  // cash-rich: will build fast and hard
+        if (cash >= buildRound)     return 1.0;   // can fund a full round now
+        if (cash >= buildRound / 2) return 0.8;   // can build partially
+        return 0.6;                               // can't develop soon — much weaker threat
     }
 
     // Returns true if acquiring {@code propId} would complete a street monopoly for {@code botId}.
@@ -1730,18 +1824,28 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 // Completing own monopoly: pay up to (aggression + completionBonus) × face
                 ceiling += (int)(facePrice * cfg.auctionSetCompletionBonus());
             }
-            // Bid more aggressively to block an opponent who is one property away from a monopoly
+            // Bid more aggressively to block an opponent one property away from a monopoly.
+            // Weight the premium by HOW dangerous that opponent is: blocking the board leader is
+            // worth far more than blocking a struggling player who couldn't develop the set anyway.
+            // threatScore ∈ [0,1] (dominated by the near-complete group's strength); the leader
+            // additionally earns the opponentLeaderPressure multiplier.
             if (propId != null) {
                 StreetType aGroup = StrongBotStrategy.spotType(propId).streetType;
                 if (aGroup.placeType == PlaceType.STREET) {
                     int aSize = StrongBotStrategy.setSize(aGroup);
-                    boolean wouldBlockOpponent = aSize > 1 && state.players().stream()
-                            .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
-                            .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1);
-                    if (wouldBlockOpponent) {
-                        // Blocking is worth the same premium — letting opponent complete their monopoly
-                        // is as costly as missing our own set.
-                        ceiling += (int)(facePrice * cfg.auctionSetCompletionBonus());
+                    if (aSize > 1) {
+                        double blockThreat = state.players().stream()
+                                .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
+                                .filter(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1)
+                                .mapToDouble(p -> {
+                                    double t = StrongBotStrategy.threatScore(state, p.playerId());
+                                    return StrongBotStrategy.isLeadingThreat(state, p.playerId())
+                                            ? t * cfg.opponentLeaderPressure() : t;
+                                })
+                                .max().orElse(0.0);
+                        if (blockThreat > 0) {
+                            ceiling += (int)(facePrice * cfg.auctionSetCompletionBonus() * Math.min(1.0, blockThreat));
+                        }
                     }
                 }
             }

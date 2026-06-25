@@ -163,13 +163,15 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
-    // Regression: STRONG bot must bid when human bids at face price (auctionAggression 1.1 > 1.0).
-    // Previously ceiling = facePrice * 1.0 meant any bid at face price ended the auction.
+    // Regression: STRONG bot must NOT bid above face price for a property with no strategic value.
+    // (User report: the bot paid >€200 at auction for a €200 railway it would gladly sell for €200.)
+    // The base auction ceiling is hard-capped at face price; only monopoly completion or opponent
+    // blocking lifts it above — neither applies here, so the bot must pass once the bid exceeds face.
     // -------------------------------------------------------------------------
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void strongBotBidsWhenHumanBidReachesFacePrice() throws InterruptedException {
+    void strongBotPassesRatherThanBidAboveFacePrice() throws InterruptedException {
         OneShotRecorder recorder = new OneShotRecorder();
         SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
 
@@ -182,8 +184,9 @@ class PureDomainBotDriverTest {
                 ))
                 .build();
 
-        // O1 = Hermanni, face price €180. Human bid exactly 180 → next min = 190.
-        // With auctionAggression=1.1 ceiling is 198, so bot can still bid 190.
+        // O1 = Hermanni, face price €180. Human bid exactly 180 → next min = 190 > face.
+        // The bot owns nothing in this group and no opponent is one away, so the ceiling is capped
+        // at face price (180). minBid 190 > 180 → the bot must pass rather than overpay.
         AuctionState auction = new AuctionState(
                 "auction-1", "O1", HUMAN_PLAYER,
                 BOT_PLAYER, HUMAN_PLAYER,
@@ -198,8 +201,72 @@ class PureDomainBotDriverTest {
         driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
 
         assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
-        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PlaceAuctionBidCommand),
-                "STRONG bot should bid after human bids face price (auctionAggression=1.1 gives ceiling 198 > minBid 190); got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().noneMatch(c -> c instanceof PlaceAuctionBidCommand),
+                "STRONG bot must NOT bid above face price (minBid 190 > face 180) for a property with no strategic value; got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PassAuctionCommand),
+                "STRONG bot should pass when the bid would exceed face price; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
+    // Jail strategy: leave when the board is safe, stay when it is dangerous.
+    // defaults() preset: preferJailLateGame=true, jailExitThreshold=500.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botPaysFineToLeaveJailWhenBoardIsSafe() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // No developed properties → boardDangerScore 0 < threshold 500 → the bot should get out
+        // and keep acquiring. It holds no jail card and can afford the €50 fine, so it pays.
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_ROLL, true, false);
+        SessionState state = buildTwoPlayerState(turn, List.of());
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 500, 10, false, false, true, 3, 0, List.of()),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PayJailFineCommand),
+                "Bot should pay the jail fine to leave jail on a safe board; got: " + recorder.commands);
+    }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botStaysInJailWhenBoardIsDangerous() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Human owns O1 with a hotel → boardDangerScore = 900 (O1 hotel rent) ≥ threshold 500.
+        // The bot should stay put (just roll, never pay/use card) to avoid landing on the hotel.
+        PropertyStateSnapshot o1Hotel = new PropertyStateSnapshot("O1", HUMAN_PLAYER, false, 0, 1);
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_ROLL, true, false);
+        SessionState state = buildTwoPlayerState(turn, List.of(o1Hotel));
+        state = state.toBuilder()
+                .players(List.of(
+                        // Bot holds a jail card and plenty of cash — it should still NOT use them.
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 800, 10, false, false, true, 3, 1, List.of()),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of("O1"))
+                ))
+                .build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof RollDiceCommand),
+                "Bot should stay in jail (just roll) on a dangerous board; got: " + recorder.commands);
+        assertTrue(recorder.commands.stream().noneMatch(c -> c instanceof PayJailFineCommand
+                        || c instanceof UseGetOutOfJailCardCommand),
+                "Bot must not pay the fine or use a card to leave jail when staying is correct; got: " + recorder.commands);
     }
 
     // -------------------------------------------------------------------------

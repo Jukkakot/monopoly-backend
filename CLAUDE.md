@@ -76,11 +76,22 @@ difficulty flags. Tuning happens via `StrongBotConfig` weights.
 **Tuning workflow:** run `ablationStudy` first to find high-signal parameters (~6 of 25
 matter; the rest are noise at ±25 % perturbation). Then evolve, then verify with
 `quickBenchmark` — which includes a humanlike bracket to catch bot-vs-bot overfitting.
-Config tuning has largely converged; further bot strength requires strategy-code changes
-(trade logic is property+cash only, auction logic ignores opponents' cash, debt logic
-sells cheapest first). Note: `preferJailLateGame`, `jailExitThreshold`,
-`bankruptcyAversion`, `jailCardHoldBias` exist in the config but are NOT wired into
-strategy code — changing them has no effect.
+Config tuning has largely converged; further bot strength requires strategy-code changes.
+
+**Opponent-awareness (runtime path = `PureDomainBotDriver`, since `monopoly.bot.use.strategy`
+defaults off):**
+- *Auction* — models each competitor's realistic bid ceiling via `dynamicReserve` (cash + board
+  position), prices weaker opponents out, and scales the monopoly-block premium by the blocked
+  opponent's `threatScore` (the board leader earns the `opponentLeaderPressure` multiplier).
+- *Trading* — `monopolyGiftPenalty` scales by `partnerBuildabilityFactor`: handing a monopoly to a
+  cash-rich opponent (who can build immediately) is penalised far more than handing it to a broke one.
+- *Jail* — `handleRollOrJail` wires `preferJailLateGame` + `jailExitThreshold` (stay in jail when the
+  board is dangerous) and `jailCardHoldBias` (spend vs hoard a get-out card).
+- *Bankruptcy* — `bankruptcyAversion` is wired into `dynamicReserve`: low cash vs board danger raises
+  the reserve, pivoting the bot to defensive cash-preservation.
+
+**Known gap (intentionally deferred):** the bot does not weaponise the finite house supply (deliberate
+under-building to starve opponents of houses). See the NOTE in `StrongBotStrategy.buildGroupScore`.
 
 ## Package layout
 

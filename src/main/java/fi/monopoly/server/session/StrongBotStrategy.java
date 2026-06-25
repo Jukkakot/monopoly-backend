@@ -137,6 +137,14 @@ final class StrongBotStrategy {
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .anyMatch(p -> buildingLevel(p) >= 4);
         if (wouldPushToHotel) score -= cfg.hotelAversion();
+        // NOTE (known gap — intentionally not implemented): the house supply is finite (32 houses,
+        // 12 hotels in standard Monopoly). A strong player can deliberately UNDER-build (e.g. hold
+        // at 3 houses across a group, or build hotels to return houses to the bank) to starve
+        // opponents of the houses they need. This bot does not model house-pool depletion at all —
+        // it neither tracks remaining supply nor uses a housing shortage as an offensive weapon.
+        // Implementing it would mean: (1) counting houses currently placed across the board, (2)
+        // estimating each opponent's imminent build needs, (3) biasing the build/hotel decision to
+        // keep scarce houses out of their reach. Deferred as low priority for now.
         if (unownedCount(state) > 8) score -= 2.0;
         if (boardDangerScore(state, playerId) >= cfg.dangerCashReserve()) score -= 6.0;
         // Timing: boost if an opponent is about to land on this group — build before they arrive
@@ -232,6 +240,16 @@ final class StrongBotStrategy {
         // Local danger: if bot is 3–8 steps from an opponent's hotel/4-house, reserve extra cash
         int localDangerRent = botApproachingDangerRent(state, playerId);
         if (localDangerRent > 0) dynamic += localDangerRent / 2;
+
+        // Bankruptcy-risk pivot: when the bot's cash is low relative to the developed rent on the
+        // board, a single bad landing could be fatal. Raise the reserve (scaled by bankruptcyAversion)
+        // so the bot stops discretionary spending on buys/builds and preserves liquidity to survive.
+        // This only holds cash back — it never forces risky liquidation — so it is safe to stack.
+        PlayerSnapshot self = findPlayer(state, playerId);
+        int selfCash = self != null ? self.cash() : 0;
+        if (dangerScore > 0 && selfCash < dangerScore * 2) {
+            dynamic += (int) Math.round(dangerScore * 0.5 * cfg.bankruptcyAversion());
+        }
 
         int raw      = Math.max(baseReserve, dynamic);
         int discount = (int) Math.round(Math.max(0, raw - cfg.minCashReserve()) * cfg.mortgageTolerance());

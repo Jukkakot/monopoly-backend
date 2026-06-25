@@ -121,10 +121,11 @@ public record StrongBotConfig(
         boolean prioritizeThreeHouses,
 
         /**
-         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
-         * <p>Intended to make the bot prefer staying in jail when the board is dangerous.
-         * Currently has no effect on bot decisions — kept as a future extension point.
-         * Use {@link #jailExitThreshold} / {@link #dangerCashReserve} for risk aversion.
+         * When {@code true}, the bot will choose to STAY in jail once the board is dangerous
+         * (see {@link #jailExitThreshold}) — sitting still on the jail square avoids landing on
+         * developed opponent properties while it keeps collecting its own rent. When {@code false}
+         * the bot always buys its way out (pay fine / use card) to keep moving and acquiring.
+         * <p>Wired in {@code PureDomainBotDriver.handleRollOrJail()}.
          */
         boolean preferJailLateGame,
 
@@ -214,17 +215,21 @@ public record StrongBotConfig(
         Map<StreetType, Double> colorGroupWeights,
 
         /**
-         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
-         * <p>Intended as a board-danger threshold above which the bot uses its roll-to-exit right
-         * or jail card. Currently has no effect on bot decisions.
-         * Kept as a future extension point.
+         * Board-danger level (see {@code boardDangerScore}) at or above which the bot prefers to
+         * STAY in jail rather than pay to get out — but only when {@link #preferJailLateGame} is set.
+         * Below this threshold the board is safe/early enough that the bot buys its way out to keep
+         * acquiring property. Higher = leaves jail in more situations; lower = hides in jail sooner.
+         * <p>Wired in {@code PureDomainBotDriver.handleRollOrJail()}.
          */
         int jailExitThreshold,
 
         /**
-         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
-         * <p>Intended to control willingness to sell assets in debt situations.
-         * Currently has no effect. Kept as a future extension point.
+         * Defensive cash-preservation multiplier triggered near the brink of bankruptcy.
+         * <p>In {@code dynamicReserve()}, when the bot's cash is low relative to the developed rent
+         * on the board (a single bad landing could be fatal), the reserve is raised by
+         * {@code boardDangerScore × 0.5 × bankruptcyAversion}, halting discretionary spending so the
+         * bot hoards liquidity to survive. Higher = pivots to defensive play more strongly.
+         * Range: 0.5 … 1.5.
          */
         double bankruptcyAversion,
 
@@ -286,9 +291,10 @@ public record StrongBotConfig(
         double opponentLeaderPressure,
 
         /**
-         * <b>NOT YET WIRED INTO STRATEGY CODE.</b>
-         * <p>Intended to bias the bot toward holding get-out-of-jail cards when the board is dangerous.
-         * Currently has no effect on bot decisions. Kept as a future extension point.
+         * Controls whether the bot spends or hoards a get-out-of-jail card when it decides to leave
+         * jail. Values ≥ 1.5 make the bot pay the €50 cash fine instead (saving the card for later);
+         * below 1.5 it spends the card freely. If it can't afford the fine it uses the card regardless.
+         * <p>Wired in {@code PureDomainBotDriver.handleRollOrJail()}.
          */
         double jailCardHoldBias,
 
