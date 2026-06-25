@@ -72,7 +72,7 @@ public final class PureDomainStrategy implements BotStrategy {
 
         TurnPhase phase = state.turn() != null ? state.turn().phase() : TurnPhase.UNKNOWN;
         return switch (phase) {
-            case WAITING_FOR_ROLL     -> new Intent.Roll();
+            case WAITING_FOR_ROLL     -> decideRollOrJail(state, botId);
             case WAITING_FOR_CARD_ACK -> new Intent.AcknowledgeCard();
             case WAITING_FOR_END_TURN -> decideEndTurn(state, botId, memory, rng);
             case WAITING_FOR_DECISION -> decidePropertyDecision(state, botId);
@@ -80,6 +80,35 @@ public final class PureDomainStrategy implements BotStrategy {
             case WAITING_FOR_AUCTION  -> decideAuction(state, rng);
             default -> new Intent.NoOp();
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // WAITING_FOR_ROLL (including jail strategy)
+    // -------------------------------------------------------------------------
+
+    private static final int JAIL_FINE = 50;
+
+    private Intent decideRollOrJail(SessionState state, String botId) {
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, botId);
+        if (player == null || !player.inJail()) return new Intent.Roll();
+
+        StrongBotConfig cfg = configFor(botId);
+        int danger = StrongBotStrategy.boardDangerScore(state, botId);
+
+        // Late-game safe-haven: stay jailed when the board is dangerous (just roll for doubles).
+        if (cfg.preferJailLateGame() && danger >= cfg.jailExitThreshold()) {
+            return new Intent.Roll();
+        }
+
+        int reserve = StrongBotStrategy.dynamicReserve(state, botId, cfg);
+        boolean hasCard = player.getOutOfJailCards() > 0;
+        boolean canAffordFine = player.cash() - JAIL_FINE >= reserve;
+        boolean hoardCard = cfg.jailCardHoldBias() >= 1.5;
+
+        if (hasCard && (!hoardCard || !canAffordFine)) return new Intent.UseGetOutOfJailCard();
+        if (canAffordFine) return new Intent.PayJailFine();
+        if (hasCard)       return new Intent.UseGetOutOfJailCard();
+        return new Intent.Roll();
     }
 
     // -------------------------------------------------------------------------
@@ -107,8 +136,13 @@ public final class PureDomainStrategy implements BotStrategy {
 
         PropertyStateSnapshot candidate = state.properties().stream()
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && p.mortgaged())
-                .filter(p -> StrongBotStrategy.botOwnsFullGroup(state, playerId,
-                        StrongBotStrategy.spotType(p.propertyId()).streetType))
+                .filter(p -> {
+                    SpotType st = StrongBotStrategy.spotType(p.propertyId());
+                    if (st.streetType.placeType == PlaceType.RAILROAD) {
+                        return StrongBotStrategy.ownedInSet(state, playerId, st.streetType) >= 3;
+                    }
+                    return StrongBotStrategy.botOwnsFullGroup(state, playerId, st.streetType);
+                })
                 .filter(p -> player.cash() - StrongBotStrategy.unmortgageCost(p.propertyId()) >= posAdjustedReserve)
                 .max(java.util.Comparator.comparingDouble(p -> StrongBotStrategy.unmortgageScore(p, state, cfg)))
                 .orElse(null);
@@ -301,6 +335,8 @@ public final class PureDomainStrategy implements BotStrategy {
         if (minBid > 0) {
             StrongBotConfig cfg = configFor(bidderId);
             int reserve = Math.min(dynamicReserve(state, bidderId), cfg.dangerCashReserve());
+            double posFactor = StrongBotStrategy.positionFactor(state, bidderId);
+            reserve = Math.max(cfg.minCashReserve(), (int)(reserve / posFactor));
             String propId = auction.propertyId();
             int facePrice = propId != null
                     ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;
@@ -853,10 +889,29 @@ public final class PureDomainStrategy implements BotStrategy {
                 int rawPenalty = groupPriceSum + cfg.tradeSetCompletionWeight();
                 boolean stalemate = noMonopoliesExist(state)
                         && memory.turnsSinceMonopolyChange() >= STALEMATE_TURN_THRESHOLD;
-                penalty += stalemate ? (int)(rawPenalty * STALEMATE_GIFT_RELIEF) : rawPenalty;
+                if (stalemate) {
+                    rawPenalty = (int)(rawPenalty * STALEMATE_GIFT_RELIEF);
+                } else {
+                    rawPenalty = (int)(rawPenalty * partnerBuildabilityFactor(state, partnerId, group));
+                }
+                penalty += rawPenalty;
             }
         }
         return penalty;
+    }
+
+    private double partnerBuildabilityFactor(SessionState state, String partnerId, StreetType group) {
+        PlayerSnapshot partner = StrongBotStrategy.findPlayer(state, partnerId);
+        int cash = partner != null ? partner.cash() : 0;
+        int buildRound = java.util.Arrays.stream(SpotType.values())
+                .filter(s -> s.streetType == group)
+                .mapToInt(s -> { Integer hp = s.getIntegerProperty("housePrice"); return hp != null ? hp : 0; })
+                .sum();
+        if (buildRound <= 0) return 1.0;
+        if (cash >= buildRound * 2) return 1.25;
+        if (cash >= buildRound)     return 1.0;
+        if (cash >= buildRound / 2) return 0.8;
+        return 0.6;
     }
 
     private int evaluateSelectionContextual(SessionState state, String botId,

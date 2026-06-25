@@ -522,11 +522,16 @@ final class StrongBotStrategy {
         return cash + state.properties().stream()
                 .filter(prop -> playerId.equals(prop.ownerPlayerId()))
                 .mapToInt(prop -> {
-                    int facePrice = SpotType.valueOf(prop.propertyId()).getIntegerProperty("price");
-                    Integer housePrice = SpotType.valueOf(prop.propertyId()).getIntegerProperty("housePrice");
-                    int buildingUnits = prop.houseCount() + prop.hotelCount() * 5;
-                    int buildingValue = (housePrice != null && buildingUnits > 0)
-                            ? buildingUnits * housePrice / 2 : 0;
+                    SpotType st = SpotType.valueOf(prop.propertyId());
+                    int facePrice = st.getIntegerProperty("price");
+                    int buildingValue = 0;
+                    if (st.streetType.placeType == fi.monopoly.types.PlaceType.STREET) {
+                        int housePrice = st.getIntegerProperty("housePrice");
+                        int buildingUnits = prop.houseCount() + prop.hotelCount() * 5;
+                        if (housePrice > 0 && buildingUnits > 0) {
+                            buildingValue = buildingUnits * housePrice / 2;
+                        }
+                    }
                     return facePrice + buildingValue;
                 })
                 .sum();

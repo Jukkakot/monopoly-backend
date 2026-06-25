@@ -179,8 +179,10 @@ public final class HeadlessGameRunner {
                                              Intent intent, String actorId) {
         String sid = state.sessionId();
         return switch (intent) {
-            case Intent.Roll()            -> service.handle(new RollDiceCommand(sid, actorId));
-            case Intent.AcknowledgeCard() -> service.handle(new AcknowledgeCardCommand(sid, actorId));
+            case Intent.Roll()                -> service.handle(new RollDiceCommand(sid, actorId));
+            case Intent.UseGetOutOfJailCard() -> service.handle(new UseGetOutOfJailCardCommand(sid, actorId));
+            case Intent.PayJailFine()         -> service.handle(new PayJailFineCommand(sid, actorId));
+            case Intent.AcknowledgeCard()     -> service.handle(new AcknowledgeCardCommand(sid, actorId));
             case Intent.EndTurn()         -> service.handle(new EndTurnCommand(sid, actorId));
 
             case Intent.BuildHouses(String propId) ->

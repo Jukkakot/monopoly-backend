@@ -30,6 +30,8 @@ import java.util.List;
  */
 public sealed interface Intent permits
         Intent.Roll,
+        Intent.UseGetOutOfJailCard,
+        Intent.PayJailFine,
         Intent.AcknowledgeCard,
         Intent.EndTurn,
         Intent.BuildHouses,
@@ -54,6 +56,10 @@ public sealed interface Intent permits
     // -------------------------------------------------------------------------
 
     record Roll() implements Intent {}
+
+    record UseGetOutOfJailCard() implements Intent {}
+
+    record PayJailFine() implements Intent {}
 
     record AcknowledgeCard() implements Intent {}
 

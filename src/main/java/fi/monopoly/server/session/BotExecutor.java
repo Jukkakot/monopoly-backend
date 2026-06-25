@@ -36,8 +36,10 @@ public final class BotExecutor {
      */
     public CommandResult execute(Intent intent, String botId) {
         return switch (intent) {
-            case Intent.Roll()             -> publisher.handle(new RollDiceCommand(sessionId, botId));
-            case Intent.AcknowledgeCard()  -> publisher.handle(new AcknowledgeCardCommand(sessionId, botId));
+            case Intent.Roll()                -> publisher.handle(new RollDiceCommand(sessionId, botId));
+            case Intent.UseGetOutOfJailCard() -> publisher.handle(new UseGetOutOfJailCardCommand(sessionId, botId));
+            case Intent.PayJailFine()         -> publisher.handle(new PayJailFineCommand(sessionId, botId));
+            case Intent.AcknowledgeCard()     -> publisher.handle(new AcknowledgeCardCommand(sessionId, botId));
             case Intent.EndTurn()          -> publisher.handle(new EndTurnCommand(sessionId, botId));
 
             case Intent.BuildHouses(String propId) ->
