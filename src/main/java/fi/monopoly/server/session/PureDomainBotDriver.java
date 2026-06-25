@@ -1721,7 +1721,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             String propId = auction.propertyId();
             int facePrice = propId != null
                     ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;
-            int ceiling = (int) (facePrice * cfg.auctionAggression());
+            // Base ceiling: hard cap at face price — bidding above face price means paying more
+            // at auction than you would have paid buying it directly, which is irrational unless
+            // there is an explicit strategic reason (monopoly completion / opponent blocking below).
+            // auctionAggression < 1.0 lets cautious presets bid conservatively (e.g. 0.8 × face).
+            int ceiling = Math.min(facePrice, (int) (facePrice * cfg.auctionAggression()));
             if (propId != null && wouldCompleteSet(state, bidderId, propId)) {
                 ceiling += cfg.auctionSetCompletionBonus();
             }
@@ -1740,9 +1744,11 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             }
             int maxBid = Math.min(ceiling, cash - reserve);
 
-            // Budget-aware: model each competitor's effective bid ceiling.
-            // Competitors keep ~$100 reserve; anything above that is biddable.
-            // If winning the property would complete their street set, they'd bid up to 130% of face.
+            // Budget-aware: model each competitor's effective bid ceiling using the same
+            // dynamic reserve model the bot uses for itself. This correctly accounts for
+            // board danger, opponent monopolies, and endgame cash pressure that a flat
+            // -100 reserve completely ignores. If winning would complete their street set
+            // they are assumed willing to pay a 30% premium over face price.
             java.util.Set<String> activeBidders = new java.util.HashSet<>(auction.eligiblePlayerIds());
             activeBidders.removeAll(auction.passedPlayerIds());
             activeBidders.remove(bidderId);
@@ -1750,7 +1756,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                     .mapToInt(id -> {
                         PlayerSnapshot p = findPlayer(state, id);
                         if (p == null) return 0;
-                        int theirUsableCash = Math.max(0, p.cash() - 100);
+                        // Use our own config as a proxy — humans and other bots face the same board dynamics
+                        int theirReserve = StrongBotStrategy.dynamicReserve(state, id, cfg);
+                        int theirUsableCash = Math.max(0, p.cash() - theirReserve);
                         int theirPropValue = facePrice;
                         if (propId != null) {
                             StreetType aGroup2 = StrongBotStrategy.spotType(propId).streetType;

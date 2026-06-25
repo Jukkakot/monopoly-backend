@@ -179,10 +179,12 @@ public record StrongBotConfig(
         int buildReservePerOpponentMonopoly,
 
         /**
-         * Auction ceiling multiplier: bot bids up to {@code facePrice × auctionAggression}.
-         * <p>Higher = willing to overpay at auction; lower = lets properties go cheap.
-         * The ceiling is lifted further by {@link #auctionSetCompletionBonus} for monopoly-completing deeds.
-         * Range: 0.5 … 1.5.
+         * Auction bid ceiling multiplier. The base ceiling is {@code min(facePrice, facePrice × auctionAggression)},
+         * so values above 1.0 are clamped to face price — the bot never exceeds face price on the base ceiling.
+         * Use values below 1.0 for cautious presets that let properties go at a discount.
+         * The ceiling is lifted further by {@link #auctionSetCompletionBonus} for monopoly-completing
+         * or opponent-blocking bids, which are legitimate reasons to pay above face price.
+         * Range: 0.5 … 1.0 (values above 1.0 are clamped to 1.0 in practice).
          */
         double auctionAggression,
 
@@ -331,7 +333,7 @@ public record StrongBotConfig(
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1.0)
                 .buildReservePerOpponentMonopoly(44)
-                .auctionAggression(1.30)
+                .auctionAggression(0.90)
                 .tradeFairnessTolerance(30)
                 .tradeSetCompletionWeight(220)
                 .jailExitThreshold(500)
@@ -375,7 +377,7 @@ public record StrongBotConfig(
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1)
                 .mortgageRecoveryPriority(1)
-                .auctionAggression(1.3)
+                .auctionAggression(1.00)
                 .auctionSetCompletionBonus(90)
                 .tradeFairnessTolerance(30)
                 .tradeSetCompletionWeight(220)
@@ -535,7 +537,7 @@ public record StrongBotConfig(
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1.2)
                 .buildReservePerOpponentMonopoly(56) // larger buffer when opponent has monopoly
-                .auctionAggression(1.1)
+                .auctionAggression(0.90)
                 .tradeFairnessTolerance(30)        // threatScore premium now handles the gap; base tolerance can be tight
                 .tradeSetCompletionWeight(280)
                 .jailExitThreshold(350)
