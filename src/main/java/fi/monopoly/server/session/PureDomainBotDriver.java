@@ -1727,7 +1727,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             // auctionAggression < 1.0 lets cautious presets bid conservatively (e.g. 0.8 × face).
             int ceiling = Math.min(facePrice, (int) (facePrice * cfg.auctionAggression()));
             if (propId != null && wouldCompleteSet(state, bidderId, propId)) {
-                ceiling += cfg.auctionSetCompletionBonus();
+                // Completing own monopoly: pay up to (aggression + completionBonus) × face
+                ceiling += (int)(facePrice * cfg.auctionSetCompletionBonus());
             }
             // Bid more aggressively to block an opponent who is one property away from a monopoly
             if (propId != null) {
@@ -1738,7 +1739,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                             .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
                             .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1);
                     if (wouldBlockOpponent) {
-                        ceiling += cfg.auctionSetCompletionBonus();
+                        // Blocking is worth the same premium — letting opponent complete their monopoly
+                        // is as costly as missing our own set.
+                        ceiling += (int)(facePrice * cfg.auctionSetCompletionBonus());
                     }
                 }
             }

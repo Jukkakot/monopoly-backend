@@ -261,12 +261,13 @@ public record StrongBotConfig(
         int postMonopolyCashBuffer,
 
         /**
-         * Extra bid ceiling added to an auction when winning the deed would complete a color monopoly.
-         * <p>Added directly to the ceiling computed by {@code facePrice × auctionAggression}.
-         * Ensures the bot fights hard for set-completing properties even if they go above face value.
-         * Range: 0 … 200.
+         * Fraction of face price added to the bid ceiling when winning would complete a color monopoly
+         * or block an opponent one property away from completing theirs.
+         * <p>E.g. 0.30 on a €200 property → ceiling raised by €60, allowing bids up to 30% above face.
+         * This is the correct response when strategic value exceeds market value.
+         * Range: 0.0 … 0.6.
          */
-        int auctionSetCompletionBonus,
+        double auctionSetCompletionBonus,
 
         /**
          * Multiplier for the cash component when evaluating a trade offer.
@@ -342,7 +343,7 @@ public record StrongBotConfig(
                 .utilityCompletionWeight(20)
                 .buildRoundCap(5)
                 .postMonopolyCashBuffer(75)
-                .auctionSetCompletionBonus(90)
+                .auctionSetCompletionBonus(0.30)
                 .tradeLiquidityWeight(1.0)
                 .opponentLeaderPressure(1.0)
                 .jailCardHoldBias(1.0)
@@ -378,7 +379,7 @@ public record StrongBotConfig(
                 .unmortgageAggression(1)
                 .mortgageRecoveryPriority(1)
                 .auctionAggression(1.00)
-                .auctionSetCompletionBonus(90)
+                .auctionSetCompletionBonus(0.40)
                 .tradeFairnessTolerance(30)
                 .tradeSetCompletionWeight(220)
                 .tradeLiquidityWeight(1)
@@ -417,7 +418,7 @@ public record StrongBotConfig(
                 .utilityCompletionWeight(15)
                 .buildRoundCap(4)                  // avoids hotels entirely
                 .postMonopolyCashBuffer(175)
-                .auctionSetCompletionBonus(60)
+                .auctionSetCompletionBonus(0.20)
                 .tradeLiquidityWeight(1.2)
                 .opponentLeaderPressure(0.8)
                 .jailCardHoldBias(2.0)             // hoards jail card
@@ -469,7 +470,7 @@ public record StrongBotConfig(
                 .utilityCompletionWeight(30)           // wants both utilities
                 .buildRoundCap(5)
                 .postMonopolyCashBuffer(50)
-                .auctionSetCompletionBonus(60)
+                .auctionSetCompletionBonus(0.20)
                 .tradeLiquidityWeight(1.0)
                 .opponentLeaderPressure(0.7)           // doesn't target the leader
                 .jailCardHoldBias(1.5)                 // holds jail cards
@@ -546,7 +547,7 @@ public record StrongBotConfig(
                 .utilityCompletionWeight(35)
                 .buildRoundCap(5)
                 .postMonopolyCashBuffer(75)
-                .auctionSetCompletionBonus(100)
+                .auctionSetCompletionBonus(0.30)
                 .tradeLiquidityWeight(1.0)
                 .opponentLeaderPressure(1.2)
                 .jailCardHoldBias(0.5)
@@ -747,7 +748,7 @@ public record StrongBotConfig(
         private int utilityCompletionWeight;
         private int buildRoundCap;
         private int postMonopolyCashBuffer;
-        private int auctionSetCompletionBonus;
+        private double auctionSetCompletionBonus;
         private double tradeLiquidityWeight;
         private double opponentLeaderPressure;
         private double jailCardHoldBias;
@@ -818,7 +819,7 @@ public record StrongBotConfig(
         public Builder utilityCompletionWeight(int v)              { this.utilityCompletionWeight = v; return this; }
         public Builder buildRoundCap(int v)                        { this.buildRoundCap = v; return this; }
         public Builder postMonopolyCashBuffer(int v)               { this.postMonopolyCashBuffer = v; return this; }
-        public Builder auctionSetCompletionBonus(int v)            { this.auctionSetCompletionBonus = v; return this; }
+        public Builder auctionSetCompletionBonus(double v)         { this.auctionSetCompletionBonus = v; return this; }
         public Builder tradeLiquidityWeight(double v)              { this.tradeLiquidityWeight = v; return this; }
         public Builder opponentLeaderPressure(double v)            { this.opponentLeaderPressure = v; return this; }
         public Builder jailCardHoldBias(double v)                  { this.jailCardHoldBias = v; return this; }

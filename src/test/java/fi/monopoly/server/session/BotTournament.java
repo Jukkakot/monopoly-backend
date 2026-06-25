@@ -669,9 +669,21 @@ public final class BotTournament {
         int reserve = StrongBotStrategy.dynamicReserve(state, bidderId, bidderCfg);
         String propId = auction.propertyId();
         int facePrice = propId != null ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;
-        int ceiling = (int)(facePrice * bidderCfg.auctionAggression());
+        int ceiling = Math.min(facePrice, (int)(facePrice * bidderCfg.auctionAggression()));
         if (propId != null && StrongBotStrategy.wouldCompleteSet(state, bidderId, propId)) {
-            ceiling += bidderCfg.auctionSetCompletionBonus();
+            ceiling += (int)(facePrice * bidderCfg.auctionSetCompletionBonus());
+        }
+        if (propId != null) {
+            StreetType aGroup = StrongBotStrategy.spotType(propId).streetType;
+            if (aGroup.placeType == PlaceType.STREET) {
+                int aSize = StrongBotStrategy.setSize(aGroup);
+                boolean wouldBlockOpponent = aSize > 1 && state.players().stream()
+                        .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
+                        .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1);
+                if (wouldBlockOpponent) {
+                    ceiling += (int)(facePrice * bidderCfg.auctionSetCompletionBonus());
+                }
+            }
         }
         if (cash - minBid >= reserve && minBid <= ceiling) {
             return service.handle(new PlaceAuctionBidCommand(state.sessionId(), bidderId, auction.auctionId(), minBid));

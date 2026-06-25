@@ -309,7 +309,7 @@ public final class UtilityStrategy implements BotStrategy {
         // Add set-completion and opponent-blocking bonuses matching pure-domain's ceiling formula.
         double aggression = params.weight("bid_aggression", 1.0);
         int ceiling = (int)(facePrice * aggression);
-        int completionBonus = cfg.auctionSetCompletionBonus();
+        int completionBonus = (int)(facePrice * cfg.auctionSetCompletionBonus());
         if (StrongBotStrategy.wouldCompleteSet(state, botId, propId)) {
             ceiling += completionBonus;
         }
