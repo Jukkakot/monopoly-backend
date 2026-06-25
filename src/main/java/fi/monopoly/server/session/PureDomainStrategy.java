@@ -421,6 +421,18 @@ public final class PureDomainStrategy implements BotStrategy {
             return declineOffer(botId, tradeId, myGiving, memory);
         }
 
+        // Decline pure STREET-property shuffles: property-for-property swaps that don't
+        // advance any monopoly goal (neither completing nor getting to groupSize-1).
+        boolean givingOnlyStreets = !myGiving.propertyIds().isEmpty()
+                && myGiving.moneyAmount() <= 0 && myGiving.jailCardCount() <= 0
+                && myGiving.propertyIds().stream().allMatch(id -> spotType(id).streetType.placeType == PlaceType.STREET);
+        boolean receivingOnlyStreets = !myReceiving.propertyIds().isEmpty()
+                && myReceiving.moneyAmount() <= 0 && myReceiving.jailCardCount() <= 0
+                && myReceiving.propertyIds().stream().allMatch(id -> spotType(id).streetType.placeType == PlaceType.STREET);
+        if (givingOnlyStreets && receivingOnlyStreets && !advancesMonopolyGoal(state, botId, myReceiving)) {
+            return declineOffer(botId, tradeId, myGiving, memory);
+        }
+
         double posFactor = StrongBotStrategy.positionFactor(state, botId);
         int fairnessTolerance = (int)(configFor(botId).tradeFairnessTolerance() * posFactor);
         double ts = StrongBotStrategy.threatScore(state, tradePartnerId);
@@ -1068,6 +1080,23 @@ public final class PureDomainStrategy implements BotStrategy {
                     .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                     .count();
             if (botOwns + inSelection >= groupSize) return true;
+        }
+        return false;
+    }
+
+    private boolean advancesMonopolyGoal(SessionState state, String botId, TradeSelectionState selection) {
+        for (StreetType group : StreetType.values()) {
+            if (group.placeType != PlaceType.STREET) continue;
+            Integer groupSize = SpotType.getNumberOfSpots(group);
+            if (groupSize == null || groupSize == 0) continue;
+            long inSelection = selection.propertyIds().stream()
+                    .filter(id -> spotType(id).streetType == group).count();
+            if (inSelection == 0) continue;
+            long botOwns = state.properties().stream()
+                    .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
+                    .count();
+            long afterReceive = botOwns + inSelection;
+            if (afterReceive >= groupSize || afterReceive == groupSize - 1) return true;
         }
         return false;
     }

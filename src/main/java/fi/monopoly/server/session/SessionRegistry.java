@@ -64,8 +64,7 @@ public final class SessionRegistry {
             List<String> playerNames,
             PureDomainBotDriver botDriver,
             String hostToken,
-            ConcurrentHashMap<String, String> playerTokens,
-            String botStrategyName   // "pure-domain-v1" (default) or "utility-v1"
+            ConcurrentHashMap<String, String> playerTokens
     ) {}
 
     private final ConcurrentHashMap<String, Entry> sessions = new ConcurrentHashMap<>();
@@ -114,7 +113,7 @@ public final class SessionRegistry {
         SessionCommandPublisher publisher = new SessionCommandPublisher(service);
         baseStore.setOnChange(publisher::publishSnapshot);
         Map<String, StrongBotConfig> botConfigs = buildBotConfigs(initialState, sessionId);
-        fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botStrategyName, botConfigs);
+        fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, botConfigs, strategy);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
@@ -134,7 +133,7 @@ public final class SessionRegistry {
                 }
             }
         }
-        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, playerTokens, botStrategyName));
+        sessions.put(sessionId, new Entry(publisher, baseStore, List.copyOf(names), botDriver, hostToken, playerTokens));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
         return new CreateResult(sessionId, hostToken, firstHumanPlayerId, firstHumanPlayerToken, Map.copyOf(playerTokens));
@@ -170,7 +169,7 @@ public final class SessionRegistry {
         String hostPlayerToken = UUID.randomUUID().toString();
         playerTokens.put(hostPlayerId, hostPlayerToken);
 
-        sessions.put(sessionId, new Entry(publisher, baseStore, new ArrayList<>(), null, hostToken, playerTokens, botStrategyName));
+        sessions.put(sessionId, new Entry(publisher, baseStore, new ArrayList<>(), null, hostToken, playerTokens));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         GlobalMetrics.recordSessionCreated();
         return new CreateResult(sessionId, hostToken, hostPlayerId, hostPlayerToken);
@@ -588,7 +587,7 @@ public final class SessionRegistry {
         entry.baseStore().update(ignored -> gameState);
 
         Map<String, StrongBotConfig> botConfigs = buildBotConfigs(gameState, sessionId);
-        fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(entry.botStrategyName(), botConfigs);
+        fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, botConfigs, strategy);
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
@@ -597,7 +596,7 @@ public final class SessionRegistry {
                 .filter(s -> s.seatKind() == SeatKind.HUMAN)
                 .map(SeatState::displayName).toList();
         sessions.put(sessionId, new Entry(entry.publisher(), entry.baseStore(),
-                humanNames, botDriver, entry.hostToken(), entry.playerTokens(), entry.botStrategyName()));
+                humanNames, botDriver, entry.hostToken(), entry.playerTokens()));
 
         entry.publisher().notifyListeners();
     }
@@ -790,8 +789,7 @@ public final class SessionRegistry {
      * distinct but competitive playstyle — preventing exploitable homogeneity.
      */
     private static fi.monopoly.server.bot.BotStrategy buildBotStrategy(
-            String name, Map<String, StrongBotConfig> configs) {
-        if ("pure-domain-v1".equals(name)) return new PureDomainStrategy(configs);
+            Map<String, StrongBotConfig> configs) {
         return new UtilityStrategy(configs);
     }
 
