@@ -334,29 +334,71 @@ public final class PureDomainStrategy implements BotStrategy {
 
         if (minBid > 0) {
             StrongBotConfig cfg = configFor(bidderId);
-            int reserve = Math.min(dynamicReserve(state, bidderId), cfg.dangerCashReserve());
-            double posFactor = StrongBotStrategy.positionFactor(state, bidderId);
-            reserve = Math.max(cfg.minCashReserve(), (int)(reserve / posFactor));
             String propId = auction.propertyId();
             int facePrice = propId != null
                     ? SpotType.valueOf(propId).getIntegerProperty("price") : minBid;
-            int ceiling = (int)(facePrice * cfg.auctionAggression());
-            if (propId != null && StrongBotStrategy.wouldCompleteSet(state, bidderId, propId)) {
-                ceiling += cfg.auctionSetCompletionBonus();
-            }
+
+            // Classify the strategic stakes of winning this property. A monopoly is the
+            // game's money engine, so completing our own set — or denying an opponent
+            // who is one deed away — is worth paying far above face price for: the
+            // long-term rent more than repays the auction premium. Once an opponent
+            // takes the missing piece of a contested group, that monopoly is dead for
+            // everyone, so a live foothold is also worth defending above face.
+            boolean completesOwnSet = false;
+            boolean blocksOpponent = false;
+            boolean advancesOwnSet = false;
+            double groupStrength = 1.0;
+            double opponentThreat = 1.0;
             if (propId != null) {
                 StreetType aGroup = StrongBotStrategy.spotType(propId).streetType;
-                if (aGroup.placeType == PlaceType.STREET) {
-                    int aSize = StrongBotStrategy.setSize(aGroup);
-                    boolean wouldBlockOpponent = aSize > 1 && state.players().stream()
-                            .filter(p -> !p.playerId().equals(bidderId) && !p.bankrupt() && !p.eliminated())
-                            .anyMatch(p -> StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1);
-                    if (wouldBlockOpponent) {
-                        ceiling += cfg.auctionSetCompletionBonus();
+                int aSize = StrongBotStrategy.setSize(aGroup);
+                if (aSize > 1) {
+                    int botOwns = StrongBotStrategy.ownedInSet(state, bidderId, aGroup);
+                    completesOwnSet = botOwns == aSize - 1;
+                    advancesOwnSet = botOwns >= 1 && botOwns < aSize - 1;
+                    for (PlayerSnapshot p : state.players()) {
+                        if (p.playerId().equals(bidderId) || p.bankrupt() || p.eliminated()) continue;
+                        if (StrongBotStrategy.ownedInSet(state, p.playerId(), aGroup) == aSize - 1) {
+                            blocksOpponent = true;
+                            opponentThreat = Math.max(opponentThreat,
+                                    StrongBotStrategy.threatScore(state, p.playerId()));
+                        }
+                    }
+                    if (aGroup.placeType == PlaceType.STREET) {
+                        groupStrength = StrongBotStrategy.streetStrengthScore(aGroup); // 1..5
                     }
                 }
             }
-            int maxBid = Math.min(ceiling, cash - reserve);
+            boolean monopolyCritical = completesOwnSet || blocksOpponent;
+
+            // Reserve: keep a survival buffer normally, but for a monopoly-critical bid
+            // spend down to the minimum floor — winning the set IS the path to safety.
+            double posFactor = StrongBotStrategy.positionFactor(state, bidderId);
+            int reserve;
+            if (monopolyCritical) {
+                reserve = Math.max(cfg.minCashReserve(), (int)(cfg.minCashReserve() / posFactor));
+            } else {
+                reserve = Math.min(dynamicReserve(state, bidderId), cfg.dangerCashReserve());
+                reserve = Math.max(cfg.minCashReserve(), (int)(reserve / posFactor));
+            }
+            int available = Math.max(0, cash - reserve);
+
+            // Base ceiling never exceeds face price for a property with no strategic value.
+            int ceiling = Math.min(facePrice, (int)(facePrice * cfg.auctionAggression()));
+            if (completesOwnSet) {
+                // Spend nearly all discretionary cash; stronger groups justify spending more.
+                double share = Math.min(1.0, 0.6 + groupStrength * 0.08); // 0.68 … 1.0
+                ceiling = Math.max(ceiling, Math.max((int)(available * share), facePrice * 2));
+            } else if (blocksOpponent) {
+                // Denying a monopoly is nearly as valuable, scaled by how dangerous the opponent is.
+                double share = Math.min(0.9, 0.45 + opponentThreat * 0.20);
+                ceiling = Math.max(ceiling, Math.max((int)(available * share), (int)(facePrice * 1.5)));
+            } else if (advancesOwnSet) {
+                // Keep a live monopoly path: premium above face, scaled by group strength.
+                double premium = 0.40 + groupStrength * 0.12; // 0.52 … 1.0 over face
+                ceiling = Math.max(ceiling, facePrice + (int)(facePrice * premium));
+            }
+            int maxBid = Math.min(ceiling, available);
 
             java.util.Set<String> activeBidders = new java.util.HashSet<>(auction.eligiblePlayerIds());
             activeBidders.removeAll(auction.passedPlayerIds());
@@ -974,6 +1016,12 @@ public final class PureDomainStrategy implements BotStrategy {
                     value += groupPriceSum * 2 + setWeight;
                 } else if (botOwns == groupSize - 1 && inSelection >= 1) {
                     value += groupPriceSum / 2 + setWeight / 3;
+                } else if (botOwns >= 1) {
+                    // Foothold premium: don't sell a deed in a group we still have a live
+                    // shot at monopolising for bare face price. Scale by group strength so
+                    // strong groups (orange/red) are guarded harder than weak ones (brown).
+                    double strength = StrongBotStrategy.streetStrengthScore(group); // 1..5
+                    value += groupPriceSum / 4 + (int)(setWeight * strength / 20.0);
                 }
             }
         }

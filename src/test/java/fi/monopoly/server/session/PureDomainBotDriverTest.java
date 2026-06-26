@@ -208,6 +208,92 @@ class PureDomainBotDriverTest {
     }
 
     // -------------------------------------------------------------------------
+    // Regression: a monopoly is the game's money engine, so the bot must be willing
+    // to bid ABOVE face price when winning completes its own color monopoly — even
+    // though the same minBid would make it pass on a non-strategic property.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botBidsAboveFacePriceToCompleteOwnMonopoly() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O2 + O3 (2 of 3 ORANGE). Auction is for O1 (face €180) — the last piece.
+        // Human already bid 180 → next min = 190 > face. Completing the ORANGE monopoly is
+        // worth paying above face, so the bot must bid rather than pass.
+        PropertyStateSnapshot o2 = new PropertyStateSnapshot("O2", BOT_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o3 = new PropertyStateSnapshot("O3", BOT_PLAYER, false, 0, 0);
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false);
+        SessionState state = buildTwoPlayerState(turn, List.of(o2, o3));
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 800, 1, false, false, false, 0, 0, List.of("O2", "O3")),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of())
+                ))
+                .build();
+        AuctionState auction = new AuctionState(
+                "auction-1", "O1", HUMAN_PLAYER,
+                BOT_PLAYER, HUMAN_PLAYER,
+                180, 190,
+                Set.of(), List.of(BOT_PLAYER, HUMAN_PLAYER),
+                AuctionStatus.ACTIVE, 0, null
+        );
+        state = state.toBuilder().auctionState(auction).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PlaceAuctionBidCommand b && b.amount() >= 190),
+                "Bot must bid above face price (≥190) to complete its ORANGE monopoly; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
+    // Regression: once an opponent takes the missing piece of a contested group,
+    // that monopoly is dead for everyone. The bot must bid above face to deny an
+    // opponent who is one deed away from completing their monopoly.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botBidsAboveFacePriceToBlockOpponentMonopoly() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Human owns O2 + O3 (2 of 3 ORANGE); bot owns nothing in the group. Auction for O1.
+        // Human bid 180 → next min 190 > face €180. Letting the human win completes their
+        // monopoly, so the bot must bid above face to block it.
+        PropertyStateSnapshot o2 = new PropertyStateSnapshot("O2", HUMAN_PLAYER, false, 0, 0);
+        PropertyStateSnapshot o3 = new PropertyStateSnapshot("O3", HUMAN_PLAYER, false, 0, 0);
+        TurnState turn = new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_AUCTION, false, false);
+        SessionState state = buildTwoPlayerState(turn, List.of(o2, o3));
+        state = state.toBuilder()
+                .players(List.of(
+                        new PlayerSnapshot(BOT_PLAYER, "seat-bot", "Bot", 800, 1, false, false, false, 0, 0, List.of()),
+                        new PlayerSnapshot(HUMAN_PLAYER, "seat-human", "Ihminen", 500, 0, false, false, false, 0, 0, List.of("O2", "O3"))
+                ))
+                .build();
+        AuctionState auction = new AuctionState(
+                "auction-1", "O1", HUMAN_PLAYER,
+                BOT_PLAYER, HUMAN_PLAYER,
+                180, 190,
+                Set.of(), List.of(BOT_PLAYER, HUMAN_PLAYER),
+                AuctionStatus.ACTIVE, 0, null
+        );
+        state = state.toBuilder().auctionState(auction).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should respond within 3s");
+        assertTrue(recorder.commands.stream().anyMatch(c -> c instanceof PlaceAuctionBidCommand b && b.amount() >= 190),
+                "Bot must bid above face price (≥190) to block the opponent's ORANGE monopoly; got: " + recorder.commands);
+    }
+
+    // -------------------------------------------------------------------------
     // Jail strategy: leave when the board is safe, stay when it is dangerous.
     // defaults() preset: preferJailLateGame=true, jailExitThreshold=500.
     // -------------------------------------------------------------------------
@@ -904,6 +990,44 @@ class PureDomainBotDriverTest {
     // Trade goal-orientation: bot must not accept property-only trades that don't
     // advance any monopoly goal (regression for aimless property-shuffling).
     // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // Regression: don't sell own deeds cheap. A property in a group the bot still
+    // has a live shot at monopolising is worth more than bare face price, so the
+    // bot must not accept mere face-value cash for its ORANGE foothold deed.
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void botDoesNotSellFootholdDeedForFaceValueCash() throws InterruptedException {
+        OneShotRecorder recorder = new OneShotRecorder();
+        SessionCommandPublisher publisher = new SessionCommandPublisher(recorder);
+
+        // Bot owns O1 (1 of 3 ORANGE — a live monopoly foothold). Human offers exactly
+        // face price (€180) in cash for it. Selling the foothold for face value gives away
+        // the monopoly potential too cheaply, so the bot must not accept.
+        PropertyStateSnapshot o1 = new PropertyStateSnapshot("O1", BOT_PLAYER, false, 0, 0);
+        TradeOfferState offer = new TradeOfferState(
+                HUMAN_PLAYER, BOT_PLAYER,
+                new TradeSelectionState(180, List.of(), 0),    // offered to bot: €180 cash
+                new TradeSelectionState(0, List.of("O1"), 0)); // requested from bot: O1
+        TradeState trade = new TradeState(
+                "trade-foothold", HUMAN_PLAYER, BOT_PLAYER, TradeStatus.SUBMITTED,
+                offer, HUMAN_PLAYER, true, BOT_PLAYER, HUMAN_PLAYER, List.of());
+
+        SessionState state = buildTwoPlayerState(
+                new TurnState(BOT_PLAYER, TurnPhase.WAITING_FOR_END_TURN, false, false),
+                List.of(o1));
+        state = state.toBuilder().tradeState(trade).build();
+        recorder.initState(state);
+
+        driver = PureDomainBotDriver.createAndRegisterIfNeeded(publisher, state, Map.of());
+        driver.onSnapshotChanged(ClientSessionSnapshot.from(state, true));
+
+        assertTrue(recorder.firstCommand.await(3, TimeUnit.SECONDS), "Bot should dispatch a command within 3s");
+        assertFalse(recorder.commands.stream().anyMatch(c -> c instanceof AcceptTradeCommand),
+                "Bot must not sell its ORANGE foothold deed for bare face-value cash; got: " + recorder.commands);
+    }
 
     @Test
     @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
