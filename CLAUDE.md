@@ -91,8 +91,10 @@ Config tuning has largely converged; further bot strength requires strategy-code
 - *Bankruptcy* — `bankruptcyAversion` is wired into `dynamicReserve`: low cash vs board danger raises
   the reserve, pivoting the bot to defensive cash-preservation.
 
-**Known gap (intentionally deferred):** the bot does not weaponise the finite house supply (deliberate
-under-building to starve opponents of houses). See the NOTE in `StrongBotStrategy.buildGroupScore`.
+**Housing-shortage weapon:** implemented via `houseHoardingWeight` in `StrongBotConfig` and
+`StrongBotStrategy.buildGroupScore()` (helpers `housesOnBoard`, `opponentHasUndevelopedMonopoly`).
+Empirical 4-player A/B (102 games, 2026-06-26): null result — house scarcity is symmetric in
+4-player, so the weapon is neutral. Disabled by default (`houseHoardingWeight = 0.0`).
 
 ## Package layout
 

@@ -140,14 +140,21 @@ final class StrongBotStrategy {
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .anyMatch(p -> buildingLevel(p) >= 4);
         if (wouldPushToHotel) score -= cfg.hotelAversion();
-        // NOTE (known gap — intentionally not implemented): the house supply is finite (32 houses,
-        // 12 hotels in standard Monopoly). A strong player can deliberately UNDER-build (e.g. hold
-        // at 3 houses across a group, or build hotels to return houses to the bank) to starve
-        // opponents of the houses they need. This bot does not model house-pool depletion at all —
-        // it neither tracks remaining supply nor uses a housing shortage as an offensive weapon.
-        // Implementing it would mean: (1) counting houses currently placed across the board, (2)
-        // estimating each opponent's imminent build needs, (3) biasing the build/hotel decision to
-        // keep scarce houses out of their reach. Deferred as low priority for now.
+        // Housing-shortage weapon: when houses are scarce and an opponent has an undeveloped monopoly,
+        // (1) rush to claim the remaining houses (score boost) and (2) refuse hotel conversions that
+        // would return 4 houses to the bank where the opponent can immediately use them.
+        if (cfg.houseHoardingWeight() > 0) {
+            int housesLeft = 32 - housesOnBoard(state);
+            if (housesLeft < 8 && opponentHasUndevelopedMonopoly(state, playerId)) {
+                if (wouldPushToHotel) {
+                    // Hotel conversion frees 4 houses — heavily penalise it on top of hotelAversion
+                    score -= cfg.houseHoardingWeight() * 8.0;
+                } else {
+                    // Houses are running out; rushing to lock them up is strongly +EV
+                    score += cfg.houseHoardingWeight() * 4.0;
+                }
+            }
+        }
         if (unownedCount(state) > 8) score -= 2.0;
         if (boardDangerScore(state, playerId) >= cfg.dangerCashReserve()) score -= 6.0;
         // Timing: boost if an opponent is about to land on this group — build before they arrive
@@ -190,6 +197,21 @@ final class StrongBotStrategy {
                 .filter(p -> playerId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .mapToInt(StrongBotStrategy::buildingLevel)
                 .max().orElse(0);
+    }
+
+    /** Houses currently placed on the board (hotels count as 0 — they do not tie up house pieces). */
+    static int housesOnBoard(SessionState state) {
+        return state.properties().stream()
+                .mapToInt(p -> p.hotelCount() > 0 ? 0 : p.houseCount())
+                .sum();
+    }
+
+    /** True when any active opponent owns a full color-street monopoly with zero houses on it. */
+    static boolean opponentHasUndevelopedMonopoly(SessionState state, String playerId) {
+        return state.players().stream()
+                .filter(p -> !p.playerId().equals(playerId) && !p.bankrupt() && !p.eliminated())
+                .anyMatch(p -> completedColorGroups(state, p.playerId()).stream()
+                        .anyMatch(g -> maxLevelInGroup(state, p.playerId(), g) < 1));
     }
 
     // -------------------------------------------------------------------------

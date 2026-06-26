@@ -307,6 +307,23 @@ public record StrongBotConfig(
         double mortgageRecoveryPriority,
 
         /**
+         * Strength of the housing-shortage weapon in {@code buildGroupScore()}. The bank holds only
+         * 32 houses, and converting four houses to a hotel returns them to the bank where opponents
+         * can claim them. When houses are scarce and an active opponent owns an undeveloped monopoly,
+         * a positive weight makes the bot (1) rush to claim scarce houses on its own monopolies and
+         * (2) refuse hotel conversions that would free houses for that opponent. 0.0 disables it.
+         *
+         * <p><b>Empirical note (2026-06-26):</b> a 102-game 4-player A/B benchmark (6 seat
+         * arrangements × 17 seeds, all decided by net-worth tiebreak) found no win-rate
+         * difference between weight=1.0 and weight=0.0 (50.0% vs 50.0%, CIs fully overlapping).
+         * House scarcity is a shared condition that harms both sides equally in symmetric play,
+         * so the weapon is neutral. Defaults to 0.0 (disabled) until a scenario is found where
+         * it provides genuine asymmetric advantage.
+         * Range: 0.0 … 2.0.
+         */
+        double houseHoardingWeight,
+
+        /**
          * When {@code true}, the bot will mortgage its most expendable non-synergy deed to fund a
          * house-build round on a monopoly it cannot currently afford to develop from cash alone.
          * <p>Trading a low-rent isolated property for immediate monopoly development is usually
@@ -787,6 +804,7 @@ public record StrongBotConfig(
         private double mortgageRecoveryPriority;
         private boolean mortgageToBuild = true;
         private double tradeSaleAggression = 1.4;
+        private double houseHoardingWeight = 0.0;
 
         /** No-arg constructor: initialises {@code colorGroupWeights} to the theory-based defaults. */
         public Builder() {
@@ -827,6 +845,7 @@ public record StrongBotConfig(
             this.mortgageRecoveryPriority        = src.mortgageRecoveryPriority();
             this.mortgageToBuild                 = src.mortgageToBuild();
             this.tradeSaleAggression             = src.tradeSaleAggression();
+            this.houseHoardingWeight             = src.houseHoardingWeight();
         }
 
         public Builder buyThreshold(double v)                      { this.buyThreshold = v; return this; }
@@ -862,6 +881,7 @@ public record StrongBotConfig(
         public Builder mortgageRecoveryPriority(double v)          { this.mortgageRecoveryPriority = v; return this; }
         public Builder mortgageToBuild(boolean v)                  { this.mortgageToBuild = v; return this; }
         public Builder tradeSaleAggression(double v)               { this.tradeSaleAggression = v; return this; }
+        public Builder houseHoardingWeight(double v)               { this.houseHoardingWeight = v; return this; }
 
         public StrongBotConfig build() {
             return new StrongBotConfig(
@@ -878,7 +898,7 @@ public record StrongBotConfig(
                     railroadCompletionWeight, utilityCompletionWeight, buildRoundCap,
                     postMonopolyCashBuffer, auctionSetCompletionBonus,
                     tradeLiquidityWeight, opponentLeaderPressure, jailCardHoldBias,
-                    mortgageRecoveryPriority, mortgageToBuild, tradeSaleAggression
+                    mortgageRecoveryPriority, houseHoardingWeight, mortgageToBuild, tradeSaleAggression
             );
         }
     }
