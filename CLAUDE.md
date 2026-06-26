@@ -78,13 +78,14 @@ matter; the rest are noise at ±25 % perturbation). Then evolve, then verify wit
 `quickBenchmark` — which includes a humanlike bracket to catch bot-vs-bot overfitting.
 Config tuning has largely converged; further bot strength requires strategy-code changes.
 
-**Opponent-awareness (runtime path = `PureDomainBotDriver`, since `monopoly.bot.use.strategy`
-defaults off):**
+**Opponent-awareness (`PureDomainStrategy` / `PureDomainBotDriver`):**
 - *Auction* — models each competitor's realistic bid ceiling via `dynamicReserve` (cash + board
   position), prices weaker opponents out, and scales the monopoly-block premium by the blocked
   opponent's `threatScore` (the board leader earns the `opponentLeaderPressure` multiplier).
+  Bids above face price when completing own monopoly or blocking an opponent's.
 - *Trading* — `monopolyGiftPenalty` scales by `partnerBuildabilityFactor`: handing a monopoly to a
   cash-rich opponent (who can build immediately) is penalised far more than handing it to a broke one.
+  Foothold deeds (first property in a color group) carry a strategic premium on the giving side.
 - *Jail* — `handleRollOrJail` wires `preferJailLateGame` + `jailExitThreshold` (stay in jail when the
   board is dangerous) and `jailCardHoldBias` (spend vs hoard a get-out card).
 - *Bankruptcy* — `bankruptcyAversion` is wired into `dynamicReserve`: low cash vs board danger raises

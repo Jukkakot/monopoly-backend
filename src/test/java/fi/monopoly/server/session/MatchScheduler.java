@@ -21,8 +21,8 @@ import java.util.stream.IntStream;
  * <pre>{@code
  * ExperimentSpec spec = new ExperimentSpec(
  *     List.of(
- *         new StrategyEntry("pure-domain-v1", new PureDomainStrategy(Map.of())),
- *         new StrategyEntry("utility-v1",     new UtilityStrategy(...))
+ *         new StrategyEntry("bot-a", new PureDomainStrategy(Map.of())),
+ *         new StrategyEntry("bot-b", new PureDomainStrategy(StrongBotConfig.humanlike().asMap()))
  *     ),
  *     500,          // gamesPerPair (× 2 for mirror)
  *     true,         // mirror
