@@ -304,7 +304,18 @@ public record StrongBotConfig(
          * a per-property recovery priority tuned for high-quality assets (monopoly groups).
          * Range: 0.5 … 2.0.
          */
-        double mortgageRecoveryPriority
+        double mortgageRecoveryPriority,
+
+        /**
+         * When {@code true}, the bot will mortgage its most expendable non-synergy deed to fund a
+         * house-build round on a monopoly it cannot currently afford to develop from cash alone.
+         * <p>Trading a low-rent isolated property for immediate monopoly development is usually
+         * strongly +EV: the houses generate far more rent than the mortgaged deed ever would.
+         * Only fires when the build group is genuinely worth building (positive build score) and
+         * the freed cash actually enables the round. {@code false} restores the legacy
+         * build-only-from-cash behaviour. Defaults to {@code true}.
+         */
+        boolean mortgageToBuild
 ) {
     public StrongBotConfig {
         colorGroupWeights = Map.copyOf(colorGroupWeights);
@@ -759,6 +770,7 @@ public record StrongBotConfig(
         private double opponentLeaderPressure;
         private double jailCardHoldBias;
         private double mortgageRecoveryPriority;
+        private boolean mortgageToBuild = true;
 
         /** No-arg constructor: initialises {@code colorGroupWeights} to the theory-based defaults. */
         public Builder() {
@@ -797,6 +809,7 @@ public record StrongBotConfig(
             this.opponentLeaderPressure          = src.opponentLeaderPressure();
             this.jailCardHoldBias                = src.jailCardHoldBias();
             this.mortgageRecoveryPriority        = src.mortgageRecoveryPriority();
+            this.mortgageToBuild                 = src.mortgageToBuild();
         }
 
         public Builder buyThreshold(double v)                      { this.buyThreshold = v; return this; }
@@ -830,6 +843,7 @@ public record StrongBotConfig(
         public Builder opponentLeaderPressure(double v)            { this.opponentLeaderPressure = v; return this; }
         public Builder jailCardHoldBias(double v)                  { this.jailCardHoldBias = v; return this; }
         public Builder mortgageRecoveryPriority(double v)          { this.mortgageRecoveryPriority = v; return this; }
+        public Builder mortgageToBuild(boolean v)                  { this.mortgageToBuild = v; return this; }
 
         public StrongBotConfig build() {
             return new StrongBotConfig(
@@ -846,7 +860,7 @@ public record StrongBotConfig(
                     railroadCompletionWeight, utilityCompletionWeight, buildRoundCap,
                     postMonopolyCashBuffer, auctionSetCompletionBonus,
                     tradeLiquidityWeight, opponentLeaderPressure, jailCardHoldBias,
-                    mortgageRecoveryPriority
+                    mortgageRecoveryPriority, mortgageToBuild
             );
         }
     }

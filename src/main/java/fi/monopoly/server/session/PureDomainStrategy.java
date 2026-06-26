@@ -38,13 +38,26 @@ public final class PureDomainStrategy implements BotStrategy {
     private static final double CATCHUP_DISCOUNT = 0.40;
 
     private final Map<String, StrongBotConfig> configs;
+    /** When non-null, this config is used for every seat regardless of playerId (config A/B seam). */
+    private final StrongBotConfig fixedConfig;
 
     public PureDomainStrategy(Map<String, StrongBotConfig> configs) {
         this.configs = Map.copyOf(configs);
+        this.fixedConfig = null;
     }
 
     public PureDomainStrategy() {
         this(Map.of());
+    }
+
+    /**
+     * Constructs a strategy that applies {@code fixedConfig} to every seat it drives, regardless of
+     * player ID. Used for head-to-head config A/B experiments where a single config must be pinned
+     * to a seat whose generated player ID is not known upfront.
+     */
+    public PureDomainStrategy(StrongBotConfig fixedConfig) {
+        this.configs = Map.of();
+        this.fixedConfig = fixedConfig;
     }
 
     @Override
@@ -120,6 +133,8 @@ public final class PureDomainStrategy implements BotStrategy {
         if (unmortgage.isPresent()) return unmortgage.get();
         Optional<Intent> build = tryBuild(state, botId);
         if (build.isPresent()) return build.get();
+        Optional<Intent> mortgageToBuild = tryMortgageToBuild(state, botId);
+        if (mortgageToBuild.isPresent()) return mortgageToBuild.get();
         if (state.tradeState() == null) {
             Optional<Intent> trade = tryInitiateTrade(state, botId, memory);
             if (trade.isPresent()) return trade.get();
@@ -170,6 +185,55 @@ public final class PureDomainStrategy implements BotStrategy {
         PropertyStateSnapshot target = StrongBotStrategy.findBuildTarget(state, playerId, bestGroup);
         if (target == null) return Optional.empty();
         return Optional.of(new Intent.BuildHouses(target.propertyId()));
+    }
+
+    /**
+     * When the bot owns a monopoly worth developing but cannot afford the build round from cash,
+     * mortgage its most expendable non-synergy deed to fund it. Reusing a low-rent isolated
+     * property as build capital is strongly +EV — the houses earn far more than the deed's rent.
+     *
+     * <p>Only fires when (1) the group is genuinely worth building (positive build score), (2) the
+     * round is unaffordable from cash above the reserve, and (3) the freed cash actually enables the
+     * round. {@code tryBuild} runs first each turn-step, so once enough cash is raised the bot builds
+     * on its next step; when no expendable deed remains, this returns empty and the turn ends —
+     * guaranteeing termination.
+     */
+    private Optional<Intent> tryMortgageToBuild(SessionState state, String playerId) {
+        StrongBotConfig cfg = configFor(playerId);
+        if (!cfg.mortgageToBuild()) return Optional.empty();
+        PlayerSnapshot player = StrongBotStrategy.findPlayer(state, playerId);
+        if (player == null) return Optional.empty();
+        int reserve = dynamicReserve(state, playerId);
+        int posAdjustedReserve = (int)(reserve / StrongBotStrategy.positionFactor(state, playerId));
+
+        StreetType bestGroup = null;
+        double bestScore = 0.0;   // strictly positive: only develop groups genuinely worth building
+        int bestRoundCost = 0;
+        for (StreetType group : StrongBotStrategy.completedColorGroups(state, playerId)) {
+            if (StrongBotStrategy.maxLevelInGroup(state, playerId, group) >= cfg.buildRoundCap()) continue;
+            int roundCost = buildRoundCost(state, playerId, group);
+            if (roundCost <= 0) continue;
+            // Skip groups already affordable from cash — tryBuild handles those.
+            if (player.cash() - roundCost >= posAdjustedReserve) continue;
+            double score = StrongBotStrategy.buildGroupScore(state, playerId, group, cfg);
+            if (score > bestScore) { bestScore = score; bestGroup = group; bestRoundCost = roundCost; }
+        }
+        if (bestGroup == null) return Optional.empty();
+
+        int needed = (posAdjustedReserve + bestRoundCost) - player.cash();
+        if (needed <= 0) return Optional.empty();
+        PropertyStateSnapshot toMortgage = findMortgageCandidateForPurchase(state, playerId, needed);
+        if (toMortgage == null) return Optional.empty();
+        return Optional.of(new Intent.MortgageProperty(toMortgage.propertyId()));
+    }
+
+    /** Total cost to add one house to every unmortgaged property in a group the player owns. */
+    private static int buildRoundCost(SessionState state, String playerId, StreetType group) {
+        return state.properties().stream()
+                .filter(p -> playerId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                        && spotType(p.propertyId()).streetType == group)
+                .mapToInt(p -> spotType(p.propertyId()).getIntegerProperty("housePrice"))
+                .sum();
     }
 
     private Optional<Intent> tryInitiateTrade(SessionState state, String botId, BotMemory memory) {
@@ -1188,6 +1252,7 @@ public final class PureDomainStrategy implements BotStrategy {
     }
 
     private StrongBotConfig configFor(String playerId) {
+        if (fixedConfig != null) return fixedConfig;
         return configs.getOrDefault(playerId, StrongBotConfig.defaults());
     }
 
