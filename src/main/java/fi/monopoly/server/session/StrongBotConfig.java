@@ -315,7 +315,22 @@ public record StrongBotConfig(
          * the freed cash actually enables the round. {@code false} restores the legacy
          * build-only-from-cash behaviour. Defaults to {@code true}.
          */
-        boolean mortgageToBuild
+        boolean mortgageToBuild,
+
+        /**
+         * Aggression multiplier on the profit margin the bot demands when selling a deed in a trade
+         * (counter-offer asking price). The markup above the deed's contextual value is
+         * {@code (0.05 + threatScore × 0.20) × tradeSaleAggression}: 1.0 reproduces the legacy
+         * margin (5–25 % above value), higher values extract a steeper premium — most of all from
+         * high-threat partners and when the deed completes the buyer's monopoly.
+         * <p>Too high starves the bot of trades it also benefits from. Defaults to 1.4: a 2-player
+         * bot-vs-bot sweep found 1.4/1.8/2.4 all statistically indistinguishable from 1.0 (trades
+         * between equal bots are rare, so the margin barely moves win-rate), so a moderate value is
+         * chosen to extract more from human opponents — who overpay relative to bots — at no measured
+         * bot-vs-bot cost.
+         * Range: 1.0 … 3.0.
+         */
+        double tradeSaleAggression
 ) {
     public StrongBotConfig {
         colorGroupWeights = Map.copyOf(colorGroupWeights);
@@ -771,6 +786,7 @@ public record StrongBotConfig(
         private double jailCardHoldBias;
         private double mortgageRecoveryPriority;
         private boolean mortgageToBuild = true;
+        private double tradeSaleAggression = 1.4;
 
         /** No-arg constructor: initialises {@code colorGroupWeights} to the theory-based defaults. */
         public Builder() {
@@ -810,6 +826,7 @@ public record StrongBotConfig(
             this.jailCardHoldBias                = src.jailCardHoldBias();
             this.mortgageRecoveryPriority        = src.mortgageRecoveryPriority();
             this.mortgageToBuild                 = src.mortgageToBuild();
+            this.tradeSaleAggression             = src.tradeSaleAggression();
         }
 
         public Builder buyThreshold(double v)                      { this.buyThreshold = v; return this; }
@@ -844,6 +861,7 @@ public record StrongBotConfig(
         public Builder jailCardHoldBias(double v)                  { this.jailCardHoldBias = v; return this; }
         public Builder mortgageRecoveryPriority(double v)          { this.mortgageRecoveryPriority = v; return this; }
         public Builder mortgageToBuild(boolean v)                  { this.mortgageToBuild = v; return this; }
+        public Builder tradeSaleAggression(double v)               { this.tradeSaleAggression = v; return this; }
 
         public StrongBotConfig build() {
             return new StrongBotConfig(
@@ -860,7 +878,7 @@ public record StrongBotConfig(
                     railroadCompletionWeight, utilityCompletionWeight, buildRoundCap,
                     postMonopolyCashBuffer, auctionSetCompletionBonus,
                     tradeLiquidityWeight, opponentLeaderPressure, jailCardHoldBias,
-                    mortgageRecoveryPriority, mortgageToBuild
+                    mortgageRecoveryPriority, mortgageToBuild, tradeSaleAggression
             );
         }
     }

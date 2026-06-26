@@ -610,7 +610,7 @@ public final class PureDomainStrategy implements BotStrategy {
                 memory.clearCounterEdits(tradeId);
                 return cancelAsDecline(botId, trade, memory);
             }
-            double margin = 1.05 + StrongBotStrategy.threatScore(state, counterPartnerId) * 0.20;
+            double margin = saleMargin(StrongBotStrategy.threatScore(state, counterPartnerId), configFor(botId));
             boolean completesBuyerSet = myGiving.propertyIds().stream()
                     .anyMatch(id -> wouldCompletePartnerMonopoly(state, counterPartnerId, id));
             if (completesBuyerSet) margin *= MONOPOLY_SALE_PREMIUM;
@@ -626,7 +626,7 @@ public final class PureDomainStrategy implements BotStrategy {
         }
 
         double ts = StrongBotStrategy.threatScore(state, counterPartnerId);
-        double profitFactor = 1.05 + ts * 0.20;
+        double profitFactor = saleMargin(ts, configFor(botId));
         int targetMoneyReceived = Math.max(0, (int)(valueGiven * profitFactor) - nonMoneyReceived);
 
         if (givingBreaksOwnMonopoly(state, botId, myGiving)) {
@@ -984,6 +984,16 @@ public final class PureDomainStrategy implements BotStrategy {
     // -------------------------------------------------------------------------
     // Trade valuation helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Profit margin demanded when selling a deed in a trade. The markup above the deed's
+     * contextual value scales with the partner's threat (charge the leader more) and with the
+     * configured {@link StrongBotConfig#tradeSaleAggression()}. At aggression 1.0 this reproduces
+     * the legacy {@code 1.05 + threatScore × 0.20} margin.
+     */
+    private static double saleMargin(double threatScore, StrongBotConfig cfg) {
+        return 1.0 + (0.05 + threatScore * 0.20) * cfg.tradeSaleAggression();
+    }
 
     private int monopolyGiftPenalty(SessionState state, String partnerId,
                                      TradeSelectionState giving, BotMemory memory) {
