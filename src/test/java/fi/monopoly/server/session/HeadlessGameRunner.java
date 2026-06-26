@@ -157,7 +157,13 @@ public final class HeadlessGameRunner {
                     noStructuralProgress = 0;
                 } else if (newState.tradeState() == null && newState.auctionState() == null) {
                     if (++noStructuralProgress > MAX_NO_STRUCTURAL_PROGRESS) {
-                        return new GameResult(-1, steps, Outcome.STALEMATE, true);
+                        // No property changes for a long stretch. On a fully-owned board this is
+                        // just a long rent phase, not a bug — the net-worth leader is well-defined,
+                        // so decide by net worth (loopSuspected flag retained for diagnostics) rather
+                        // than discarding the game. Keeps 3-4p experiments measurable.
+                        return new GameResult(
+                                winnerByNetWorth(service.currentState(), playerIds), steps,
+                                Outcome.STALEMATE, true);
                     }
                 }
             } else {
@@ -291,6 +297,7 @@ public final class HeadlessGameRunner {
 
     private static int winnerByNetWorth(SessionState state, List<String> playerIds) {
         int bestSeat = -1, bestWorth = Integer.MIN_VALUE;
+        boolean tie = false;
         for (int i = 0; i < playerIds.size(); i++) {
             String pid = playerIds.get(i);
             PlayerSnapshot p = state.players().stream()
@@ -298,9 +305,11 @@ public final class HeadlessGameRunner {
                     .findFirst().orElse(null);
             if (p == null) continue;
             int worth = p.cash() + propertyEquity(state, pid);
-            if (worth > bestWorth) { bestWorth = worth; bestSeat = i; }
+            if (worth > bestWorth) { bestWorth = worth; bestSeat = i; tie = false; }
+            else if (worth == bestWorth) { tie = true; }
         }
-        return bestSeat;
+        // Exact net-worth tie ⇒ genuinely undecidable; report no winner rather than bias to seat order.
+        return tie ? -1 : bestSeat;
     }
 
     private static int propertyEquity(SessionState state, String pid) {

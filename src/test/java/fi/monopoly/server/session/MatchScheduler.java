@@ -104,7 +104,7 @@ public final class MatchScheduler {
             StringBuilder sb = new StringBuilder();
             sb.append("=".repeat(80)).append('\n');
             sb.append("Evaluation Report\n");
-            sb.append(String.format("  games=%d  stalemates=%d (%.1f%%)  loop-suspected=%d  mirror=%b%n",
+            sb.append(String.format("  games=%d  net-worth-decided=%d (%.1f%%)  undecided-draws=%d  mirror=%b%n",
                     totalGames, totalStalemates,
                     totalGames > 0 ? 100.0 * totalStalemates / totalGames : 0,
                     loopSuspectedCount, mirror));
@@ -182,17 +182,17 @@ public final class MatchScheduler {
             games[0]++; games[1]++;
             HeadlessGameRunner.GameResult gr = r.result();
             if (gr.loopSuspected()) loopCount++;
-            if (gr.outcome() == HeadlessGameRunner.Outcome.STALEMATE) {
-                totalStalemates++;
-                // Stalemates count as draws — no win awarded to either
-            } else {
-                int winnerSeat = gr.winnerSeat();
-                if (winnerSeat == 0) {
-                    // Seat 0 won: which strategy was at seat 0?
-                    wins[r.strategyAtSeat0()]++;
-                } else if (winnerSeat == 1) {
-                    wins[1 - r.strategyAtSeat0()]++;
-                }
+            if (gr.outcome() == HeadlessGameRunner.Outcome.STALEMATE) totalStalemates++;
+            // Honour the winner whenever the game is decidable. A game that reaches the step cap
+            // without a bankruptcy is decided by net worth (standard timed-Monopoly scoring), so its
+            // winnerSeat is valid — only an exact net-worth tie / suspected loop yields -1, which is
+            // the only genuine draw. This is what makes 3-4 player games (which rarely bankrupt out
+            // within the step cap) measurable instead of ~80% discarded.
+            int winnerSeat = gr.winnerSeat();
+            if (winnerSeat == 0) {
+                wins[r.strategyAtSeat0()]++;
+            } else if (winnerSeat == 1) {
+                wins[1 - r.strategyAtSeat0()]++;
             }
         }
 
@@ -203,6 +203,55 @@ public final class MatchScheduler {
 
         return new EvaluationReport(results, outcomes.size(), totalStalemates, loopCount,
                 spec.seedBase(), spec.mirror());
+    }
+
+    /**
+     * 4-player head-to-head A/B: two seats run strategy {@code a}, two run {@code b}, rotated over
+     * all six distinct {A,A,B,B} seat arrangements to cancel positional advantage. Each game is
+     * decided by bankruptcy or — at the step cap — net worth, so games that don't bankrupt out
+     * (the 4-player norm) still count. This is the regime where denial / opponent-modelling levers
+     * actually fire, so it is the harness to validate them.
+     *
+     * @param seedsPerArrangement seeds played per arrangement (× 6 arrangements = total games)
+     */
+    public static EvaluationReport runFourPlayerAB(StrategyEntry a, StrategyEntry b,
+                                                   int seedsPerArrangement, int maxSteps, long seedBase) {
+        boolean[][] arrangements = {
+                {true, true, false, false}, {true, false, true, false}, {true, false, false, true},
+                {false, true, true, false}, {false, true, false, true}, {false, false, true, true}
+        }; // true ⇒ that seat runs strategy A
+
+        record Job(HeadlessGameRunner.MatchConfig cfg, boolean[] layout) {}
+        List<Job> jobs = new ArrayList<>();
+        for (boolean[] layout : arrangements) {
+            for (int s = 0; s < seedsPerArrangement; s++) {
+                long seed = seedBase + s;
+                List<HeadlessGameRunner.SeatAssignment> seats = new ArrayList<>();
+                for (boolean isA : layout) {
+                    seats.add(new HeadlessGameRunner.SeatAssignment(isA ? a.strategy() : b.strategy()));
+                }
+                jobs.add(new Job(new HeadlessGameRunner.MatchConfig(seed, seats, maxSteps), layout));
+            }
+        }
+
+        record JobResult(HeadlessGameRunner.GameResult result, boolean[] layout) {}
+        List<JobResult> outcomes = jobs.parallelStream()
+                .map(j -> new JobResult(HeadlessGameRunner.play(j.cfg()), j.layout()))
+                .toList();
+
+        int aWins = 0, bWins = 0, draws = 0, tiebreak = 0;
+        for (JobResult r : outcomes) {
+            if (r.result().outcome() == HeadlessGameRunner.Outcome.STALEMATE) tiebreak++;
+            int w = r.result().winnerSeat();
+            if (w < 0) { draws++; continue; }
+            if (r.layout()[w]) aWins++; else bWins++;
+        }
+        int decided = aWins + bWins;
+        List<StrategyResult> results = List.of(
+                new StrategyResult(a.name(), aWins, decided, 0, WilsonInterval.of(aWins, decided)),
+                new StrategyResult(b.name(), bWins, decided, 0, WilsonInterval.of(bWins, decided))
+        );
+        return new EvaluationReport(results, outcomes.size(), tiebreak, draws, seedBase, false);
     }
 
     // -------------------------------------------------------------------------
