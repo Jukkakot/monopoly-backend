@@ -479,7 +479,7 @@ public final class SessionHttpServer {
         }
     }
 
-    private record SettingsRequest(BotSpeed botSpeed) {}
+    private record SettingsRequest(BotSpeed botSpeed, Boolean viewerGating) {}
 
     private void handleSettings(Context ctx) {
         String id = ctx.pathParam("id");
@@ -496,6 +496,10 @@ public final class SessionHttpServer {
             double mult = req.botSpeed().toMultiplier();
             registry.setBotSpeed(id, mult);
             log.debug("Session {} botSpeed={} ({}x)", id.substring(0, 8), req.botSpeed(), mult);
+        }
+        if (req.viewerGating() != null) {
+            registry.setViewerGatingEnabled(id, req.viewerGating());
+            log.debug("Session {} viewerGating={}", id.substring(0, 8), req.viewerGating());
         }
         ctx.status(200).json(Map.of("ok", true));
     }

@@ -612,6 +612,13 @@ public final class SessionRegistry {
         return true;
     }
 
+    public boolean setViewerGatingEnabled(String sessionId, boolean enabled) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || entry.botDriver() == null) return false;
+        entry.botDriver().setViewerGatingEnabled(enabled);
+        return true;
+    }
+
     public double getBotSpeedMultiplier(String sessionId) {
         Entry entry = sessions.get(sessionId);
         if (entry == null || entry.botDriver() == null) return -1;

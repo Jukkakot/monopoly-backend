@@ -758,6 +758,12 @@ components:
             - `fast` — instant (0 ms delay)
             - `normal` — human-like delays (~1–3 s per action)
             - `slow` — exaggerated delays (~2.5–7 s per action)
+        viewerGating:
+          type: boolean
+          description: |
+            When `false`, bots act immediately without waiting for a connected viewer or
+            client ACK acknowledgements. Useful in automated tests to avoid the 50 ms ACK
+            throttle stalling bot progress.
 
     SessionSettingsResponse:
       type: object
