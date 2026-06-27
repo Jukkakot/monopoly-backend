@@ -31,6 +31,11 @@ public final class AuctionCommandHandler {
     private final Supplier<List<String>> bankruptcyQueueGetter;
     private final Consumer<List<String>> bankruptcyQueueSetter;
     private ActiveAuctionContext activeContext;
+    private Consumer<TurnContinuationState> postAuctionPauseAction;
+
+    public void setPostAuctionPauseAction(Consumer<TurnContinuationState> action) {
+        this.postAuctionPauseAction = action;
+    }
 
     public AuctionState startAuction(
             String triggeringPlayerId,
@@ -270,6 +275,8 @@ public final class AuctionCommandHandler {
             bankruptcyQueueSetter.accept(remaining);
             String triggeringPlayerId = currentStateSupplier.get().turn().activePlayerId();
             startAuction(triggeringPlayerId, nextPropertyId, resolveDisplayName(nextPropertyId), null);
+        } else if (postAuctionPauseAction != null && ctx.continuationState() != null) {
+            postAuctionPauseAction.accept(ctx.continuationState());
         } else {
             turnContinuationResolver.accept(ctx.continuationState());
         }

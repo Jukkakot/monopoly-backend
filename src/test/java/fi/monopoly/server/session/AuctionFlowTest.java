@@ -3,8 +3,10 @@ package fi.monopoly.server.session;
 import fi.monopoly.application.command.*;
 import fi.monopoly.application.result.CommandResult;
 import fi.monopoly.application.session.InMemorySessionState;
+import fi.monopoly.application.session.SessionApplicationService;
 import fi.monopoly.client.session.ClientSessionSnapshot;
 import fi.monopoly.client.session.SessionCommandPort;
+import fi.monopoly.domain.decision.PendingDecision;
 import fi.monopoly.domain.session.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
@@ -176,6 +178,79 @@ class AuctionFlowTest {
         assertNotNull(final_);
         assertEquals(AuctionStatus.WON_PENDING_RESOLUTION, final_.status());
         assertEquals(BOT, final_.winningPlayerId(), "Bot should win when human passes after opening");
+    }
+
+    /**
+     * Regression: after auction resolution, phase must be WAITING_FOR_END_TURN
+     * so the active player can press "Lopeta vuoro" themselves.
+     * Previously resolveAuction() called turnContinuationResolver directly,
+     * bypassing the pause step and immediately advancing to the next player.
+     */
+    @Test
+    void auctionResolutionLeavesActivePlayerInWaitingForEndTurn() {
+        String p1 = "player-1", p2 = "player-2";
+        SessionState initial = PureDomainSessionFactory.initialGameState(
+                SESSION_ID, List.of("Alice", "Bob"), List.of("#AA0000", "#0000AA"),
+                List.of(SeatKind.HUMAN, SeatKind.HUMAN));
+
+        // Find which player is seat 0 (active first)
+        String active = initial.turn().activePlayerId();
+        String other = initial.players().stream()
+                .map(PlayerSnapshot::playerId)
+                .filter(id -> !id.equals(active))
+                .findFirst().orElseThrow();
+
+        SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, new InMemorySessionState(initial));
+
+        // Open a property-purchase decision manually so we can trigger a decline→auction
+        TurnContinuationState continuation = new TurnContinuationState(
+                "cont-1", active, TurnContinuationType.RESUME_AFTER_AUCTION, TurnContinuationAction.END_TURN_WITH_SWITCH,
+                PROPERTY, null);
+        PendingDecision decision = service.openPropertyPurchaseDecision(
+                active, PROPERTY, "Hermanni", FACE_PRICE, null, continuation);
+
+        // Active player declines → auction starts
+        CommandResult decline = service.handle(new DeclinePropertyCommand(SESSION_ID, active, decision.decisionId(), PROPERTY));
+        assertTrue(decline.accepted(), "Decline must be accepted");
+        AuctionState auction = service.currentState().auctionState();
+        assertNotNull(auction, "Auction should be active after decline");
+
+        // Other player bids to win (active player has no more eligible bids once they pass)
+        String auctionId = auction.auctionId();
+
+        // Drive auction to WON_PENDING_RESOLUTION: other bids, active passes
+        service.handle(new PlaceAuctionBidCommand(SESSION_ID,
+                auction.currentActorPlayerId().equals(other) ? other : active,
+                auctionId, 10));
+        AuctionState mid = service.currentState().auctionState();
+        if (mid != null && mid.status() == AuctionStatus.ACTIVE) {
+            service.handle(new PassAuctionCommand(SESSION_ID, mid.currentActorPlayerId(), auctionId));
+        }
+
+        AuctionState won = service.currentState().auctionState();
+        assertNotNull(won, "Auction state must exist in WON_PENDING_RESOLUTION");
+        assertEquals(AuctionStatus.WON_PENDING_RESOLUTION, won.status());
+
+        // Winner confirms
+        CommandResult finish = service.handle(new FinishAuctionResolutionCommand(SESSION_ID, auctionId));
+        assertTrue(finish.accepted(), "FinishAuctionResolution must be accepted");
+
+        SessionState after = service.currentState();
+        assertNull(after.auctionState(), "Auction state must be null after resolution");
+
+        // KEY ASSERTION: turn must wait for end-turn, not jump to next player
+        assertEquals(TurnPhase.WAITING_FOR_END_TURN, after.turn().phase(),
+                "Phase must be WAITING_FOR_END_TURN after auction — player must press end turn");
+        assertEquals(active, after.turn().activePlayerId(),
+                "Active player must still be the original roller after auction");
+
+        // End turn → switches to next player
+        CommandResult endTurn = service.handle(new EndTurnCommand(SESSION_ID, active));
+        assertTrue(endTurn.accepted(), "EndTurn must be accepted in WAITING_FOR_END_TURN");
+        assertEquals(TurnPhase.WAITING_FOR_ROLL, service.currentState().turn().phase(),
+                "Phase must advance to WAITING_FOR_ROLL after EndTurn");
+        assertNotEquals(active, service.currentState().turn().activePlayerId(),
+                "Active player must switch after EndTurn");
     }
 
     // -------------------------------------------------------------------------

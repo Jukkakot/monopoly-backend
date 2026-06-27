@@ -126,6 +126,9 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
         if (propertyPurchaseCommandHandler != null) {
             propertyPurchaseCommandHandler.setPostPurchasePauseAction(pauseAction);
         }
+        if (auctionCommandHandler != null) {
+            auctionCommandHandler.setPostAuctionPauseAction(pauseAction);
+        }
     }
 
     public PendingDecision openPropertyPurchaseDecision(
