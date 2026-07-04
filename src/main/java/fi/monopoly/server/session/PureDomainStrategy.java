@@ -358,6 +358,24 @@ public final class PureDomainStrategy implements BotStrategy {
         if (allowed.contains(DebtAction.PAY_DEBT_NOW) && debt.currentCash() >= debt.amountRemaining()) {
             return new Intent.ResolveDebt(debt.debtId(), DebtAction.PAY_DEBT_NOW, null);
         }
+        // Mortgage undeveloped / low-value deeds BEFORE selling houses. Houses are the income engine
+        // and are sold back at a 50% loss, whereas mortgaging a deed loses almost no income (an
+        // undeveloped low-rent property) and no principal — you keep the deed and can redeem it later.
+        // Only mortgage what is legally mortgageable (a street group with no buildings on it); developed
+        // groups fall through to building sales below, which then frees those deeds to be mortgaged.
+        // The mortgageableForDebt filter mirrors the gateway's canMortgage check, so the bot never
+        // proposes an illegal mortgage that would be rejected and stall the debt loop.
+        if (allowed.contains(DebtAction.MORTGAGE_PROPERTY)) {
+            var toMortgage = state.properties().stream()
+                    .filter(p -> debtorId.equals(p.ownerPlayerId()) && !p.mortgaged())
+                    .filter(p -> mortgageableForDebt(state, p))
+                    .min(java.util.Comparator.comparingInt(
+                            p -> StrongBotStrategy.debtMortgagePriority(state, debtorId, p)));
+            if (toMortgage.isPresent()) {
+                return new Intent.ResolveDebt(debt.debtId(), DebtAction.MORTGAGE_PROPERTY,
+                        toMortgage.get().propertyId());
+            }
+        }
         if (allowed.contains(DebtAction.SELL_BUILDING)) {
             var buildingProp = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
@@ -369,16 +387,6 @@ public final class PureDomainStrategy implements BotStrategy {
             if (buildingProp.isPresent()) {
                 return new Intent.ResolveDebt(debt.debtId(), DebtAction.SELL_BUILDING,
                         buildingProp.get().propertyId());
-            }
-        }
-        if (allowed.contains(DebtAction.MORTGAGE_PROPERTY)) {
-            var toMortgage = state.properties().stream()
-                    .filter(p -> debtorId.equals(p.ownerPlayerId()) && !p.mortgaged())
-                    .min(java.util.Comparator.comparingInt(
-                            p -> StrongBotStrategy.debtMortgagePriority(state, debtorId, p)));
-            if (toMortgage.isPresent()) {
-                return new Intent.ResolveDebt(debt.debtId(), DebtAction.MORTGAGE_PROPERTY,
-                        toMortgage.get().propertyId());
             }
         }
         if (allowed.contains(DebtAction.DECLARE_BANKRUPTCY)) {
@@ -1273,6 +1281,21 @@ public final class PureDomainStrategy implements BotStrategy {
                 .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .count();
         return facePrice * (1.0 - (double) botOwnsInGroup / groupSize);
+    }
+
+    /**
+     * True when {@code prop} can legally be mortgaged right now to service a debt — mirrors
+     * {@code DomainDebtRemediationGateway.canMortgage}. A street deed is only mortgageable when
+     * <em>no</em> property in its color group carries a building; railroads and utilities are
+     * always mortgageable. Keeps {@link #decideDebt} from proposing a mortgage the gateway would
+     * reject (which would stall the debt-resolution loop).
+     */
+    private static boolean mortgageableForDebt(SessionState state, PropertyStateSnapshot prop) {
+        SpotType st = spotType(prop.propertyId());
+        if (st.streetType.placeType != PlaceType.STREET) return true;
+        return state.properties().stream()
+                .filter(q -> spotType(q.propertyId()).streetType == st.streetType)
+                .noneMatch(q -> q.houseCount() > 0 || q.hotelCount() > 0);
     }
 
     private static boolean evenSellEligible(SessionState state, PropertyStateSnapshot prop) {
