@@ -424,6 +424,8 @@ public record StrongBotConfig(
                 .buildRoundCap(5)
                 .buildReservePerOpponentMonopoly(44)
                 .postMonopolyCashBuffer(75)
+                .bankruptcyAversion(0.7)           // was unset (=0), which disabled the near-bankruptcy
+                                                   // reserve boost; 0.7 = risk-taking but not suicidal
                 .mortgageTolerance(0.25)
                 .unmortgageAggression(1)
                 .mortgageRecoveryPriority(1)
