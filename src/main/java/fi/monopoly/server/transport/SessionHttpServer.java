@@ -431,7 +431,15 @@ public final class SessionHttpServer {
             if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
             JsonNode body = objectMapper.readTree(ctx.bodyAsBytes());
             String hostToken = body.path("hostToken").textValue();
-            if (!registry.validateHostToken(id, hostToken)) {
+            String playerId = body.path("playerId").textValue();
+            String playerToken = body.path("playerToken").textValue();
+            // Retrigger is a benign recovery action — any seated player may use it, not only
+            // the host. (In lobby games the "bot stuck?" button is shown to every player, but
+            // only the host holds the hostToken; the old host-only check made the button a
+            // silent 403 no-op for everyone else.)
+            boolean authorized = registry.validateHostToken(id, hostToken)
+                    || (playerId != null && registry.validatePlayerToken(id, playerId, playerToken));
+            if (!authorized) {
                 ctx.status(403).json(Map.of("error", "UNAUTHORIZED"));
                 return;
             }

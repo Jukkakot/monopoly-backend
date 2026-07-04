@@ -401,6 +401,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /sessions/{sessionId}/bot/retrigger:
+    post:
+      tags: [session]
+      summary: Force the bot driver to re-evaluate and act immediately
+      operationId: retriggerBot
+      description: |
+        Recovery action for a stuck bot: resets the driver's pending-action flag and
+        schedules an immediate bot step, bypassing viewer gating. Safe to call at any
+        time — a retrigger when no bot action is needed is a no-op.
+
+        Authorization: either a valid `hostToken`, or a valid `playerId` + `playerToken`
+        pair of any seated player. Sessions created without a host token (bots-only
+        sessions) accept the call without credentials.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostToken:
+                  type: string
+                  format: uuid
+                playerId:
+                  type: string
+                playerToken:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Retrigger processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggered:
+                    type: boolean
+                    description: True when a bot driver existed and was retriggered.
+        '403':
+          description: Neither a valid host token nor a valid player token was provided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sessions/{sessionId}/settings:
     get:
       tags: [session]

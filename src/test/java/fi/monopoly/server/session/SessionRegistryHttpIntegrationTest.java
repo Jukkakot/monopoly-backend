@@ -408,6 +408,42 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     // -------------------------------------------------------------------------
+    // Bot retrigger authorization
+    // -------------------------------------------------------------------------
+
+    /**
+     * The "bot stuck?" recovery button is shown to every player, but the endpoint used to
+     * accept only the hostToken — making it a silent 403 no-op for non-host players.
+     * A valid playerId + playerToken pair must authorize the retrigger; garbage credentials
+     * must still be rejected.
+     */
+    @Test
+    void nonHostPlayerCanRetriggerBotWithPlayerToken() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId    = extractSessionId(createResp.body());
+        String hostToken    = extractPattern(HOST_TOKEN_PATTERN, createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String hostPlayerToken = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+        post("/sessions/" + sessionId + "/lobby/bots", "{\"hostToken\":\"" + hostToken + "\"}");
+        post("/sessions/" + sessionId + "/lobby/ready",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + hostPlayerToken + "\",\"ready\":true}");
+        Thread.sleep(200);
+
+        // Player credentials without the host token must be authorized
+        HttpResponse<String> playerResp = post("/sessions/" + sessionId + "/bot/retrigger",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + hostPlayerToken + "\"}");
+        assertEquals(200, playerResp.statusCode(),
+                "Retrigger with a valid playerToken must be authorized, got: " + playerResp.body());
+
+        // Garbage credentials must still be rejected
+        HttpResponse<String> badResp = post("/sessions/" + sessionId + "/bot/retrigger",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"wrong-token\"}");
+        assertEquals(403, badResp.statusCode(),
+                "Retrigger with a wrong playerToken must return 403, got: " + badResp.body());
+    }
+
+    // -------------------------------------------------------------------------
     // Debug state endpoint — no-auth current behavior
     // -------------------------------------------------------------------------
 
