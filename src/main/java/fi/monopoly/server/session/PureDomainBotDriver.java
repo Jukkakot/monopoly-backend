@@ -307,31 +307,18 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 }
             }
         }
+        // Bot-closed trades are recorded at dispatch time (dispatchViaStrategy) where the closer
+        // and intent are known exactly. This observation path exists only for HUMAN closers,
+        // which never pass through the bot dispatch. Skip accepted trades: on accept the property
+        // the opener requested has transferred to the opener — recording those as declines was
+        // wrongly blocking future trades with partners after successful deals.
         if (prevTrade != null && state.tradeState() == null
-                && botPlayerIds.contains(prevTrade.openedByPlayerId())
-                && prevTrade.decisionRequiredFromPlayerId() != null) {
-            String partner = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId())
-                    ? prevTrade.recipientPlayerId() : prevTrade.initiatorPlayerId();
-            TradeOfferState lastOffer = prevTrade.currentOffer();
-            String declinedPropId = null;
-            int declinedAmount = 0;
-            if (lastOffer != null) {
-                boolean botIsProposer = prevTrade.openedByPlayerId().equals(prevTrade.initiatorPlayerId());
-                TradeSelectionState botWanted = botIsProposer
-                        ? lastOffer.requestedFromRecipient() : lastOffer.offeredToRecipient();
-                TradeSelectionState botGave = botIsProposer
-                        ? lastOffer.offeredToRecipient() : lastOffer.requestedFromRecipient();
-                if (!botWanted.propertyIds().isEmpty()) {
-                    declinedPropId = botWanted.propertyIds().get(0);
-                    declinedAmount = botGave.moneyAmount();
-                }
-            }
-            fi.monopoly.server.bot.BotMemory botMem = memories.get(prevTrade.openedByPlayerId());
-            if (botMem != null) {
-                botMem.recordDecline(partner);
-                if (declinedPropId != null) {
-                    botMem.recordDeclinedAmount(partner, declinedPropId, declinedAmount);
-                }
+                && botPlayerIds.contains(prevTrade.openedByPlayerId())) {
+            String closer = prevTrade.decisionRequiredFromPlayerId() != null
+                    ? prevTrade.decisionRequiredFromPlayerId() : prevTrade.editingPlayerId();
+            if (closer != null && !botPlayerIds.contains(closer)
+                    && !tradeWasAccepted(prevTrade, state)) {
+                fi.monopoly.server.bot.BotMemory.recordTradeKilledByPartner(memories, prevTrade, closer);
             }
         }
         if (!needsBotAction(state)) {
@@ -371,6 +358,19 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;  // client is too far behind — wait for ACK before advancing
         }
         dispatchGreedy(state);
+    }
+
+    /** A closed trade was accepted iff the property the opener requested now belongs to the opener. */
+    private static boolean tradeWasAccepted(TradeState closedTrade, SessionState currentState) {
+        TradeOfferState offer = closedTrade.currentOffer();
+        if (offer == null) return false;
+        String opener = closedTrade.openedByPlayerId();
+        TradeSelectionState openerWanted = opener.equals(closedTrade.initiatorPlayerId())
+                ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+        if (openerWanted.propertyIds().isEmpty()) return false;
+        String wantedProp = openerWanted.propertyIds().get(0);
+        return currentState.properties().stream()
+                .anyMatch(p -> wantedProp.equals(p.propertyId()) && opener.equals(p.ownerPlayerId()));
     }
 
     private boolean needsBotAction(SessionState state) {
@@ -416,6 +416,17 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         fi.monopoly.server.bot.BotMemory memory =
                 memories.getOrDefault(activeId, fi.monopoly.server.bot.BotMemory.empty());
         fi.monopoly.server.bot.Intent intent = strategy.decide(state, activeId, memory, rng);
+        // When this bot kills another bot's trade (decline or counter-cancel), tell the opener's
+        // memory before executing — snapshot observation can't see counter-cancels because
+        // decisionRequiredFromPlayerId is null in COUNTERED state, which let the opener
+        // re-propose the identical trade forever.
+        boolean killsTrade = intent instanceof fi.monopoly.server.bot.Intent.RespondToTrade resp
+                        && resp.response() == fi.monopoly.server.bot.Intent.TradeResponse.DECLINE
+                || intent instanceof fi.monopoly.server.bot.Intent.CancelTrade;
+        if (killsTrade && state.tradeState() != null) {
+            fi.monopoly.server.bot.BotMemory.recordTradeKilledByPartner(
+                    memories, state.tradeState(), activeId);
+        }
         executor.execute(intent, activeId);
     }
 

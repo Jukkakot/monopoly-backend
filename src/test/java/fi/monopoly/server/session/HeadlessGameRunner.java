@@ -133,18 +133,15 @@ public final class HeadlessGameRunner {
                 consecutiveRejects = 0;
                 steps++;
 
-                // Propagate trade outcomes to the proposer's memory.
-                // In the real game, the bot driver receives decline/cancel events through
-                // the SSE stream and updates memory accordingly.  In the headless runner,
-                // each bot only sees its own memory, so we bridge the gap here:
-                // when B declines A's trade, we record the decline in A's memory so
-                // A's tryInitiateTrade() respects MAX_DECLINES_PER_PARTNER and stops looping.
-                if (intent instanceof Intent.RespondToTrade resp
-                        && resp.response() == Intent.TradeResponse.DECLINE
-                        && state.tradeState() != null) {
-                    String proposerId = state.tradeState().initiatorPlayerId();
-                    BotMemory proposerMemory = memories.get(proposerId);
-                    if (proposerMemory != null) proposerMemory.recordDecline(actorId);
+                // Propagate trade outcomes to the opener's memory. Each bot only sees its own
+                // memory in strategy.decide(), so when B kills A's trade (decline of a submitted
+                // offer OR cancel during counter-editing) the bridge records it in A's memory —
+                // otherwise A's tryInitiateTrade() guards stay empty and A loops the same offer.
+                boolean killsTrade = intent instanceof Intent.RespondToTrade resp
+                                && resp.response() == Intent.TradeResponse.DECLINE
+                        || intent instanceof Intent.CancelTrade;
+                if (killsTrade && state.tradeState() != null) {
+                    BotMemory.recordTradeKilledByPartner(memories, state.tradeState(), actorId);
                 }
 
                 // Structural-progress loop detection: count steps without any property

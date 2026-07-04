@@ -1,5 +1,9 @@
 package fi.monopoly.server.bot;
 
+import fi.monopoly.domain.session.TradeOfferState;
+import fi.monopoly.domain.session.TradeSelectionState;
+import fi.monopoly.domain.session.TradeState;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -108,5 +112,56 @@ public final class BotMemory {
     /** Returns a fresh, empty memory instance for use at game start. */
     public static BotMemory empty() {
         return new BotMemory();
+    }
+
+    // -------------------------------------------------------------------------
+    // Cross-memory bridge
+    // -------------------------------------------------------------------------
+
+    /**
+     * Records a trade failure in the <em>opener's</em> memory when the trade was killed by the
+     * other party — a decline of a submitted offer, or a cancel during counter-editing.
+     *
+     * <p>This is the only place the opener learns its offer failed: the strategy layer only ever
+     * sees the acting bot's own memory, so the decliner cannot write into the opener's memory
+     * itself. Without this bridge the opener's {@code declineCount}, {@code declinedSwapTargets}
+     * and {@code lastDeclinedAmount} guards stay empty and the opener re-proposes the identical
+     * trade indefinitely (the bot-vs-bot trade-loop bug).</p>
+     *
+     * <p>No-op when the closer <em>is</em> the opener (self-cancels are recorded by the strategy
+     * via {@code cancelAsDecline}) or when the opener has no memory (human player).</p>
+     */
+    public static void recordTradeKilledByPartner(Map<String, BotMemory> memories,
+                                                  TradeState trade, String closerId) {
+        if (trade == null || closerId == null) return;
+        String opener = trade.openedByPlayerId();
+        if (opener == null || opener.equals(closerId)) return;
+        BotMemory openerMemory = memories.get(opener);
+        if (openerMemory == null) return;
+
+        String partner = opener.equals(trade.initiatorPlayerId())
+                ? trade.recipientPlayerId() : trade.initiatorPlayerId();
+        openerMemory.recordDecline(partner);
+
+        TradeOfferState offer = trade.currentOffer();
+        if (offer == null) return;
+        boolean openerIsInitiator = opener.equals(trade.initiatorPlayerId());
+        TradeSelectionState openerWanted = openerIsInitiator
+                ? offer.requestedFromRecipient() : offer.offeredToRecipient();
+        TradeSelectionState openerGave = openerIsInitiator
+                ? offer.offeredToRecipient() : offer.requestedFromRecipient();
+        if (openerWanted.propertyIds().isEmpty()) return;
+
+        // A declined cash-only offer may still be escalated to a property swap, so only the
+        // amount is recorded (re-offers must strictly beat it). Once a SWAP for the target is
+        // declined there is no better offer left to make — block the target entirely, otherwise
+        // the opener re-proposes the identical swap forever.
+        if (!openerGave.propertyIds().isEmpty()) {
+            for (String propId : openerWanted.propertyIds()) {
+                openerMemory.recordDeclinedSwapTarget(partner, propId);
+            }
+        }
+        openerMemory.recordDeclinedAmount(
+                partner, openerWanted.propertyIds().get(0), openerGave.moneyAmount());
     }
 }

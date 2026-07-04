@@ -519,12 +519,12 @@ public final class PureDomainStrategy implements BotStrategy {
             if (botWantsSomething && counterCount < MAX_COUNTERS_PER_TRADE) {
                 return new Intent.RespondToTrade(Intent.TradeResponse.COUNTER, tradeId);
             }
-            return declineOffer(botId, tradeId, myGiving, memory);
+            return declineOffer(tradeId);
         }
 
         if (valueGiven > 0 && valueReceived * 3 < valueGiven
                 && !completesOwnMonopoly(state, botId, myReceiving)) {
-            return declineOffer(botId, tradeId, myGiving, memory);
+            return declineOffer(tradeId);
         }
 
         // Decline pure STREET-property shuffles: property-for-property swaps that don't
@@ -536,7 +536,7 @@ public final class PureDomainStrategy implements BotStrategy {
                 && myReceiving.moneyAmount() <= 0 && myReceiving.jailCardCount() <= 0
                 && myReceiving.propertyIds().stream().allMatch(id -> spotType(id).streetType.placeType == PlaceType.STREET);
         if (givingOnlyStreets && receivingOnlyStreets && !advancesMonopolyGoal(state, botId, myReceiving)) {
-            return declineOffer(botId, tradeId, myGiving, memory);
+            return declineOffer(tradeId);
         }
 
         double posFactor = StrongBotStrategy.positionFactor(state, botId);
@@ -565,7 +565,7 @@ public final class PureDomainStrategy implements BotStrategy {
             }
         }
 
-        return declineOffer(botId, tradeId, myGiving, memory);
+        return declineOffer(tradeId);
     }
 
     // -------------------------------------------------------------------------
@@ -770,11 +770,13 @@ public final class PureDomainStrategy implements BotStrategy {
     // Trade memory helpers
     // -------------------------------------------------------------------------
 
-    private Intent declineOffer(String botId, String tradeId, TradeSelectionState botGiving,
-                                BotMemory memory) {
-        for (String propId : botGiving.propertyIds()) {
-            memory.recordDeclinedSwapTarget(botId, propId);
-        }
+    /**
+     * Declines the offer. The opener's memory (declineCount / declinedSwapTargets /
+     * lastDeclinedAmount) is updated by the runtime that owns all memories —
+     * {@code PureDomainBotDriver} at dispatch, {@code HeadlessGameRunner} in its loop —
+     * because this strategy only ever sees the acting bot's own memory.
+     */
+    private Intent declineOffer(String tradeId) {
         return new Intent.RespondToTrade(Intent.TradeResponse.DECLINE, tradeId);
     }
 
