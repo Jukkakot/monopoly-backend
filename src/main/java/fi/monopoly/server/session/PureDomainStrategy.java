@@ -318,23 +318,29 @@ public final class PureDomainStrategy implements BotStrategy {
         int postCash = cash - purchase.price();
         String propId = purchase.propertyId();
 
-        if (postCash < 0) {
-            PropertyStateSnapshot toMortgage =
-                    findMortgageCandidateForPurchase(state, botId, purchase.price() - cash);
-            if (toMortgage != null) {
-                return new Intent.MortgageProperty(toMortgage.propertyId());
-            }
-            return new Intent.DeclineProperty(decision.decisionId(), propId);
-        }
-
         boolean completesSet = StrongBotStrategy.wouldCompleteSet(state, botId, propId);
         if (completesSet) {
-            boolean buy = postCash >= Math.max(0, reserve - 100);
+            // Mortgage-to-fund only when the raise reaches the buy condition below —
+            // findMortgageCandidateForPurchase checks the FULL remaining need is raisable,
+            // so a mortgage sequence that starts always ends in a purchase, never in a
+            // decline after deeds were already mortgaged for nothing.
+            int requiredPostCash = Math.max(0, reserve - 100);
+            if (postCash < requiredPostCash) {
+                PropertyStateSnapshot toMortgage = findMortgageCandidateForPurchase(
+                        state, botId, purchase.price() + requiredPostCash - cash);
+                if (toMortgage != null) {
+                    return new Intent.MortgageProperty(toMortgage.propertyId());
+                }
+            }
+            boolean buy = postCash >= requiredPostCash;
             return buy
                     ? new Intent.BuyProperty(decision.decisionId(), propId)
                     : new Intent.DeclineProperty(decision.decisionId(), propId);
         }
 
+        // Non-completing property: never mortgage to fund it. The old code mortgaged first
+        // and evaluated afterwards, so a broke bot stripped its own deeds (paying 10 %
+        // redemption interest later) only to decline the purchase anyway.
         if (postCash < reserve) {
             return new Intent.DeclineProperty(decision.decisionId(), propId);
         }
@@ -523,7 +529,7 @@ public final class PureDomainStrategy implements BotStrategy {
 
         int valueReceived = evaluateSelectionContextual(state, botId, myReceiving, true);
         int valueGiven    = evaluateSelectionContextual(state, botId, myGiving, false)
-                          + monopolyGiftPenalty(state, tradePartnerId, myGiving, memory);
+                          + monopolyGiftPenalty(state, botId, tradePartnerId, myGiving, memory);
 
         boolean botGetsNothing = myReceiving.propertyIds().isEmpty()
                 && myReceiving.moneyAmount() <= 0 && myReceiving.jailCardCount() <= 0;
@@ -611,7 +617,7 @@ public final class PureDomainStrategy implements BotStrategy {
         String counterPartnerId = botIsRecipient ? offer.proposerPlayerId() : offer.recipientPlayerId();
 
         int valueGiven = evaluateSelectionContextual(state, botId, myGiving, false)
-                       + monopolyGiftPenalty(state, counterPartnerId, myGiving, memory);
+                       + monopolyGiftPenalty(state, botId, counterPartnerId, myGiving, memory);
         int currentMoneyReceived = myReceiving.moneyAmount();
         int nonMoneyReceived = evaluateSelectionValue(myReceiving, state) - currentMoneyReceived;
 
@@ -750,6 +756,17 @@ public final class PureDomainStrategy implements BotStrategy {
         // Step 2a: offer own property as sweetener
         boolean targetIsP1 = isMonopolyCompletingTarget(state, botId, targetPropId0);
         if (myGive.propertyIds().isEmpty() && myGive.moneyAmount() == 0) {
+            // Mutual monopoly swap: when the target completes OUR set and we hold the piece
+            // that completes the PARTNER's set (in another group), offer exactly that piece —
+            // the classic "you take orange, I take red" deal. findExpendableOwnProperty can
+            // never construct this because it filters out partner-completing pieces.
+            if (targetIsP1) {
+                String mutualPiece = findMutualSwapPiece(state, botId, partnerId0, targetPropId0);
+                if (mutualPiece != null) {
+                    return new Intent.EditTrade(tradeId,
+                            new TradeEditPatch(null, giveSide, null, List.of(mutualPiece), List.of(), null));
+                }
+            }
             if (available0 < targetPrice || targetIsP1) {
                 String expendable = findExpendableOwnProperty(state, botId, partnerId0, targetPropId0);
                 if (expendable != null) {
@@ -958,6 +975,31 @@ public final class PureDomainStrategy implements BotStrategy {
         return partnerPieces.isEmpty() ? List.of(primaryTarget) : partnerPieces;
     }
 
+    /**
+     * Finds an own deed that completes the PARTNER's color group, for a mutual monopoly swap
+     * where the requested target simultaneously completes the bot's own group. Only offers a
+     * piece whose group is at most one strength tier above the group the bot completes for
+     * itself — giving away orange to finish brown is a losing exchange.
+     */
+    private String findMutualSwapPiece(SessionState state, String botId, String partnerId,
+                                       String targetPropId) {
+        StreetType targetGroup = spotType(targetPropId).streetType;
+        if (targetGroup.placeType != PlaceType.STREET) return null;
+        double ownGain = StrongBotStrategy.streetStrengthScore(targetGroup);
+        return state.properties().stream()
+                .filter(p -> botId.equals(p.ownerPlayerId()) && !p.mortgaged()
+                        && p.houseCount() == 0 && p.hotelCount() == 0)
+                .filter(p -> spotType(p.propertyId()).streetType != targetGroup)
+                .filter(p -> wouldCompletePartnerMonopoly(state, partnerId, p.propertyId()))
+                .filter(p -> {
+                    StreetType g = spotType(p.propertyId()).streetType;
+                    return g.placeType != PlaceType.STREET
+                            || StrongBotStrategy.streetStrengthScore(g) <= ownGain + 1.0;
+                })
+                .map(PropertyStateSnapshot::propertyId)
+                .findFirst().orElse(null);
+    }
+
     private String findExpendableOwnProperty(SessionState state, String botId, String partnerId,
                                               String requestedPropId) {
         StreetType requestedGroup = requestedPropId != null ? spotType(requestedPropId).streetType : null;
@@ -1033,10 +1075,13 @@ public final class PureDomainStrategy implements BotStrategy {
         return Math.min(CATCHUP_DISCOUNT_MAX, rate);
     }
 
-    private int monopolyGiftPenalty(SessionState state, String partnerId,
+    /** Strategic cost to {@code botId} of handing {@code partnerId} a completed color group. */
+    private int monopolyGiftPenalty(SessionState state, String botId, String partnerId,
                                      TradeSelectionState giving, BotMemory memory) {
         int penalty = 0;
-        StrongBotConfig cfg = configFor(partnerId);
+        // The penalty is the DECIDING bot's valuation — weight it with the bot's own config,
+        // not the partner's (whose config is a default placeholder for human partners).
+        StrongBotConfig cfg = configFor(botId);
         for (StreetType group : StreetType.values()) {
             if (group.placeType != PlaceType.STREET) continue;
             Integer groupSize = SpotType.getNumberOfSpots(group);

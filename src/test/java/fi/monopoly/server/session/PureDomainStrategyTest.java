@@ -1,5 +1,8 @@
 package fi.monopoly.server.session;
 
+import fi.monopoly.domain.decision.DecisionType;
+import fi.monopoly.domain.decision.PendingDecision;
+import fi.monopoly.domain.decision.PropertyPurchaseDecisionPayload;
 import fi.monopoly.domain.session.TradeOfferState;
 import fi.monopoly.domain.session.TradeSelectionState;
 import fi.monopoly.domain.session.TradeState;
@@ -135,6 +138,82 @@ class PureDomainStrategyTest {
 
         assertEquals(0, openerMemory.declineCount("bot-b"));
         assertTrue(openerMemory.declinedSwapTargets("bot-b").isEmpty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Purchase decision: mortgage-to-fund must only fire for set-completing buys
+    // -------------------------------------------------------------------------
+
+    private static PendingDecision purchaseDecision(String propId, int price) {
+        return new PendingDecision("decision-1", DecisionType.PROPERTY_PURCHASE, "player-1",
+                List.of(), "", new PropertyPurchaseDecisionPayload(propId, propId, price));
+    }
+
+    @Test
+    void botDeclinesUnaffordableNonCompletingPropertyWithoutMortgaging() {
+        // Bot has €50, lands on O1 (€180, owns nothing in orange) and holds two mortgageable
+        // railroads. Mortgaging them would raise the cash — but the bot would then decline the
+        // purchase anyway (postCash < reserve), having stripped its deeds for nothing.
+        var state = TestSessionState.twoPlayerGame()
+                .withCash("player-1", 50)
+                .withOwnership("player-1", "RR1", "RR2")
+                .withPhase(TurnPhase.WAITING_FOR_DECISION)
+                .build().toBuilder()
+                .pendingDecision(purchaseDecision("O1", 180))
+                .build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+
+        assertInstanceOf(Intent.DeclineProperty.class, intent,
+                "must decline outright instead of mortgaging deeds for a purchase it would refuse");
+    }
+
+    @Test
+    void botMortgagesToFundSetCompletingPurchase() {
+        // Bot owns B1 and lands on B2 (completes brown), €30 cash, holds RR1 (mortgage €100).
+        var state = TestSessionState.twoPlayerGame()
+                .withCash("player-1", 30)
+                .withOwnership("player-1", "B1", "RR1")
+                .withPhase(TurnPhase.WAITING_FOR_DECISION)
+                .build().toBuilder()
+                .pendingDecision(purchaseDecision("B2", 60))
+                .build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+
+        assertInstanceOf(Intent.MortgageProperty.class, intent,
+                "set completion is worth funding by mortgage");
+        assertEquals("RR1", ((Intent.MortgageProperty) intent).propertyId(),
+                "must mortgage the railroad, not the brown deed it is completing");
+    }
+
+    // -------------------------------------------------------------------------
+    // Mutual monopoly swap: "you take green, I take purple"
+    // -------------------------------------------------------------------------
+
+    @Test
+    void botOffersPartnerCompletingPieceInMutualMonopolySwap() {
+        // Bot owns P1+P2 (one away from purple) and G3 — the exact piece that completes the
+        // partner's green group. Trade is open with P3 requested; the bot should offer G3,
+        // which findExpendableOwnProperty alone can never do (it filters partner-completing pieces).
+        var state = TestSessionState.twoPlayerGame()
+                .withOwnership("player-1", "P1", "P2", "G3")
+                .withOwnership("player-2", "P3", "G1", "G2")
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build().toBuilder()
+                .tradeState(new TradeState(
+                        "trade-1", "player-1", "player-2", TradeStatus.EDITING,
+                        new TradeOfferState("player-1", "player-2",
+                                TradeSelectionState.NONE,
+                                new TradeSelectionState(0, List.of("P3"), 0)),
+                        "player-1", false, null, "player-1", List.of()))
+                .build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+
+        assertInstanceOf(Intent.EditTrade.class, intent);
+        assertTrue(((Intent.EditTrade) intent).patch().propertyIdsToAdd().contains("G3"),
+                "the mutual-swap piece (G3, completing partner's green) must be offered");
     }
 
     @Test
