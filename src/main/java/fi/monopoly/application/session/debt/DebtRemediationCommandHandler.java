@@ -159,28 +159,7 @@ public final class DebtRemediationCommandHandler {
     }
 
     private static int estimatedLiquidationValue(SessionState state, String playerId) {
-        int total = 0;
-        for (PropertyStateSnapshot prop : state.properties()) {
-            if (!playerId.equals(prop.ownerPlayerId())) {
-                continue;
-            }
-            if (!prop.mortgaged()) {
-                try {
-                    int price = SpotType.valueOf(prop.propertyId()).getIntegerProperty("price");
-                    total += price / 2;
-                } catch (IllegalArgumentException ignored) {
-                }
-            }
-            int buildings = prop.houseCount() + prop.hotelCount();
-            if (buildings > 0) {
-                try {
-                    int housePrice = SpotType.valueOf(prop.propertyId()).getIntegerProperty("housePrice");
-                    total += buildings * housePrice / 2;
-                } catch (IllegalArgumentException ignored) {
-                }
-            }
-        }
-        return total;
+        return DomainDebtRemediationGateway.estimatedLiquidationValue(state, playerId);
     }
 
     private static PlayerSnapshot findPlayer(SessionState state, String playerId) {

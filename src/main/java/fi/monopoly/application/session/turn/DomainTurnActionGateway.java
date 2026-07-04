@@ -1316,16 +1316,11 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     }
 
     private static int estimateLiquidation(SessionState state, String playerId) {
-        return state.properties().stream()
-                .filter(p -> playerId.equals(p.ownerPlayerId()) && !p.mortgaged())
-                .mapToInt(p -> {
-                    try {
-                        return SpotType.valueOf(p.propertyId()).getIntegerProperty("price") / 2;
-                    } catch (IllegalArgumentException e) {
-                        return 0;
-                    }
-                })
-                .sum();
+        // Delegates to the debt gateway's estimator so the bankruptcyRisk flag is computed the
+        // same way at debt opening and after each remediation step. The old copy ignored
+        // buildings entirely, flagging hotel owners as bankruptcy risks they weren't.
+        return fi.monopoly.application.session.debt.DomainDebtRemediationGateway
+                .estimatedLiquidationValue(state, playerId);
     }
 
     private static int[] parseRents(String rentsStr) {

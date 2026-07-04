@@ -451,6 +451,24 @@ class DomainDebtRemediationGatewayTest {
     }
 
     // -------------------------------------------------------------------------
+    // estimatedLiquidationValue
+    // -------------------------------------------------------------------------
+
+    @Test
+    void hotelLiquidatesAsFiveBuildingUnits() {
+        // A hotel sells back one unit at a time (hotel → 4 houses → … → 0), each unit
+        // returning housePrice/2 — so its liquidation value is 5 units, not 1.
+        DebtStateModel debt = debt(PLAYER_1, null, 100);
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 0), null, debt,
+                List.of(new PropertyStateSnapshot("B1", PLAYER_1, false, 0, 1)), null);
+
+        int liquidation = DomainDebtRemediationGateway.estimatedLiquidationValue(store.get(), PLAYER_1);
+
+        assertEquals(B1_MORTGAGE_VALUE + 5 * (B1_HOUSE_PRICE / 2), liquidation,
+                "hotel must count as 5 building units in the liquidation estimate");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers: store builders
     // -------------------------------------------------------------------------
 

@@ -409,7 +409,13 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                 .build();
     }
 
-    private static int estimatedLiquidationValue(SessionState state, String playerId) {
+    /**
+     * Total cash a player could raise by mortgaging every unmortgaged deed and selling every
+     * building. A hotel liquidates as 5 building units (selling steps hotel → 4 houses → … → 0,
+     * each unit returning half the house price) — counting it as one unit understated hotel
+     * owners' liquidity and raised false {@code bankruptcyRisk} flags.
+     */
+    public static int estimatedLiquidationValue(SessionState state, String playerId) {
         int total = 0;
         for (PropertyStateSnapshot prop : state.properties()) {
             if (!playerId.equals(prop.ownerPlayerId())) continue;
@@ -417,9 +423,9 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
                 try { total += SpotType.valueOf(prop.propertyId()).getIntegerProperty("price") / 2; }
                 catch (IllegalArgumentException ignored) {}
             }
-            int buildings = prop.houseCount() + prop.hotelCount();
-            if (buildings > 0) {
-                try { total += buildings * SpotType.valueOf(prop.propertyId()).getIntegerProperty("housePrice") / 2; }
+            int buildingUnits = prop.houseCount() + prop.hotelCount() * 5;
+            if (buildingUnits > 0) {
+                try { total += buildingUnits * (SpotType.valueOf(prop.propertyId()).getIntegerProperty("housePrice") / 2); }
                 catch (IllegalArgumentException ignored) {}
             }
         }
