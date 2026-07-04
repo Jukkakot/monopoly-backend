@@ -545,6 +545,18 @@ public final class PureDomainStrategy implements BotStrategy {
             return declineOffer(tradeId);
         }
 
+        // Pure cash-and-card swap: with no properties on either side there is no strategic
+        // upside and no valuation noise, so the fairness tolerance must NOT apply — otherwise
+        // a human can drain the bot a tolerance-sized loss (~30-40€) per trade, indefinitely.
+        // Accept only a strictly profitable transfer.
+        if (myGiving.propertyIds().isEmpty() && myReceiving.propertyIds().isEmpty()) {
+            int rawReceived = myReceiving.moneyAmount() + myReceiving.jailCardCount() * 50;
+            int rawGiven    = myGiving.moneyAmount() + myGiving.jailCardCount() * 50;
+            return rawReceived > rawGiven
+                    ? new Intent.RespondToTrade(Intent.TradeResponse.ACCEPT, tradeId)
+                    : declineOffer(tradeId);
+        }
+
         if (valueGiven > 0 && valueReceived * 3 < valueGiven
                 && !completesOwnMonopoly(state, botId, myReceiving)) {
             return declineOffer(tradeId);
@@ -670,8 +682,15 @@ public final class PureDomainStrategy implements BotStrategy {
             } else {
                 int fairGiveMoney = Math.max(0, (int)(nonMoneyReceived * 0.95));
                 if (fairGiveMoney < 10) {
-                    memory.clearCounterEdits(tradeId);
-                    return new Intent.SubmitTrade(tradeId);
+                    // Receiving essentially only money: submitting as-is would keep the bot's
+                    // original cash give (a "pay 100€, receive 40€" offer). Submit only when
+                    // the transfer is profitable; otherwise zero out the bot's own cash first.
+                    if (currentMoneyReceived >= givenMoney) {
+                        memory.clearCounterEdits(tradeId);
+                        return new Intent.SubmitTrade(tradeId);
+                    }
+                    return new Intent.EditTrade(tradeId,
+                            new TradeEditPatch(null, editGiveSide, 0, List.of(), List.of(), null));
                 }
                 return new Intent.EditTrade(tradeId,
                         new TradeEditPatch(null, editGiveSide, fairGiveMoney, List.of(), List.of(), null));

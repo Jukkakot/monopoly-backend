@@ -548,6 +548,11 @@ final class StrongBotStrategy {
                 .mapToInt(prop -> {
                     SpotType st = SpotType.valueOf(prop.propertyId());
                     int facePrice = st.getIntegerProperty("price");
+                    // A mortgaged deed's equity is roughly half its face price — the owner
+                    // already pocketed the mortgage principal, and redeeming costs 55% of face.
+                    // Counting it at full face made a desperate all-mortgaged player rank as
+                    // rich as an untouched one, skewing positionFactor and threatScore.
+                    int deedValue = prop.mortgaged() ? facePrice / 2 : facePrice;
                     int buildingValue = 0;
                     if (st.streetType.placeType == fi.monopoly.types.PlaceType.STREET) {
                         int housePrice = st.getIntegerProperty("housePrice");
@@ -556,7 +561,7 @@ final class StrongBotStrategy {
                             buildingValue = buildingUnits * housePrice / 2;
                         }
                     }
-                    return facePrice + buildingValue;
+                    return deedValue + buildingValue;
                 })
                 .sum();
     }

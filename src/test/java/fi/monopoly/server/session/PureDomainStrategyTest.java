@@ -216,6 +216,98 @@ class PureDomainStrategyTest {
                 "the mutual-swap piece (G3, completing partner's green) must be offered");
     }
 
+    // -------------------------------------------------------------------------
+    // Cash-for-cash trades: fairness tolerance must not be exploitable
+    // -------------------------------------------------------------------------
+
+    /** A submitted trade where the bot (player-1, recipient) gives/receives only money. */
+    private static TradeState cashSwapAwaitingBot(int botReceives, int botGives) {
+        return new TradeState(
+                "trade-1", "player-2", "player-1", TradeStatus.SUBMITTED,
+                new TradeOfferState("player-2", "player-1",
+                        new TradeSelectionState(botReceives, List.of(), 0),
+                        new TradeSelectionState(botGives, List.of(), 0)),
+                null, false, "player-1", "player-2", List.of());
+    }
+
+    @Test
+    void botDeclinesCashForCashTradeThatLosesMoney() {
+        // 70€ in, 100€ out is within the fairness tolerance for property trades — but with no
+        // properties involved there is nothing to tolerate; accepting would let a human drain
+        // the bot ~30€ per trade forever.
+        var state = TestSessionState.twoPlayerGame()
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build().toBuilder()
+                .tradeState(cashSwapAwaitingBot(70, 100))
+                .build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+
+        assertInstanceOf(Intent.RespondToTrade.class, intent);
+        assertEquals(Intent.TradeResponse.DECLINE, ((Intent.RespondToTrade) intent).response());
+    }
+
+    @Test
+    void botAcceptsStrictlyProfitableCashTransfer() {
+        var state = TestSessionState.twoPlayerGame()
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build().toBuilder()
+                .tradeState(cashSwapAwaitingBot(100, 20))
+                .build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+
+        assertInstanceOf(Intent.RespondToTrade.class, intent);
+        assertEquals(Intent.TradeResponse.ACCEPT, ((Intent.RespondToTrade) intent).response());
+    }
+
+    @Test
+    void botDoesNotSubmitLosingCashCounterOffer() {
+        // Counter-editing a money-for-money offer (bot gives 100€, receives 40€): the old code
+        // submitted it unchanged when the "fair give" fell under 10€. The bot must zero its own
+        // cash side instead of proposing a pure 60€ loss.
+        var state = TestSessionState.twoPlayerGame()
+                .withPhase(TurnPhase.WAITING_FOR_END_TURN)
+                .build().toBuilder()
+                .tradeState(new TradeState(
+                        "trade-1", "player-2", "player-1", TradeStatus.COUNTERED,
+                        new TradeOfferState("player-2", "player-1",
+                                new TradeSelectionState(40, List.of(), 0),
+                                new TradeSelectionState(100, List.of(), 0)),
+                        "player-1", false, null, "player-2", List.of()))
+                .build();
+
+        Intent intent = strategy.decide(state, "player-1", BotMemory.empty(), rng);
+
+        assertFalse(intent instanceof Intent.SubmitTrade,
+                "must not submit a counter-offer that pays 100€ for 40€");
+        if (intent instanceof Intent.EditTrade edit) {
+            assertEquals(0, edit.patch().replaceMoneyAmount(),
+                    "the bot's own cash give must be zeroed");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Net worth: mortgaged deeds are not full-value assets
+    // -------------------------------------------------------------------------
+
+    @Test
+    void mortgagedDeedsCountAtHalfValueInNetWorth() {
+        var state = TestSessionState.twoPlayerGame()
+                .withOwnership("player-1", "O1", "O2")
+                .withOwnership("player-2", "O3", "R1")
+                .withMortgaged("O1")
+                .withMortgaged("O2")
+                .build();
+
+        int mortgagedWorth = StrongBotStrategy.estimateNetWorth(state, "player-1");
+        int o1 = fi.monopoly.types.SpotType.O1.getIntegerProperty("price");
+        int o2 = fi.monopoly.types.SpotType.O2.getIntegerProperty("price");
+
+        assertEquals(1500 + o1 / 2 + o2 / 2, mortgagedWorth,
+                "mortgaged deeds must count at half face value, not full");
+    }
+
     @Test
     void noOpOnUnknownPhase() {
         // Build a state with UNKNOWN phase via the fallback branch
