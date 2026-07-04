@@ -433,6 +433,13 @@ public record StrongBotConfig(
                 .tradeSetCompletionWeight(220)
                 .tradeLiquidityWeight(1)
                 .preferJailLateGame(true)
+                // jailExitThreshold was unset (=0), which — with preferJailLateGame(true) — made the
+                // safe-haven check `danger >= 0` always fire, so this "leaves jail eagerly" preset in
+                // fact ALWAYS stayed jailed. 500 restores the intent: leave jail normally, hide only
+                // once the board carries serious developed rent (matches defaults()).
+                .jailExitThreshold(500)
+                // Was unset (=0). Keep the card as free jail exit when actually leaving (bias < 1.5).
+                .jailCardHoldBias(1.0)
                 .build();
     }
 
