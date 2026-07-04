@@ -35,7 +35,14 @@ public final class PureDomainStrategy implements BotStrategy {
     private static final double MONOPOLY_SALE_PREMIUM = 1.6;
     private static final double STALEMATE_GIFT_RELIEF = 0.5;
     private static final int STALEMATE_TURN_THRESHOLD = 12;
-    private static final double CATCHUP_DISCOUNT = 0.40;
+    // Catch-up discount: applied to valueGiven when a trade would complete the bot's own first
+    // monopoly while opponents already own sets. Scales with how far behind the bot is (number of
+    // opponent monopolies) so the trailing bot makes a genuinely aggressive gamble to break in and
+    // start earning rent, rather than the old marginal flat 0.40. Capped so it never gives away
+    // almost everything (the remaining floor still blocks obviously-fleecing trades).
+    private static final double CATCHUP_DISCOUNT_BASE = 0.45;
+    private static final double CATCHUP_DISCOUNT_PER_OPP_MONOPOLY = 0.15;
+    private static final double CATCHUP_DISCOUNT_MAX = 0.75;
 
     private final Map<String, StrongBotConfig> configs;
     /** When non-null, this config is used for every seat regardless of playerId (config A/B seam). */
@@ -238,10 +245,11 @@ public final class PureDomainStrategy implements BotStrategy {
 
     private Optional<Intent> tryInitiateTrade(SessionState state, String botId, BotMemory memory) {
         PlayerSnapshot bot = StrongBotStrategy.findPlayer(state, botId);
+        if (bot == null) return Optional.empty();
         int reserve = dynamicReserve(state, botId);
-        if (bot == null || bot.cash() < reserve + 50) return Optional.empty();
 
-        // Pass 0: win-win swap
+        // Pass 0: win-win swap — a property-for-property deal needs no spare cash, so a cash-poor bot
+        // may still open it. (The cash gate below only guards the P3 cash purchase in Pass 2.)
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (memory.declineCount(other.playerId()) >= MAX_DECLINES_PER_PARTNER) continue;
@@ -263,7 +271,8 @@ public final class PureDomainStrategy implements BotStrategy {
             }
         }
 
-        // Pass 2: P3 foothold acquisition
+        // Pass 2: P3 foothold acquisition — a cash purchase, so it requires spare cash above reserve.
+        if (bot.cash() < reserve + 50) return Optional.empty();
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (memory.declineCount(other.playerId()) >= MAX_DECLINES_PER_PARTNER) continue;
@@ -351,6 +360,24 @@ public final class PureDomainStrategy implements BotStrategy {
         if (allowed.contains(DebtAction.PAY_DEBT_NOW) && debt.currentCash() >= debt.amountRemaining()) {
             return new Intent.ResolveDebt(debt.debtId(), DebtAction.PAY_DEBT_NOW, null);
         }
+        // Mortgage undeveloped / low-value deeds BEFORE selling houses. Houses are the income engine
+        // and are sold back at a 50% loss, whereas mortgaging a deed loses almost no income (an
+        // undeveloped low-rent property) and no principal — you keep the deed and can redeem it later.
+        // Only mortgage what is legally mortgageable (a street group with no buildings on it); developed
+        // groups fall through to building sales below, which then frees those deeds to be mortgaged.
+        // The mortgageableForDebt filter mirrors the gateway's canMortgage check, so the bot never
+        // proposes an illegal mortgage that would be rejected and stall the debt loop.
+        if (allowed.contains(DebtAction.MORTGAGE_PROPERTY)) {
+            var toMortgage = state.properties().stream()
+                    .filter(p -> debtorId.equals(p.ownerPlayerId()) && !p.mortgaged())
+                    .filter(p -> mortgageableForDebt(state, p))
+                    .min(java.util.Comparator.comparingInt(
+                            p -> StrongBotStrategy.debtMortgagePriority(state, debtorId, p)));
+            if (toMortgage.isPresent()) {
+                return new Intent.ResolveDebt(debt.debtId(), DebtAction.MORTGAGE_PROPERTY,
+                        toMortgage.get().propertyId());
+            }
+        }
         if (allowed.contains(DebtAction.SELL_BUILDING)) {
             var buildingProp = state.properties().stream()
                     .filter(p -> debtorId.equals(p.ownerPlayerId()) && buildingLevel(p) > 0)
@@ -362,16 +389,6 @@ public final class PureDomainStrategy implements BotStrategy {
             if (buildingProp.isPresent()) {
                 return new Intent.ResolveDebt(debt.debtId(), DebtAction.SELL_BUILDING,
                         buildingProp.get().propertyId());
-            }
-        }
-        if (allowed.contains(DebtAction.MORTGAGE_PROPERTY)) {
-            var toMortgage = state.properties().stream()
-                    .filter(p -> debtorId.equals(p.ownerPlayerId()) && !p.mortgaged())
-                    .min(java.util.Comparator.comparingInt(
-                            p -> StrongBotStrategy.debtMortgagePriority(state, debtorId, p)));
-            if (toMortgage.isPresent()) {
-                return new Intent.ResolveDebt(debt.debtId(), DebtAction.MORTGAGE_PROPERTY,
-                        toMortgage.get().propertyId());
             }
         }
         if (allowed.contains(DebtAction.DECLARE_BANKRUPTCY)) {
@@ -547,7 +564,9 @@ public final class PureDomainStrategy implements BotStrategy {
         int strategicDiscount = 0;
         if (completesOwnMonopoly(state, botId, myReceiving)) {
             boolean catchingUp = someoneElseHasMonopoly(state, botId) && !playerHasMonopoly(state, botId);
-            double discountRate = catchingUp ? CATCHUP_DISCOUNT : MONOPOLY_COMPLETION_DISCOUNT;
+            double discountRate = catchingUp
+                    ? catchupDiscountRate(state, botId)
+                    : MONOPOLY_COMPLETION_DISCOUNT;
             strategicDiscount = (int)(valueGiven * discountRate);
             requiredPremium = 0;
         }
@@ -997,6 +1016,23 @@ public final class PureDomainStrategy implements BotStrategy {
         return 1.0 + (0.05 + threatScore * 0.20) * cfg.tradeSaleAggression();
     }
 
+    /**
+     * Discount rate applied to {@code valueGiven} when a trade completes the bot's own monopoly and
+     * the bot is behind on monopolies (an opponent already owns a set, the bot owns none).
+     *
+     * <p>Scales with how far behind the bot is: {@code CATCHUP_DISCOUNT_BASE} plus
+     * {@code CATCHUP_DISCOUNT_PER_OPP_MONOPOLY} for every color group opponents have completed,
+     * capped at {@code CATCHUP_DISCOUNT_MAX}. Since the catch-up path only fires when at least one
+     * opponent monopoly exists, the effective rate starts at {@code BASE + PER} (0.60) and climbs
+     * to the cap (0.75), so the trailing bot accepts paying meaningfully more to complete its first
+     * monopoly and start earning rent.</p>
+     */
+    private double catchupDiscountRate(SessionState state, String botId) {
+        int opponentMonopolies = StrongBotStrategy.opponentMonopolyCount(state, botId);
+        double rate = CATCHUP_DISCOUNT_BASE + opponentMonopolies * CATCHUP_DISCOUNT_PER_OPP_MONOPOLY;
+        return Math.min(CATCHUP_DISCOUNT_MAX, rate);
+    }
+
     private int monopolyGiftPenalty(SessionState state, String partnerId,
                                      TradeSelectionState giving, BotMemory memory) {
         int penalty = 0;
@@ -1249,6 +1285,21 @@ public final class PureDomainStrategy implements BotStrategy {
                 .filter(p -> botId.equals(p.ownerPlayerId()) && spotType(p.propertyId()).streetType == group)
                 .count();
         return facePrice * (1.0 - (double) botOwnsInGroup / groupSize);
+    }
+
+    /**
+     * True when {@code prop} can legally be mortgaged right now to service a debt — mirrors
+     * {@code DomainDebtRemediationGateway.canMortgage}. A street deed is only mortgageable when
+     * <em>no</em> property in its color group carries a building; railroads and utilities are
+     * always mortgageable. Keeps {@link #decideDebt} from proposing a mortgage the gateway would
+     * reject (which would stall the debt-resolution loop).
+     */
+    private static boolean mortgageableForDebt(SessionState state, PropertyStateSnapshot prop) {
+        SpotType st = spotType(prop.propertyId());
+        if (st.streetType.placeType != PlaceType.STREET) return true;
+        return state.properties().stream()
+                .filter(q -> spotType(q.propertyId()).streetType == st.streetType)
+                .noneMatch(q -> q.houseCount() > 0 || q.hotelCount() > 0);
     }
 
     private static boolean evenSellEligible(SessionState state, PropertyStateSnapshot prop) {

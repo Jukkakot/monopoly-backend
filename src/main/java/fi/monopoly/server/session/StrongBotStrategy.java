@@ -528,8 +528,10 @@ final class StrongBotStrategy {
         if (n <= 1) return 1.0;
         int rank = ranking.indexOf(botId);
         if (rank < 0) return 1.0;
-        // rank 0 = richest → 0.85; rank n-1 = poorest → 1.30
-        return 0.85 + (n - 1 - rank) * (0.45 / (n - 1));
+        // rank 0 = richest → 0.85 (conservative); rank n-1 = poorest → 1.30 (risk-taking).
+        // Used as reserve ÷ factor, threshold ÷ factor, tolerance × factor, so a high factor makes
+        // the trailing bot spend/accept more aggressively while the leader stays conservative.
+        return 0.85 + rank * (0.45 / (n - 1));
     }
 
     /**
