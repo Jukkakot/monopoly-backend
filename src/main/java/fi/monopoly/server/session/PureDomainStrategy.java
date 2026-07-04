@@ -35,7 +35,14 @@ public final class PureDomainStrategy implements BotStrategy {
     private static final double MONOPOLY_SALE_PREMIUM = 1.6;
     private static final double STALEMATE_GIFT_RELIEF = 0.5;
     private static final int STALEMATE_TURN_THRESHOLD = 12;
-    private static final double CATCHUP_DISCOUNT = 0.40;
+    // Catch-up discount: applied to valueGiven when a trade would complete the bot's own first
+    // monopoly while opponents already own sets. Scales with how far behind the bot is (number of
+    // opponent monopolies) so the trailing bot makes a genuinely aggressive gamble to break in and
+    // start earning rent, rather than the old marginal flat 0.40. Capped so it never gives away
+    // almost everything (the remaining floor still blocks obviously-fleecing trades).
+    private static final double CATCHUP_DISCOUNT_BASE = 0.45;
+    private static final double CATCHUP_DISCOUNT_PER_OPP_MONOPOLY = 0.15;
+    private static final double CATCHUP_DISCOUNT_MAX = 0.75;
 
     private final Map<String, StrongBotConfig> configs;
     /** When non-null, this config is used for every seat regardless of playerId (config A/B seam). */
@@ -547,7 +554,9 @@ public final class PureDomainStrategy implements BotStrategy {
         int strategicDiscount = 0;
         if (completesOwnMonopoly(state, botId, myReceiving)) {
             boolean catchingUp = someoneElseHasMonopoly(state, botId) && !playerHasMonopoly(state, botId);
-            double discountRate = catchingUp ? CATCHUP_DISCOUNT : MONOPOLY_COMPLETION_DISCOUNT;
+            double discountRate = catchingUp
+                    ? catchupDiscountRate(state, botId)
+                    : MONOPOLY_COMPLETION_DISCOUNT;
             strategicDiscount = (int)(valueGiven * discountRate);
             requiredPremium = 0;
         }
@@ -993,6 +1002,23 @@ public final class PureDomainStrategy implements BotStrategy {
      */
     private static double saleMargin(double threatScore, StrongBotConfig cfg) {
         return 1.0 + (0.05 + threatScore * 0.20) * cfg.tradeSaleAggression();
+    }
+
+    /**
+     * Discount rate applied to {@code valueGiven} when a trade completes the bot's own monopoly and
+     * the bot is behind on monopolies (an opponent already owns a set, the bot owns none).
+     *
+     * <p>Scales with how far behind the bot is: {@code CATCHUP_DISCOUNT_BASE} plus
+     * {@code CATCHUP_DISCOUNT_PER_OPP_MONOPOLY} for every color group opponents have completed,
+     * capped at {@code CATCHUP_DISCOUNT_MAX}. Since the catch-up path only fires when at least one
+     * opponent monopoly exists, the effective rate starts at {@code BASE + PER} (0.60) and climbs
+     * to the cap (0.75), so the trailing bot accepts paying meaningfully more to complete its first
+     * monopoly and start earning rent.</p>
+     */
+    private double catchupDiscountRate(SessionState state, String botId) {
+        int opponentMonopolies = StrongBotStrategy.opponentMonopolyCount(state, botId);
+        double rate = CATCHUP_DISCOUNT_BASE + opponentMonopolies * CATCHUP_DISCOUNT_PER_OPP_MONOPOLY;
+        return Math.min(CATCHUP_DISCOUNT_MAX, rate);
     }
 
     private int monopolyGiftPenalty(SessionState state, String partnerId,
