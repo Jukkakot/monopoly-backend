@@ -544,11 +544,25 @@ public final class SessionHttpServer {
             ClientSessionUpdates updates,
             Supplier<ClientSessionSnapshot> snapshotSupplier,
             Runnable onCloseExtra) {
+        // Accept Last-Event-ID from header (native browser SSE reconnect) or query param
+        // (client fallback on initial connect before browser has seen any event id).
+        String lastEventIdHeader = client.ctx().header("Last-Event-ID");
+        String lastEventIdQuery  = client.ctx().queryParam("lastEventId");
+        long clientVersion = parseLastEventId(lastEventIdHeader != null ? lastEventIdHeader : lastEventIdQuery);
+
+        // Per-connection monotonic send guard. The listener is registered BEFORE the initial
+        // snapshot is written (so no update is ever missed), which means a command committed in
+        // between can push version N+1 through the listener before this thread writes version N —
+        // the client would then render the older state last. The guard makes every send
+        // strictly-increasing per connection and serializes the actual writes.
+        java.util.concurrent.atomic.AtomicLong lastSentVersion =
+                new java.util.concurrent.atomic.AtomicLong(clientVersion);
+        Object sendLock = new Object();
+
         ClientSessionListener listener = snapshot -> {
             if (!client.terminated()) {
                 try {
-                    ClientSessionSnapshot stamped = snapshot.stampedNow();
-                    client.sendEvent("message", stamped, String.valueOf(stamped.version()));
+                    sendIfNewer(client, snapshot, lastSentVersion, sendLock);
                 } catch (Exception e) {
                     client.close();
                 }
@@ -562,19 +576,22 @@ public final class SessionHttpServer {
         // Send initial snapshot synchronously while the response is still in synchronous
         // mode — before keepAlive() switches it to async. This is the canonical Javalin SSE
         // pattern and avoids any race between the async ctx.future() and the first write.
-        // Accept Last-Event-ID from header (native browser SSE reconnect) or query param
-        // (client fallback on initial connect before browser has seen any event id).
-        String lastEventIdHeader = client.ctx().header("Last-Event-ID");
-        String lastEventIdQuery  = client.ctx().queryParam("lastEventId");
-        long clientVersion = parseLastEventId(lastEventIdHeader != null ? lastEventIdHeader : lastEventIdQuery);
-        ClientSessionSnapshot initial = snapshotSupplier.get();
-        if (clientVersion < initial.version()) {
-            try {
-                ClientSessionSnapshot stamped = initial.stampedNow();
-                client.sendEvent("message", stamped, String.valueOf(stamped.version()));
-            } catch (Exception ignored) {}
-        }
+        try {
+            sendIfNewer(client, snapshotSupplier.get(), lastSentVersion, sendLock);
+        } catch (Exception ignored) {}
         client.keepAlive();
+    }
+
+    /** Writes the snapshot to the SSE stream iff its version is newer than anything already sent. */
+    private static void sendIfNewer(SseClient client, ClientSessionSnapshot snapshot,
+                                    java.util.concurrent.atomic.AtomicLong lastSentVersion,
+                                    Object sendLock) {
+        synchronized (sendLock) {
+            if (snapshot.version() <= lastSentVersion.get()) return;
+            lastSentVersion.set(snapshot.version());
+            ClientSessionSnapshot stamped = snapshot.stampedNow();
+            client.sendEvent("message", stamped, String.valueOf(stamped.version()));
+        }
     }
 
     private static long parseLastEventId(String header) {
