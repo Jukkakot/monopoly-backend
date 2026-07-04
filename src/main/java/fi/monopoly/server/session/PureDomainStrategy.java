@@ -245,10 +245,11 @@ public final class PureDomainStrategy implements BotStrategy {
 
     private Optional<Intent> tryInitiateTrade(SessionState state, String botId, BotMemory memory) {
         PlayerSnapshot bot = StrongBotStrategy.findPlayer(state, botId);
+        if (bot == null) return Optional.empty();
         int reserve = dynamicReserve(state, botId);
-        if (bot == null || bot.cash() < reserve + 50) return Optional.empty();
 
-        // Pass 0: win-win swap
+        // Pass 0: win-win swap — a property-for-property deal needs no spare cash, so a cash-poor bot
+        // may still open it. (The cash gate below only guards the P3 cash purchase in Pass 2.)
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (memory.declineCount(other.playerId()) >= MAX_DECLINES_PER_PARTNER) continue;
@@ -270,7 +271,8 @@ public final class PureDomainStrategy implements BotStrategy {
             }
         }
 
-        // Pass 2: P3 foothold acquisition
+        // Pass 2: P3 foothold acquisition — a cash purchase, so it requires spare cash above reserve.
+        if (bot.cash() < reserve + 50) return Optional.empty();
         for (PlayerSnapshot other : state.players()) {
             if (other.playerId().equals(botId) || other.bankrupt() || other.eliminated()) continue;
             if (memory.declineCount(other.playerId()) >= MAX_DECLINES_PER_PARTNER) continue;
