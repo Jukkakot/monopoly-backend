@@ -770,6 +770,42 @@ class DomainTurnActionGatewayTest {
     }
 
     @Test
+    void nearestRailroadCardChargesDoubleRent() {
+        // MOVE_NEAREST:0 — "pay owner twice the rental". P1 at 4 + dice 2+1 → CHANCE1 (7);
+        // nearest railroad RR2 (15) owned by P2 with one railroad → base rent 25 → charged 50.
+        PropertyStateSnapshot rr2 = new PropertyStateSnapshot("RR2", PLAYER_2, false, 0, 0);
+        InMemorySessionState store = storeWithChanceDeckTwoPlayers(
+                player(PLAYER_1, 4, 1500), player(PLAYER_2, 0, 1000),
+                List.of("MOVE_NEAREST:0"), List.of(rr2));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        gateway.rollDice();
+        gateway.acknowledgeCard();
+
+        assertEquals(1450, playerById(store.get(), PLAYER_1).cash(),
+                "card promises double rent: 2 × 25 = 50");
+        assertEquals(1050, playerById(store.get(), PLAYER_2).cash());
+    }
+
+    @Test
+    void nearestUtilityCardChargesTenTimesDice() {
+        // MOVE_NEAREST:1 — "pay ten times the amount thrown". P1 at 4 + dice 2+1 → CHANCE1 (7);
+        // nearest utility U1 (12) owned by P2 → 10 × 3 = 30 (not the normal 4 × dice).
+        PropertyStateSnapshot u1 = new PropertyStateSnapshot("U1", PLAYER_2, false, 0, 0);
+        InMemorySessionState store = storeWithChanceDeckTwoPlayers(
+                player(PLAYER_1, 4, 1500), player(PLAYER_2, 0, 1000),
+                List.of("MOVE_NEAREST:1"), List.of(u1));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1);
+
+        gateway.rollDice();
+        gateway.acknowledgeCard();
+
+        assertEquals(1470, playerById(store.get(), PLAYER_1).cash(),
+                "card promises 10 × dice throw: 10 × 3 = 30");
+        assertEquals(1030, playerById(store.get(), PLAYER_2).cash());
+    }
+
+    @Test
     void chanceCardRepairPropertiesChargesForHouses() {
         // REPAIR_PROPERTIES:0 in chance = houseCost=25, hotelCost=100
         // Player owns B1 with 2 houses → repair cost = 2 * 25 = 50
@@ -917,6 +953,22 @@ class DomainTurnActionGatewayTest {
                 .seats(seats).players(List.of(p1, p2)).properties(List.of())
                 .turn(new TurnState(p1.playerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
                 .chanceDeck(List.of()).communityDeck(communityDeck)
+                .build();
+        return new InMemorySessionState(state);
+    }
+
+    private static InMemorySessionState storeWithChanceDeckTwoPlayers(
+            PlayerSnapshot p1, PlayerSnapshot p2,
+            List<String> chanceDeck, List<PropertyStateSnapshot> props) {
+        List<SeatState> seats = List.of(
+                new SeatState("seat-0", 0, p1.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p1.name(), "HUMAN", "#000000"),
+                new SeatState("seat-1", 1, p2.playerId(), SeatKind.HUMAN, ControlMode.MANUAL, p2.name(), "HUMAN", "#FFFFFF")
+        );
+        SessionState state = SessionState.builder()
+                .sessionId(SESSION_ID).version(0L).status(SessionStatus.IN_PROGRESS)
+                .seats(seats).players(List.of(p1, p2)).properties(props)
+                .turn(new TurnState(p1.playerId(), TurnPhase.WAITING_FOR_ROLL, true, false, 0))
+                .chanceDeck(chanceDeck).communityDeck(List.of())
                 .build();
         return new InMemorySessionState(state);
     }

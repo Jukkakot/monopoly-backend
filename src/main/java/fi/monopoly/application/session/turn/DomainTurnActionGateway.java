@@ -618,7 +618,16 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
     // Private helpers: landing effects
     // -------------------------------------------------------------------------
 
+    /** Rent override for the Chance "advance to nearest…" cards, whose text promises
+     *  double railroad rent / ten times the dice throw on utilities. */
+    private enum CardRentRule { NORMAL, DOUBLE, DICE_TIMES_TEN }
+
     private void applyLandingEffects(String playerId, SpotType landedSpot, boolean isDoubles, int consecutiveDoubles, int diceTotal) {
+        applyLandingEffects(playerId, landedSpot, isDoubles, consecutiveDoubles, diceTotal, CardRentRule.NORMAL);
+    }
+
+    private void applyLandingEffects(String playerId, SpotType landedSpot, boolean isDoubles,
+                                     int consecutiveDoubles, int diceTotal, CardRentRule rentRule) {
         PlaceType placeType = landedSpot.streetType.placeType;
 
         if (placeType == PlaceType.STREET || placeType == PlaceType.RAILROAD || placeType == PlaceType.UTILITY) {
@@ -635,6 +644,9 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 return;
             }
             int rent = calculateRent(current, landedSpot, property, ownerId, diceTotal);
+            // The card text is the promise made to the player — honor it.
+            if (rentRule == CardRentRule.DOUBLE) rent *= 2;
+            else if (rentRule == CardRentRule.DICE_TIMES_TEN) rent = diceTotal * 10;
             applyRentOrDebt(current, playerId, ownerId, rent, isDoubles, consecutiveDoubles,
                     landedSpot.name());
             return;
@@ -883,7 +895,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                             .build(),
                     ev("PASSED_GO", playerId)));
         }
-        applyLandingEffects(playerId, finalNearestSpot, isDoubles, consecutiveDoubles, diceTotal);
+        // Card text promise: railroad → pay twice the rental; utility → pay 10× the dice throw.
+        CardRentRule rentRule = targetType == PlaceType.RAILROAD
+                ? CardRentRule.DOUBLE : CardRentRule.DICE_TIMES_TEN;
+        applyLandingEffects(playerId, finalNearestSpot, isDoubles, consecutiveDoubles, diceTotal, rentRule);
     }
 
     private void applyCardMoveBack(String playerId, int spaces, boolean isDoubles, int consecutiveDoubles, int diceTotal) {
