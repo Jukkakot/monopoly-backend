@@ -110,6 +110,16 @@ public final class SessionCommandPublisher implements SessionCommandPort, Client
         publishSnapshot();
     }
 
+    /**
+     * Runs {@code action} under the same lock that serializes command handling. Registry-level
+     * mutations of the base store (e.g. debug state import) MUST use this: a store update racing
+     * a concurrently executing command gets partially or wholly overwritten by the command's
+     * derived state, silently losing the mutation.
+     */
+    public synchronized void runExclusive(Runnable action) {
+        action.run();
+    }
+
     void publishSnapshot() {
         ClientSessionSnapshot snapshot = currentSnapshot();
         for (ClientSessionListener listener : listeners) {

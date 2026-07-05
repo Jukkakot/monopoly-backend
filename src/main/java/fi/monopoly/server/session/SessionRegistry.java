@@ -432,7 +432,11 @@ public final class SessionRegistry {
         Entry entry = sessions.get(sessionId);
         if (entry == null) return false;
         lastActivityAt.put(sessionId, System.currentTimeMillis());
-        entry.baseStore().update(state -> applyDebugPatch(state, patch));
+        // Serialize with command handling: applying the patch while a bot command is mid-flight
+        // let the command's derived state overwrite the import wholesale (bots act every ~50 ms
+        // at fast speed, so injected test scenarios were randomly lost).
+        entry.publisher().runExclusive(
+                () -> entry.baseStore().update(state -> applyDebugPatch(state, patch)));
         entry.publisher().notifyListeners();
         log.info("Debug state import applied to session {}", sessionId.substring(0, Math.min(8, sessionId.length())));
         return true;
