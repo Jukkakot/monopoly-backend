@@ -185,6 +185,26 @@ class DomainTradeGatewayTest {
         assertEquals(P1, propertyById(store.get(), "LB1").ownerPlayerId());
     }
 
+    @Test
+    void pureSwapUpdatesPlayersOwnedPropertyLists() {
+        // A property-for-property swap has zero cash and jail-card deltas — the players'
+        // ownedPropertyIds must still be rebuilt (the client's player list, net worth and
+        // game-over rankings all read them).
+        PropertyStateSnapshot b1 = prop("B1", P1, false, 0, 0);
+        PropertyStateSnapshot lb1 = prop("LB1", P2, false, 0, 0);
+        PlayerSnapshot p1 = new PlayerSnapshot(P1, "seat-0", P1, 500, 0, false, false, false, 0, 0, List.of("B1"));
+        PlayerSnapshot p2 = new PlayerSnapshot(P2, "seat-1", P2, 500, 0, false, false, false, 0, 0, List.of("LB1"));
+        InMemorySessionState store = storeWithPlayers(p1, p2, List.of(b1, lb1));
+
+        new DomainTradeGateway(store).applyOffer(
+                new TradeOfferState(P1, P2, properties(List.of("B1")), properties(List.of("LB1"))));
+
+        assertEquals(List.of("LB1"), playerById(store.get(), P1).ownedPropertyIds(),
+                "proposer's owned list must reflect the swap");
+        assertEquals(List.of("B1"), playerById(store.get(), P2).ownedPropertyIds(),
+                "recipient's owned list must reflect the swap");
+    }
+
     // -------------------------------------------------------------------------
     // applyOffer — jail card transfer
     // -------------------------------------------------------------------------

@@ -77,16 +77,20 @@ public final class DomainTradeGateway implements TradeGateway {
 
             List<PlayerSnapshot> updatedPlayers = state.players().stream()
                     .map(p -> {
-                        int cashDelta = 0;
-                        int jailDelta = 0;
-                        if (proposerId.equals(p.playerId())) {
-                            cashDelta = requested.moneyAmount() - offered.moneyAmount();
-                            jailDelta = requested.jailCardCount() - offered.jailCardCount();
-                        } else if (recipientId.equals(p.playerId())) {
-                            cashDelta = offered.moneyAmount() - requested.moneyAmount();
-                            jailDelta = offered.jailCardCount() - requested.jailCardCount();
-                        }
-                        if (cashDelta == 0 && jailDelta == 0) return p;
+                        boolean isProposer = proposerId.equals(p.playerId());
+                        boolean isRecipient = recipientId.equals(p.playerId());
+                        // Both parties must ALWAYS be rebuilt: in a pure property-for-property
+                        // swap the cash and jail-card deltas are zero, but ownedPropertyIds
+                        // still changes — the old early-return left the players' owned lists
+                        // stale (wrong net worth, player list and game-over rankings).
+                        if (!isProposer && !isRecipient) return p;
+
+                        int cashDelta = isProposer
+                                ? requested.moneyAmount() - offered.moneyAmount()
+                                : offered.moneyAmount() - requested.moneyAmount();
+                        int jailDelta = isProposer
+                                ? requested.jailCardCount() - offered.jailCardCount()
+                                : offered.jailCardCount() - requested.jailCardCount();
 
                         List<String> ownedIds = updatedProps.stream()
                                 .filter(prop -> p.playerId().equals(prop.ownerPlayerId()))

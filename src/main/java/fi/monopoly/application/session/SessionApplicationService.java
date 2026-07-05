@@ -273,14 +273,40 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
             if (player == null || player.eliminated()) {
                 return rejected("PLAYER_NOT_FOUND", "Player not found or already eliminated");
             }
-            if (leaveGameGateway != null) {
-                leaveGameGateway.leaveGame(leaveCmd.actorPlayerId());
+            String leaverId = leaveCmd.actorPlayerId();
+
+            // Pass the leaver out of any active auction BEFORE eliminating them — otherwise
+            // the auction rotation waits forever for an eliminated player's bid.
+            if (auctionCommandHandler != null && state.auctionState() != null) {
+                auctionCommandHandler.removeParticipant(leaverId);
             }
-            // Clear any overlay state that may reference the leaving player
-            overlay.setTradeState(null);
-            overlay.setActiveDebt(null);
-            overlay.setPendingDecision(null);
-            overlay.setTurnContinuation(null);
+
+            if (leaveGameGateway != null) {
+                leaveGameGateway.leaveGame(leaverId);
+            }
+
+            // Clear overlay flow state ONLY when it involves the leaver. Trades live solely
+            // in the overlay layer, and the debt overlay carries remediation progress on top
+            // of the base copy — the old unconditional clears cancelled bystanders' active
+            // trades and reset a debtor's progress whenever ANYONE left the game.
+            TradeState trade = state.tradeState();
+            if (trade != null && (leaverId.equals(trade.initiatorPlayerId())
+                    || leaverId.equals(trade.recipientPlayerId()))) {
+                overlay.setTradeState(null);
+            }
+            DebtStateModel debt = state.activeDebt();
+            if (debt != null && (leaverId.equals(debt.debtorPlayerId())
+                    || leaverId.equals(debt.creditorPlayerId()))) {
+                overlay.setActiveDebt(null);
+            }
+            fi.monopoly.domain.decision.PendingDecision decision = state.pendingDecision();
+            if (decision != null && leaverId.equals(decision.actorPlayerId())) {
+                overlay.setPendingDecision(null);
+            }
+            TurnContinuationState cont = state.turnContinuationState();
+            if (cont != null && leaverId.equals(cont.activePlayerId())) {
+                overlay.setTurnContinuation(null);
+            }
             return accepted();
         }
         if (command instanceof RefreshSessionViewCommand refreshSessionViewCommand) {

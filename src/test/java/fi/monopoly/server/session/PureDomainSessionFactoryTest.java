@@ -137,6 +137,80 @@ class PureDomainSessionFactoryTest {
     // Private helpers
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // LeaveGame — bystander leaves must not disturb other players' flow state
+    // -------------------------------------------------------------------------
+
+    @Test
+    void bystanderLeavingDoesNotCancelOthersTrade() {
+        SessionApplicationService service = factoryWithThreePlayers();
+        assertTrue(service.handle(new OpenTradeCommand(SESSION_ID, PLAYER_1, "player-2")).accepted());
+        assertNotNull(service.currentState().tradeState());
+
+        assertTrue(service.handle(new LeaveGameCommand(SESSION_ID, "player-3")).accepted());
+
+        assertNotNull(service.currentState().tradeState(),
+                "a bystander leaving must not cancel a trade between two other players");
+    }
+
+    @Test
+    void tradePartyLeavingCancelsTheTrade() {
+        SessionApplicationService service = factoryWithThreePlayers();
+        assertTrue(service.handle(new OpenTradeCommand(SESSION_ID, PLAYER_1, "player-2")).accepted());
+
+        assertTrue(service.handle(new LeaveGameCommand(SESSION_ID, "player-2")).accepted());
+
+        assertNull(service.currentState().tradeState(),
+                "the trade must be cancelled when one of its parties leaves");
+    }
+
+    @Test
+    void leaverIsPassedOutOfActiveAuction() {
+        AuctionState auction = new AuctionState(
+                "auction:B1", "B1", PLAYER_1, "player-3", null, 0, 10,
+                java.util.Set.of(), List.of(PLAYER_1, "player-2", "player-3"),
+                AuctionStatus.ACTIVE, 0, null);
+        SessionApplicationService service = factoryWithThreePlayers(auction);
+
+        assertTrue(service.handle(new LeaveGameCommand(SESSION_ID, "player-3")).accepted());
+
+        AuctionState after = service.currentState().auctionState();
+        assertNotNull(after, "auction must continue among the remaining bidders");
+        assertTrue(after.passedPlayerIds().contains("player-3"),
+                "the leaver must be marked as passed so the rotation skips them");
+        assertNotEquals("player-3", after.currentActorPlayerId(),
+                "the rotation must not wait for an eliminated player's bid");
+    }
+
+    @Test
+    void auctionWonBySurvivingLeaderWhenLastCompetitorLeaves() {
+        AuctionState auction = new AuctionState(
+                "auction:B1", "B1", PLAYER_1, "player-3", "player-2", 50, 60,
+                java.util.Set.of(PLAYER_1), List.of(PLAYER_1, "player-2", "player-3"),
+                AuctionStatus.ACTIVE, 0, null);
+        SessionApplicationService service = factoryWithThreePlayers(auction);
+
+        assertTrue(service.handle(new LeaveGameCommand(SESSION_ID, "player-3")).accepted());
+
+        AuctionState after = service.currentState().auctionState();
+        assertNotNull(after);
+        assertEquals(AuctionStatus.WON_PENDING_RESOLUTION, after.status(),
+                "the surviving leader wins when everyone else has passed or left");
+        assertEquals("player-2", after.winningPlayerId());
+    }
+
+    private static SessionApplicationService factoryWithThreePlayers() {
+        return factoryWithThreePlayers(null);
+    }
+
+    private static SessionApplicationService factoryWithThreePlayers(AuctionState auction) {
+        SessionState initialState = buildState(
+                List.of(player(PLAYER_1, 0, 1500), player("player-2", 1, 1500), player("player-3", 2, 1500)),
+                List.of()
+        ).toBuilder().auctionState(auction).build();
+        return PureDomainSessionFactory.create(SESSION_ID, initialState);
+    }
+
     private static SessionApplicationService factoryWithPlayer(String playerId, int cash) {
         SessionState initialState = buildState(
                 List.of(player(playerId, 0, cash)),

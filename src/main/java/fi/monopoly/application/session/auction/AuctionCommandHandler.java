@@ -104,6 +104,59 @@ public final class AuctionCommandHandler {
         return handle(new PlaceAuctionBidCommand(sessionId, actorPlayerId, state.auctionId(), amount));
     }
 
+    /**
+     * Removes a player from the active auction when they leave the game. Without this the
+     * rotation eventually lands on the eliminated player and waits forever for their bid.
+     *
+     * <p>The leaver is marked as passed, a lead they held is voided (nobody can collect from
+     * an eliminated player), and the auction closes when at most one active bidder remains —
+     * won by the surviving leader, or without a winner when no bid stands.</p>
+     */
+    public void removeParticipant(String playerId) {
+        SessionState current = currentStateSupplier.get();
+        AuctionState state = current.auctionState();
+        if (state == null) return;
+        if (activeContext == null) {
+            activeContext = restoreContextFrom(current, state);
+        }
+
+        if (state.status() == AuctionStatus.WON_PENDING_RESOLUTION) {
+            // Winner left before resolution — nobody to transfer to; end without a winner.
+            if (playerId.equals(state.winningPlayerId())) {
+                resolveAuction(activeContext);
+            }
+            return;
+        }
+        if (state.status() != AuctionStatus.ACTIVE) return;
+        if (!state.eligiblePlayerIds().contains(playerId)
+                || state.passedPlayerIds().contains(playerId)) return;
+
+        Set<String> passed = new LinkedHashSet<>(state.passedPlayerIds());
+        passed.add(playerId);
+        String leading = playerId.equals(state.leadingPlayerId()) ? null : state.leadingPlayerId();
+        List<String> remaining = remainingActiveBidderIds(state.eligiblePlayerIds(), passed);
+
+        if (remaining.isEmpty()) {
+            resolveAuction(activeContext);
+            return;
+        }
+        if (leading != null && remaining.size() == 1 && remaining.get(0).equals(leading)) {
+            auctionStateSetter.accept(new AuctionState(
+                    state.auctionId(), state.propertyId(), state.triggeringPlayerId(),
+                    null, leading, state.currentBid(), state.minimumNextBid(),
+                    passed, state.eligiblePlayerIds(),
+                    AuctionStatus.WON_PENDING_RESOLUTION, state.currentBid(), leading));
+            return;
+        }
+        String actor = playerId.equals(state.currentActorPlayerId())
+                ? nextEligibleActor(state.eligiblePlayerIds(), passed, playerId)
+                : state.currentActorPlayerId();
+        auctionStateSetter.accept(new AuctionState(
+                state.auctionId(), state.propertyId(), state.triggeringPlayerId(),
+                actor, leading, state.currentBid(), state.minimumNextBid(),
+                passed, state.eligiblePlayerIds(), AuctionStatus.ACTIVE, 0, null));
+    }
+
     private CommandResult handleBid(PlaceAuctionBidCommand command) {
         AuctionState state = validateActiveAuction(command.sessionId(), command.auctionId());
         if (state == null) {
