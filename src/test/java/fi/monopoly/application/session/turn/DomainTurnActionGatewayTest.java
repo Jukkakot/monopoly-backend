@@ -333,6 +333,23 @@ class DomainTurnActionGatewayTest {
         assertNotEquals(JAIL_INDEX, updated.boardIndex()); // player moved
     }
 
+    @Test
+    void brokePlayerStaysInJailWhenForcedFineIsUnaffordable() {
+        // Last round without doubles but only €30 cash: the fee must not be partially
+        // waived (old code clamped cash to 0) nor drive cash negative — the player stays
+        // on their final round until they can pay or roll doubles.
+        InMemorySessionState store = storeWith(playerInJail(PLAYER_1, 30, 1));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1); // not doubles
+
+        gateway.rollDice();
+
+        PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
+        assertTrue(updated.inJail(), "must stay jailed when the fine is unaffordable");
+        assertEquals(30, updated.cash(), "no partial fee may be taken");
+        assertEquals(1, updated.jailRoundsRemaining(), "the final round does not expire");
+        assertEquals(JAIL_INDEX, updated.boardIndex());
+    }
+
     // -------------------------------------------------------------------------
     // endTurn
     // -------------------------------------------------------------------------

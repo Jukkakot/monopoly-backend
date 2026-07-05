@@ -556,7 +556,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 // No re-roll bonus after jail escape even if doubles
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
             }
-        } else if (roundsLeft <= 1) {
+        } else if (roundsLeft <= 1 && activePlayer.cash() >= GET_OUT_OF_JAIL_FEE) {
             log.info("Player {} must pay jail fine (last round), total={}", activePlayer.name(), total);
             int rawNew = JAIL_INDEX + total;
             int newIndex = rawNew % BOARD_SIZE;
@@ -595,13 +595,19 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
             }
         } else {
-            log.debug("Player {} stays in jail, roundsLeft → {}", activePlayer.name(), roundsLeft - 1);
+            // Stays in jail: either rounds remain, or the forced last-round fine is
+            // unaffordable. A broke player can neither be released into negative cash nor
+            // have the fee silently discounted (the old code clamped cash at 0, waiving up
+            // to €50) — they stay on their final round until they roll doubles or can pay,
+            // raising cash by mortgaging during their end-turn if needed.
+            int newRounds = Math.max(1, roundsLeft - 1);
+            log.debug("Player {} stays in jail, roundsLeft → {}", activePlayer.name(), newRounds);
             store.update(s -> {
                 List<PlayerSnapshot> updated = s.players().stream()
                         .map(p -> playerId.equals(p.playerId())
                                 ? new PlayerSnapshot(p.playerId(), p.seatId(), p.name(), p.cash(),
                                         p.boardIndex(), p.bankrupt(), p.eliminated(), true,
-                                        roundsLeft - 1, p.getOutOfJailCards(), p.ownedPropertyIds())
+                                        newRounds, p.getOutOfJailCards(), p.ownedPropertyIds())
                                 : p)
                         .toList();
                 return appendEvents(
@@ -1264,11 +1270,13 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 .toList();
     }
 
+    /** Caller must verify the player can afford the fee — handleInJailRoll keeps a broke
+     *  player jailed instead, so the fee is never partially waived. */
     private static List<PlayerSnapshot> clearJailFlagWithFine(List<PlayerSnapshot> players, String playerId) {
         return players.stream()
                 .map(p -> playerId.equals(p.playerId())
                         ? new PlayerSnapshot(p.playerId(), p.seatId(), p.name(),
-                                Math.max(0, p.cash() - GET_OUT_OF_JAIL_FEE),
+                                p.cash() - GET_OUT_OF_JAIL_FEE,
                                 p.boardIndex(), p.bankrupt(), p.eliminated(), false, 0,
                                 p.getOutOfJailCards(), p.ownedPropertyIds())
                         : p)
