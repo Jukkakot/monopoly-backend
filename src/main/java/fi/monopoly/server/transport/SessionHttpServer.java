@@ -332,22 +332,25 @@ public final class SessionHttpServer {
                 ctx.status(400).json(Map.of("error", "name is required"));
                 return;
             }
-            if (registry.isNameTakenInLobby(id, name)) {
-                ctx.status(409).json(Map.of("error", "name_taken", "message", "This name is already in use"));
-                return;
+            // Name/color uniqueness is validated atomically inside joinLobby — transport-level
+            // pre-checks would be check-then-act and let two simultaneous joins both pass.
+            SessionRegistry.JoinOutcome outcome = registry.joinLobby(id, name, color);
+            if (outcome.result() != null) {
+                var r = outcome.result();
+                ctx.status(200).json(Map.of(
+                        "playerId", r.seat().playerId(),
+                        "seatId", r.seat().seatId(),
+                        "tokenColorHex", r.seat().tokenColorHex(),
+                        "playerToken", r.playerToken()));
+            } else {
+                String code = outcome.error();
+                String message = switch (code) {
+                    case "name_taken"  -> "This name is already in use";
+                    case "color_taken" -> "This color is already in use";
+                    default            -> "No available seats or session not in LOBBY state";
+                };
+                ctx.status(409).json(Map.of("error", code, "message", message));
             }
-            if (registry.isColorTakenByHuman(id, color)) {
-                ctx.status(409).json(Map.of("error", "color_taken", "message", "This color is already in use"));
-                return;
-            }
-            registry.joinLobby(id, name, color)
-                    .ifPresentOrElse(
-                            r -> ctx.status(200).json(Map.of(
-                                    "playerId", r.seat().playerId(),
-                                    "seatId", r.seat().seatId(),
-                                    "tokenColorHex", r.seat().tokenColorHex(),
-                                    "playerToken", r.playerToken())),
-                            () -> ctx.status(409).json(Map.of("error", "lobby_full", "message", "No available seats or session not in LOBBY state")));
         } catch (NotFoundResponse e) {
             throw e;
         } catch (Exception e) {

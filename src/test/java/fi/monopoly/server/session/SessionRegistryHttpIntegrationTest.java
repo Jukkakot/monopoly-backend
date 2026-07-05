@@ -408,6 +408,34 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     // -------------------------------------------------------------------------
+    // Lobby join uniqueness (validated atomically inside the store update)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void joiningWithDuplicateNameOrColorIsRejected() throws Exception {
+        String createBody = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}").body();
+        String sessionId = extractSessionId(createBody);
+
+        // Same name as the host (case-insensitive) → 409 name_taken
+        HttpResponse<String> dupName = post("/sessions/" + sessionId + "/join",
+                "{\"name\":\"alice\",\"color\":\"#2A9D8F\"}");
+        assertEquals(409, dupName.statusCode());
+        assertTrue(dupName.body().contains("name_taken"), dupName.body());
+
+        // Same color as the host → 409 color_taken
+        HttpResponse<String> dupColor = post("/sessions/" + sessionId + "/join",
+                "{\"name\":\"Bob\",\"color\":\"#E63946\"}");
+        assertEquals(409, dupColor.statusCode());
+        assertTrue(dupColor.body().contains("color_taken"), dupColor.body());
+
+        // Distinct name and color → joins fine
+        HttpResponse<String> ok = post("/sessions/" + sessionId + "/join",
+                "{\"name\":\"Bob\",\"color\":\"#2A9D8F\"}");
+        assertEquals(200, ok.statusCode(), ok.body());
+    }
+
+    // -------------------------------------------------------------------------
     // Lobby start idempotency
     // -------------------------------------------------------------------------
 

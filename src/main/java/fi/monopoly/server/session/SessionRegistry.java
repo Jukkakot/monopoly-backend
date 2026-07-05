@@ -58,6 +58,13 @@ public final class SessionRegistry {
     }
     public record JoinResult(SeatState seat, String playerToken) {}
 
+    /** Outcome of a lobby join: exactly one of {@code result} or {@code error} is non-null.
+     *  Error codes: {@code name_taken}, {@code color_taken}, {@code lobby_full}. */
+    public record JoinOutcome(JoinResult result, String error) {
+        static JoinOutcome ok(JoinResult r) { return new JoinOutcome(r, null); }
+        static JoinOutcome fail(String code) { return new JoinOutcome(null, code); }
+    }
+
     private record Entry(
             SessionCommandPublisher publisher,
             InMemorySessionState baseStore,
@@ -179,17 +186,40 @@ public final class SessionRegistry {
      * Dynamically adds a new human seat for the joining player (max {@value MAX_SEATS} total).
      * If a bot holds the same color or name as the joining human, the bot is reassigned first.
      */
-    public Optional<JoinResult> joinLobby(String sessionId, String name, String color) {
+    public JoinOutcome joinLobby(String sessionId, String name, String color) {
         Entry entry = sessions.get(sessionId);
-        if (entry == null) return Optional.empty();
+        if (entry == null) return JoinOutcome.fail("lobby_full");
         lastActivityAt.put(sessionId, System.currentTimeMillis());
 
         String newPlayerId = "player-" + UUID.randomUUID();
         final SeatState[] added = {null};
+        final String[] rejectReason = {null};
 
         entry.baseStore().update(state -> {
             if (state.status() != SessionStatus.LOBBY) return state;
             if (state.seats().size() >= MAX_SEATS) return state;
+
+            // Duplicate-name/color validation must happen INSIDE the synchronized update:
+            // the transport-level pre-checks are check-then-act, so two players joining
+            // with the same name at the same moment both used to pass them.
+            boolean nameTaken = state.seats().stream()
+                    .filter(s -> s.seatKind() == SeatKind.HUMAN)
+                    .anyMatch(s -> s.displayName() != null && s.displayName().equalsIgnoreCase(name));
+            if (nameTaken) {
+                rejectReason[0] = "name_taken";
+                return state;
+            }
+            if (color != null && !color.isBlank()) {
+                final String humanColorUp = color.toUpperCase();
+                boolean colorTaken = state.seats().stream()
+                        .filter(s -> s.seatKind() == SeatKind.HUMAN)
+                        .anyMatch(s -> s.tokenColorHex() != null
+                                && s.tokenColorHex().toUpperCase().equals(humanColorUp));
+                if (colorTaken) {
+                    rejectReason[0] = "color_taken";
+                    return state;
+                }
+            }
 
             List<SeatState> workingSeats = new ArrayList<>(state.seats());
 
@@ -264,11 +294,13 @@ public final class SessionRegistry {
             return state.toBuilder().seats(workingSeats).players(updatedPlayers).build();
         });
 
-        if (added[0] == null) return Optional.empty();
+        if (added[0] == null) {
+            return JoinOutcome.fail(rejectReason[0] != null ? rejectReason[0] : "lobby_full");
+        }
         String playerToken = UUID.randomUUID().toString();
         entry.playerTokens().put(newPlayerId, playerToken);
         entry.publisher().notifyListeners();
-        return Optional.of(new JoinResult(added[0], playerToken));
+        return JoinOutcome.ok(new JoinResult(added[0], playerToken));
     }
 
     /**
@@ -553,25 +585,6 @@ public final class SessionRegistry {
     // -------------------------------------------------------------------------
 
     /** Returns true if the given name (case-insensitive) is already taken by a HUMAN seat in the lobby. */
-    public boolean isNameTakenInLobby(String sessionId, String name) {
-        Entry entry = sessions.get(sessionId);
-        if (entry == null) return false;
-        return entry.baseStore().get().seats().stream()
-                .filter(s -> s.seatKind() == SeatKind.HUMAN)
-                .anyMatch(s -> s.displayName().equalsIgnoreCase(name));
-    }
-
-    /** Returns true if the given color is already taken by a HUMAN seat in the lobby. */
-    public boolean isColorTakenByHuman(String sessionId, String color) {
-        if (color == null || color.isBlank()) return false;
-        Entry entry = sessions.get(sessionId);
-        if (entry == null) return false;
-        final String colorUp = color.toUpperCase();
-        return entry.baseStore().get().seats().stream()
-                .filter(s -> s.seatKind() == SeatKind.HUMAN)
-                .anyMatch(s -> s.tokenColorHex() != null && s.tokenColorHex().toUpperCase().equals(colorUp));
-    }
-
     // -------------------------------------------------------------------------
     // Token validation
     // -------------------------------------------------------------------------
