@@ -408,6 +408,51 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     // -------------------------------------------------------------------------
+    // Lobby start idempotency
+    // -------------------------------------------------------------------------
+
+    /**
+     * The LOBBY→IN_PROGRESS transition must be atomic and one-shot: a ready call arriving
+     * after the game has started (e.g. the second half of two concurrent final-ready taps)
+     * must not rebuild the initial game state — the old check-then-act guard let both
+     * callers start the game, resetting state and double-registering bot drivers.
+     */
+    @Test
+    void readyCallAfterGameStartDoesNotResetTheGame() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId    = extractSessionId(createResp.body());
+        String hostToken    = extractPattern(HOST_TOKEN_PATTERN, createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String playerToken  = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+        post("/sessions/" + sessionId + "/lobby/bots", "{\"hostToken\":\"" + hostToken + "\"}");
+        post("/sessions/" + sessionId + "/lobby/ready",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + playerToken + "\",\"ready\":true}");
+        Thread.sleep(200);
+
+        // Game started — mark it with a recognizable cash value
+        put("/sessions/" + sessionId + "/debug/state",
+                "{\"players\":[{\"playerId\":\"" + hostPlayerId + "\",\"cash\":777}]}");
+
+        // A straggler ready call must be a no-op, not a fresh game start
+        HttpResponse<String> lateReady = post("/sessions/" + sessionId + "/lobby/ready",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + playerToken + "\",\"ready\":false}");
+        assertEquals(200, lateReady.statusCode());
+        assertTrue(lateReady.body().contains("\"changed\":false"),
+                "ready toggles after game start must not change anything, got: " + lateReady.body());
+
+        String snapshot = get("/sessions/" + sessionId + "/snapshot").body();
+        JsonNode players = objectMapper.readTree(snapshot).path("state").path("players");
+        boolean cashPreserved = false;
+        for (JsonNode p : players) {
+            if (hostPlayerId.equals(p.path("playerId").asText())) {
+                cashPreserved = p.path("cash").asInt() == 777;
+            }
+        }
+        assertTrue(cashPreserved, "in-progress game state must not be reset by a late ready call");
+    }
+
+    // -------------------------------------------------------------------------
     // Bot retrigger authorization
     // -------------------------------------------------------------------------
 

@@ -581,14 +581,21 @@ public final class SessionRegistry {
     // -------------------------------------------------------------------------
 
     private void startLobbyGame(String sessionId, Entry entry) {
-        SessionState current = entry.baseStore().get();
-        if (current.status() != SessionStatus.LOBBY) return;
-
-        List<SeatState> lobbySeats = PureDomainSessionFactory.sanitizeColors(current.seats());
-        String hostPlayerId = current.hostPlayerId();
-
-        SessionState gameState = PureDomainSessionFactory.initialGameStateFromSeats(sessionId, lobbySeats, hostPlayerId);
-        entry.baseStore().update(ignored -> gameState);
+        // The LOBBY→IN_PROGRESS flip must happen inside the store's synchronized update:
+        // two players tapping "ready" at the same moment both used to pass a bare
+        // check-then-act status guard, each building a fresh game state and — worse —
+        // each registering its own bot driver, doubling every bot command for the game.
+        final SessionState[] startedState = {null};
+        entry.baseStore().update(state -> {
+            if (state.status() != SessionStatus.LOBBY) return state;
+            List<SeatState> lobbySeats = PureDomainSessionFactory.sanitizeColors(state.seats());
+            SessionState gameState = PureDomainSessionFactory.initialGameStateFromSeats(
+                    sessionId, lobbySeats, state.hostPlayerId());
+            startedState[0] = gameState;
+            return gameState;
+        });
+        if (startedState[0] == null) return;  // someone else already started the game
+        SessionState gameState = startedState[0];
 
         Map<String, StrongBotConfig> botConfigs = buildBotConfigs(gameState, sessionId);
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
