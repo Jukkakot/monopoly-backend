@@ -78,6 +78,16 @@ public final class DomainAuctionGateway implements AuctionGateway {
 
     @Override
     public boolean transferWinningProperty(String winnerId, String propertyId, int amount) {
+        // Bids are validated against cash at BID time, but the winner can spend money
+        // between winning and resolution (mortgage toggling is allowed during the auction
+        // phase) — transferring anyway would drive their cash negative. Rejecting here
+        // surfaces AUCTION_TRANSFER_FAILED; the winner can re-raise cash and finish again.
+        PlayerSnapshot winner = store.get().players().stream()
+                .filter(p -> winnerId.equals(p.playerId()))
+                .findFirst().orElse(null);
+        if (winner == null || winner.cash() < amount) {
+            return false;
+        }
         store.update(state -> {
             List<PlayerSnapshot> players = state.players().stream()
                     .map(p -> {

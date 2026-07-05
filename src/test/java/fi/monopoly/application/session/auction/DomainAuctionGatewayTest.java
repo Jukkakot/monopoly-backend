@@ -148,6 +148,25 @@ class DomainAuctionGatewayTest {
     }
 
     @Test
+    void transferWinningPropertyRejectedWhenWinnerCannotPay() {
+        // The bid was affordable when placed, but the winner spent cash before resolution
+        // (mortgage toggling is allowed during the auction phase). Transferring anyway
+        // would drive their balance negative — a free property.
+        InMemorySessionState store = storeWithPlayersAndProperties(
+                List.of(player(PLAYER_1, 0, 80), player(PLAYER_2, 1, 300)),
+                List.of(unownedProperty(PROPERTY_ID))
+        );
+        DomainAuctionGateway gateway = new DomainAuctionGateway(store);
+
+        boolean result = gateway.transferWinningProperty(PLAYER_1, PROPERTY_ID, 100);
+
+        assertFalse(result, "transfer must be rejected when the winner cannot cover the bid");
+        assertEquals(80, playerById(store.get(), PLAYER_1).cash(), "cash must be untouched");
+        assertNull(propertyById(store.get(), PROPERTY_ID).ownerPlayerId(),
+                "the property must stay with the bank");
+    }
+
+    @Test
     void transferWinningPropertyDoesNotAffectOtherPlayers() {
         InMemorySessionState store = storeWithPlayersAndProperties(
                 List.of(player(PLAYER_1, 0, 500), player(PLAYER_2, 1, 300)),
