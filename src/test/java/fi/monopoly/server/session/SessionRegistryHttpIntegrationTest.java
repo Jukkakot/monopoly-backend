@@ -452,6 +452,37 @@ class SessionRegistryHttpIntegrationTest {
         assertTrue(cashPreserved, "in-progress game state must not be reset by a late ready call");
     }
 
+    /**
+     * Removing a middle bot must compact the remaining seat indexes — joins compute the next
+     * index as seats.size(), so a gap made the next joiner duplicate an existing seatIndex
+     * (shared default color / token shape, ambiguous turn order).
+     */
+    @Test
+    void seatIndexesStayUniqueAfterRemovingAMiddleBot() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId = extractSessionId(createResp.body());
+        String hostToken = extractPattern(HOST_TOKEN_PATTERN, createResp.body());
+
+        // host(0) + bot(1) + bot(2); remove the FIRST bot, then add a new one
+        String bot1 = post("/sessions/" + sessionId + "/lobby/bots", "{\"hostToken\":\"" + hostToken + "\"}").body();
+        post("/sessions/" + sessionId + "/lobby/bots", "{\"hostToken\":\"" + hostToken + "\"}");
+        String bot1SeatId = objectMapper.readTree(bot1).path("seatId").asText();
+        delete("/sessions/" + sessionId + "/lobby/bots/" + bot1SeatId, "{\"hostToken\":\"" + hostToken + "\"}");
+        post("/sessions/" + sessionId + "/lobby/bots", "{\"hostToken\":\"" + hostToken + "\"}");
+
+        JsonNode seats = objectMapper.readTree(get("/sessions/" + sessionId + "/snapshot").body())
+                .path("state").path("seats");
+        java.util.Set<Integer> indexes = new java.util.HashSet<>();
+        for (JsonNode seat : seats) {
+            assertTrue(indexes.add(seat.path("seatIndex").asInt()),
+                    "duplicate seatIndex " + seat.path("seatIndex").asInt() + " in " + seats);
+        }
+        assertEquals(3, indexes.size());
+        assertTrue(indexes.containsAll(java.util.List.of(0, 1, 2)),
+                "seat indexes must be contiguous 0..n-1, got: " + indexes);
+    }
+
     // -------------------------------------------------------------------------
     // Bot retrigger authorization
     // -------------------------------------------------------------------------
@@ -608,6 +639,15 @@ class SessionRegistryHttpIntegrationTest {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:" + port + path))
                 .PUT(HttpRequest.BodyPublishers.ofString(body))
+                .header("Content-Type", "application/json").build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> delete(String path, String body) throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .method("DELETE", HttpRequest.BodyPublishers.ofString(body))
                 .header("Content-Type", "application/json").build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }

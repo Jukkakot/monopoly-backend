@@ -327,9 +327,21 @@ public final class SessionRegistry {
             if (target == null) return state;
 
             removed[0] = true;
-            List<SeatState> newSeats = state.seats().stream()
+            List<SeatState> filtered = state.seats().stream()
                     .filter(s -> !s.seatId().equals(seatId))
-                    .collect(Collectors.toList());
+                    .toList();
+            // Compact seat indexes after removal: joins compute the next index as
+            // seats.size(), so a gap left by a removed middle seat made the next joiner
+            // DUPLICATE an existing index — two players sharing a default color/token
+            // shape and an ambiguous turn order (both derive from seatIndex).
+            List<SeatState> newSeats = new ArrayList<>(filtered.size());
+            for (int i = 0; i < filtered.size(); i++) {
+                SeatState s = filtered.get(i);
+                newSeats.add(s.seatIndex() == i ? s
+                        : new SeatState(s.seatId(), i, s.playerId(), s.seatKind(), s.controlMode(),
+                                s.displayName(), s.controllerProfileId(), s.tokenColorHex(),
+                                s.joined(), s.ready()));
+            }
             List<PlayerSnapshot> newPlayers = state.players().stream()
                     .filter(p -> !p.playerId().equals(target.playerId()))
                     .collect(Collectors.toList());
