@@ -217,6 +217,56 @@ class PureDomainSessionFactoryTest {
                 "the turn must pass to the seat after the leaver, not restart from seat 0");
     }
 
+    // -------------------------------------------------------------------------
+    // PayDebt — must validate against the debtor's live cash, not the cached
+    // debt.currentCash (a trade accepted mid-debt changes the balance)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void payDebtRejectedWhenLiveCashDroppedBelowDebtAfterDebtOpened() {
+        DebtStateModel debt = new DebtStateModel(
+                "debt-1", PLAYER_1, DebtCreditorType.BANK, null,
+                300, "Tax", false, 500 /* stale: recorded before cash left via trade */, 0,
+                List.of(DebtAction.PAY_DEBT_NOW, DebtAction.DECLARE_BANKRUPTCY));
+        SessionState initialState = buildState(
+                List.of(player(PLAYER_1, 0, 100), player("player-2", 1, 1500)),
+                List.of()
+        ).toBuilder()
+                .turn(new TurnState(PLAYER_1, TurnPhase.RESOLVING_DEBT, false, false, 0))
+                .activeDebt(debt)
+                .build();
+        SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initialState);
+
+        CommandResult result = service.handle(new PayDebtCommand(SESSION_ID, PLAYER_1, "debt-1"));
+
+        assertFalse(result.accepted(), "paying with only €100 live cash against a €300 debt must be rejected");
+        assertEquals(100, service.currentState().players().stream()
+                        .filter(p -> PLAYER_1.equals(p.playerId())).findFirst().orElseThrow().cash(),
+                "the debtor's cash must not go negative");
+    }
+
+    @Test
+    void payDebtAcceptedWhenLiveCashRoseAboveDebtAfterDebtOpened() {
+        DebtStateModel debt = new DebtStateModel(
+                "debt-1", PLAYER_1, DebtCreditorType.BANK, null,
+                300, "Tax", false, 100 /* stale: recorded before cash arrived via trade */, 0,
+                List.of(DebtAction.PAY_DEBT_NOW, DebtAction.DECLARE_BANKRUPTCY));
+        SessionState initialState = buildState(
+                List.of(player(PLAYER_1, 0, 500), player("player-2", 1, 1500)),
+                List.of()
+        ).toBuilder()
+                .turn(new TurnState(PLAYER_1, TurnPhase.RESOLVING_DEBT, false, false, 0))
+                .activeDebt(debt)
+                .build();
+        SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initialState);
+
+        CommandResult result = service.handle(new PayDebtCommand(SESSION_ID, PLAYER_1, "debt-1"));
+
+        assertTrue(result.accepted(), "€500 live cash covers a €300 debt even if the cached value is stale");
+        assertEquals(200, service.currentState().players().stream()
+                        .filter(p -> PLAYER_1.equals(p.playerId())).findFirst().orElseThrow().cash());
+    }
+
     private static SessionApplicationService factoryWithThreePlayers() {
         return factoryWithThreePlayers(null);
     }

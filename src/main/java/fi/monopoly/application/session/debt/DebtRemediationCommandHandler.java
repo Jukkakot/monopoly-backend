@@ -39,7 +39,13 @@ public final class DebtRemediationCommandHandler {
                 if (!validBase(cmd.sessionId(), cmd.actorPlayerId(), cmd.debtId(), debt)) {
                     yield rejected("INVALID_DEBT_ACTION", "Debt action does not match the active debt");
                 }
-                if (debt.currentCash() < debt.amountRemaining()) {
+                // Check the debtor's LIVE cash, not the debt model's cached currentCash —
+                // a trade accepted while the debt is open changes the debtor's balance
+                // without refreshing the debt state. Paying against a stale high value
+                // would drive the balance negative.
+                PlayerSnapshot debtor = findPlayer(state, debt.debtorPlayerId());
+                int liveCash = debtor != null ? debtor.cash() : 0;
+                if (liveCash < debt.amountRemaining()) {
                     yield rejected("DEBT_NOT_PAYABLE", "Current cash does not cover the debt");
                 }
                 activeDebtUpdater.accept(null);
