@@ -213,6 +213,13 @@ public final class SessionApplicationService implements SessionCommandPort, Sess
     }
 
     private CommandResult dispatchInner(SessionCommand command) {
+        // Once the game is over no gameplay command may mutate state — bankruptcy and
+        // leave paths can leave the winner's turn in WAITING_FOR_ROLL with canRoll=true,
+        // which would otherwise let play continue past the end.
+        if (!(command instanceof RefreshSessionViewCommand)
+                && currentState().status() == SessionStatus.GAME_OVER) {
+            return rejected("GAME_OVER", "Game is already over");
+        }
         if (propertyPurchaseCommandHandler != null
                 && (command instanceof BuyPropertyCommand || command instanceof DeclinePropertyCommand)) {
             return propertyPurchaseCommandHandler.handle(command);

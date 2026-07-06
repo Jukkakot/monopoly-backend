@@ -267,6 +267,31 @@ class PureDomainSessionFactoryTest {
                         .filter(p -> PLAYER_1.equals(p.playerId())).findFirst().orElseThrow().cash());
     }
 
+    @Test
+    void winnerCannotKeepPlayingAfterGameEndsByBankruptcy() {
+        // The bankruptcy path leaves the winner's turn in WAITING_FOR_ROLL with
+        // canRoll=true — gameplay commands must still be rejected once status is GAME_OVER.
+        DebtStateModel debt = new DebtStateModel(
+                "debt-1", "player-2", DebtCreditorType.PLAYER, PLAYER_1,
+                500, "rent", true, 0, 0,
+                List.of(DebtAction.PAY_DEBT_NOW, DebtAction.DECLARE_BANKRUPTCY));
+        SessionState initialState = buildState(
+                List.of(player(PLAYER_1, 0, 1500), player("player-2", 1, 0)),
+                List.of()
+        ).toBuilder()
+                .turn(new TurnState("player-2", TurnPhase.RESOLVING_DEBT, false, false, 0))
+                .activeDebt(debt)
+                .build();
+        SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initialState);
+
+        assertTrue(service.handle(new DeclareBankruptcyCommand(SESSION_ID, "player-2", "debt-1")).accepted());
+        assertEquals(SessionStatus.GAME_OVER, service.currentState().status());
+
+        CommandResult roll = service.handle(new RollDiceCommand(SESSION_ID, PLAYER_1));
+        assertFalse(roll.accepted(), "the winner must not be able to roll after the game is over");
+        assertEquals("GAME_OVER", roll.rejections().get(0).code());
+    }
+
     private static SessionApplicationService factoryWithThreePlayers() {
         return factoryWithThreePlayers(null);
     }
