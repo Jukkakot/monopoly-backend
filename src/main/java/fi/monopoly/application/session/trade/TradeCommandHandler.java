@@ -93,6 +93,9 @@ public final class TradeCommandHandler {
     }
 
     private CommandResult handleEdit(EditTradeOfferCommand command) {
+        if (command.patch() == null) {
+            return reject("INVALID_TRADE_EDIT", "Trade edit command must include a patch");
+        }
         TradeState state = validateEditableTrade(command.sessionId(), command.tradeId(), command.actorPlayerId());
         if (state == null) {
             return reject("INVALID_TRADE_EDIT", "Trade edit command is not valid in the current state");

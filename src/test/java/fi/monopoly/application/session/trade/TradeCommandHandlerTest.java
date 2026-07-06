@@ -111,6 +111,25 @@ class TradeCommandHandlerTest {
     }
 
     // -------------------------------------------------------------------------
+    // Edit validation
+    // -------------------------------------------------------------------------
+
+    @Test
+    void editWithoutPatchIsRejectedInsteadOfCrashing() {
+        // A request body missing the "patch" object deserializes to patch == null —
+        // the handler must reject it cleanly, not throw an NPE (HTTP 500).
+        TradeState editing = new TradeState(TRADE_ID, P1, P2, TradeStatus.EDITING,
+                new TradeOfferState(P1, P2, TradeSelectionState.NONE, TradeSelectionState.NONE),
+                P1, true, null, P1, List.of());
+        setTrade(editing);
+
+        CommandResult result = handler.handle(new EditTradeOfferCommand(SESSION_ID, P1, TRADE_ID, null));
+
+        assertFalse(result.accepted(), "a patchless edit must be rejected");
+        assertEquals("INVALID_TRADE_EDIT", result.rejections().get(0).code());
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
