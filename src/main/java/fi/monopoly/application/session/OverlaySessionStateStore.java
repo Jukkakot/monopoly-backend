@@ -7,6 +7,7 @@ import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
@@ -29,8 +30,20 @@ public final class OverlaySessionStateStore implements SessionStateStore {
     private volatile SessionStatus statusOverride;
     private volatile List<String> bankruptcyAuctionQueue = List.of();
 
+    // Overlay flow fields (decision/auction/debt/trade/…) are NOT part of the base store, so
+    // changing them does not bump the base version. The SSE fanout drops any snapshot whose
+    // version is not strictly newer than the last sent, which would silently swallow the final
+    // consistent snapshot of a command whose only change was an overlay field (e.g. opening an
+    // auction on a declined property). This epoch is added to the base version so every overlay
+    // mutation advances the reported version and the snapshot is delivered.
+    private final AtomicLong overlayEpoch = new AtomicLong(0);
+
     public OverlaySessionStateStore(Supplier<SessionState> baseSupplier) {
         this.baseSupplier = baseSupplier;
+    }
+
+    private void touch() {
+        overlayEpoch.incrementAndGet();
     }
 
     @Override
@@ -49,6 +62,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
         SessionStatus status = statusOverride != null ? statusOverride : base.status();
         List<String> baq = !bankruptcyAuctionQueue.isEmpty() ? bankruptcyAuctionQueue : base.bankruptcyAuctionQueue();
         return base.toBuilder()
+                .version(base.version() + overlayEpoch.get())
                 .status(status)
                 .turn(turn)
                 .pendingDecision(pd)
@@ -69,30 +83,37 @@ public final class OverlaySessionStateStore implements SessionStateStore {
         tradeState = updated.tradeState();
         turnContinuation = updated.turnContinuationState();
         bankruptcyAuctionQueue = updated.bankruptcyAuctionQueue();
+        touch();
     }
 
     public void setPendingDecision(PendingDecision pd) {
         this.pendingDecision = pd;
+        touch();
     }
 
     public void setAuctionState(AuctionState as) {
         this.auctionState = as;
+        touch();
     }
 
     public void setActiveDebt(DebtStateModel ad) {
         this.activeDebt = ad;
+        touch();
     }
 
     public void setTradeState(TradeState ts) {
         this.tradeState = ts;
+        touch();
     }
 
     public void setTurnContinuation(TurnContinuationState tcs) {
         this.turnContinuation = tcs;
+        touch();
     }
 
     public void setStatusOverride(SessionStatus status) {
         this.statusOverride = status;
+        touch();
     }
 
     public boolean hasAuctionState() {
@@ -115,6 +136,7 @@ public final class OverlaySessionStateStore implements SessionStateStore {
             tradeState = null;
             turnContinuation = null;
             bankruptcyAuctionQueue = List.of();
+            touch();
             return;
         }
         pendingDecision = state.pendingDecision();
@@ -123,10 +145,12 @@ public final class OverlaySessionStateStore implements SessionStateStore {
         tradeState = state.tradeState();
         turnContinuation = state.turnContinuationState();
         bankruptcyAuctionQueue = state.bankruptcyAuctionQueue();
+        touch();
     }
 
     public void setBankruptcyAuctionQueue(List<String> queue) {
         this.bankruptcyAuctionQueue = queue != null ? List.copyOf(queue) : List.of();
+        touch();
     }
 
     public List<String> getBankruptcyAuctionQueue() {
