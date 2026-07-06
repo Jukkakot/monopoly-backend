@@ -970,6 +970,7 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 final int perPlayerPartial = others.isEmpty() ? 0 : available / others.size();
                 final int totalPartial = perPlayerPartial * others.size();
                 if (totalPartial > 0) {
+                    final List<String> recipientIds = others.stream().map(PlayerSnapshot::playerId).toList();
                     store.update(s -> {
                         final int perP = perPlayerPartial;
                         List<PlayerSnapshot> updated = s.players().stream()
@@ -987,7 +988,10 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                                     return p;
                                 })
                                 .toList();
-                        return s.toBuilder().players(updated).build();
+                        GameEventEntry[] flows = recipientIds.stream()
+                                .map(rid -> evMoney(playerId, rid, perP, "kortti"))
+                                .toArray(GameEventEntry[]::new);
+                        return appendEvents(s.toBuilder().players(updated).build(), flows);
                     });
                 }
                 SessionState afterPartial = store.get();

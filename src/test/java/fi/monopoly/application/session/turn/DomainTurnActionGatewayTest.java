@@ -1051,6 +1051,43 @@ class DomainTurnActionGatewayTest {
     }
 
     @Test
+    void partialPayEachPlayerCardLogsMoneyFlowEvents() {
+        // ALL_PLAYERS_MONEY with -50 and only €70 cash: the partial distribution
+        // (35 to each of the two others) must appear in the event log as MONEY_FLOW
+        // entries — the client's money animations and log are driven by them.
+        PlayerSnapshot p1 = new PlayerSnapshot(PLAYER_1, "seat-0", PLAYER_1, 70, 4, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p2 = new PlayerSnapshot(PLAYER_2, "seat-1", PLAYER_2, 1000, 0, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p3 = new PlayerSnapshot(PLAYER_3, "seat-2", PLAYER_3,  800, 0, false, false, false, 0, 0, List.of());
+
+        InMemorySessionState store = storeWithChanceDeckThreePlayers(p1, p2, p3, List.of("ALL_PLAYERS_MONEY:0"));
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1); // 4 + 3 → CHANCE1
+
+        gateway.rollDice();
+        store.update(s -> {
+            PendingCardEffect pe = s.pendingCardEffect();
+            if (pe == null) return s;
+            return s.toBuilder()
+                    .pendingCardEffect(new PendingCardEffect(pe.playerId(), pe.cardType(),
+                            List.of("-50"), pe.isDoubles(), pe.consecutiveDoubles(), pe.diceTotal()))
+                    .build();
+        });
+        gateway.acknowledgeCard();
+
+        assertEquals(0, playerById(store.get(), PLAYER_1).cash(), "payer distributes all divisible cash");
+        assertEquals(1035, playerById(store.get(), PLAYER_2).cash());
+        assertEquals(835, playerById(store.get(), PLAYER_3).cash());
+        assertNotNull(store.get().activeDebt(), "the unpaid remainder must open a debt");
+        assertEquals(30, store.get().activeDebt().amountRemaining());
+
+        List<GameEventEntry> partialFlows = store.get().eventLog().stream()
+                .filter(e -> "MONEY_FLOW".equals(e.type()))
+                .filter(e -> PLAYER_1.equals(e.data().get("from")) && "35".equals(e.data().get("amount")))
+                .toList();
+        assertEquals(2, partialFlows.size(),
+                "each partial payment must be logged as a MONEY_FLOW event");
+    }
+
+    @Test
     void communityCardCollectFromEachPlayerDistributesCorrectly() {
         // Birthday card: active player collects 10 from each other player.
         // 3 players: p1(active,1500), p2(1000), p3(800)
