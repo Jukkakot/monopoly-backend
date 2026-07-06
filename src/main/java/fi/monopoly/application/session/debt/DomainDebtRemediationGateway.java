@@ -365,22 +365,8 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
 
     private static String nextActivePlayerId(List<PlayerSnapshot> players, List<SeatState> seats,
                                               String currentPlayerId) {
-        java.util.Map<String, Integer> seatIndex = seats.stream()
-                .collect(java.util.stream.Collectors.toMap(SeatState::playerId, SeatState::seatIndex));
-        List<PlayerSnapshot> active = players.stream()
-                .filter(p -> !p.eliminated() && !p.bankrupt())
-                .sorted(java.util.Comparator.comparingInt(p -> seatIndex.getOrDefault(p.playerId(), Integer.MAX_VALUE)))
-                .toList();
-        if (active.isEmpty()) return null;
-        int idx = -1;
-        for (int i = 0; i < active.size(); i++) {
-            if (active.get(i).playerId().equals(currentPlayerId)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx < 0) return active.get(0).playerId();
-        return active.get((idx + 1) % active.size()).playerId();
+        return fi.monopoly.application.session.turn.DomainTurnContinuationGateway
+                .nextActivePlayerId(players, seats, currentPlayerId);
     }
 
     // -------------------------------------------------------------------------

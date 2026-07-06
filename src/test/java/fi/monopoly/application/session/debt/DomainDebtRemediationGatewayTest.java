@@ -428,6 +428,31 @@ class DomainDebtRemediationGatewayTest {
     }
 
     @Test
+    void bankruptcyOfMiddleSeatPlayerPassesTurnToNextSeat() {
+        // 3 players in seats 0,1,2 — the seat-1 player goes bankrupt on their own turn.
+        // The turn must continue clockwise to seat 2, not jump back to seat 0.
+        String player3 = "player-3";
+        DebtStateModel debt = debt(PLAYER_2, null, 500);
+
+        List<SeatState> seats = List.of(seat(PLAYER_1, 0), seat(PLAYER_2, 1), seat(player3, 2));
+        PlayerSnapshot p1 = player(PLAYER_1, 500);
+        PlayerSnapshot p2 = new PlayerSnapshot(PLAYER_2, "seat-1", PLAYER_2, 100, 0, false, false, false, 0, 0, List.of());
+        PlayerSnapshot p3 = new PlayerSnapshot(player3, "seat-2", player3, 500, 0, false, false, false, 0, 0, List.of());
+        SessionState state = new SessionState(SESSION_ID, 0L, SessionStatus.IN_PROGRESS,
+                seats, List.of(p1, p2, p3), List.of(),
+                new TurnState(PLAYER_2, TurnPhase.RESOLVING_DEBT, false, false, 0),
+                null, null, debt, null, null);
+        InMemorySessionState store = new InMemorySessionState(state);
+
+        new DomainDebtRemediationGateway(store).declareBankruptcy();
+
+        TurnState turn = store.get().turn();
+        assertEquals(player3, turn.activePlayerId(),
+                "the turn must pass to the seat after the bankrupt player, not restart from seat 0");
+        assertEquals(TurnPhase.WAITING_FOR_ROLL, turn.phase());
+    }
+
+    @Test
     void declareBankruptcyNoWinnerWithMultiplePlayersRemaining() {
         // 3 players: p1 goes bankrupt, p2+p3 remain
         DebtStateModel debt = debt(PLAYER_1, null, 500);

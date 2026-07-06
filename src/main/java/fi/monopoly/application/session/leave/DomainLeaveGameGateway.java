@@ -8,10 +8,8 @@ import fi.monopoly.domain.turn.TurnState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static fi.monopoly.domain.session.GameEventHelper.*;
 
@@ -119,18 +117,7 @@ public final class DomainLeaveGameGateway implements LeaveGameGateway {
 
     private static String nextActivePlayerId(List<PlayerSnapshot> players, List<SeatState> seats,
                                               String currentPlayerId) {
-        Map<String, Integer> seatIndex = seats.stream()
-                .collect(Collectors.toMap(SeatState::playerId, SeatState::seatIndex));
-        List<PlayerSnapshot> active = players.stream()
-                .filter(p -> !p.eliminated() && !p.bankrupt())
-                .sorted(Comparator.comparingInt(p -> seatIndex.getOrDefault(p.playerId(), Integer.MAX_VALUE)))
-                .toList();
-        if (active.isEmpty()) return null;
-        int idx = -1;
-        for (int i = 0; i < active.size(); i++) {
-            if (active.get(i).playerId().equals(currentPlayerId)) { idx = i; break; }
-        }
-        if (idx < 0) return active.get(0).playerId();
-        return active.get((idx + 1) % active.size()).playerId();
+        return fi.monopoly.application.session.turn.DomainTurnContinuationGateway
+                .nextActivePlayerId(players, seats, currentPlayerId);
     }
 }

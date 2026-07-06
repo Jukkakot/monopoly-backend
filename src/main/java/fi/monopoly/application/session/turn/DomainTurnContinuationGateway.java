@@ -58,21 +58,35 @@ public final class DomainTurnContinuationGateway implements TurnContinuationGate
     }
 
     static String nextActivePlayerId(SessionState state, String currentPlayerId) {
-        Map<String, Integer> seatIndex = state.seats().stream()
+        return nextActivePlayerId(state.players(), state.seats(), currentPlayerId);
+    }
+
+    /**
+     * Selects the next non-eliminated, non-bankrupt player in seat order after
+     * {@code currentPlayerId}. When the current player is no longer in the active list
+     * (they just went bankrupt or left the game), the turn continues clockwise from
+     * their seat — it must not jump back to the lowest seat index.
+     */
+    public static String nextActivePlayerId(List<PlayerSnapshot> players, List<SeatState> seats,
+                                            String currentPlayerId) {
+        Map<String, Integer> seatIndex = seats.stream()
                 .collect(Collectors.toMap(SeatState::playerId, SeatState::seatIndex));
-        List<PlayerSnapshot> active = state.players().stream()
+        List<PlayerSnapshot> active = players.stream()
                 .filter(p -> !p.eliminated() && !p.bankrupt())
                 .sorted(Comparator.comparingInt(p -> seatIndex.getOrDefault(p.playerId(), Integer.MAX_VALUE)))
                 .toList();
         if (active.isEmpty()) return null;
-        int idx = -1;
         for (int i = 0; i < active.size(); i++) {
             if (active.get(i).playerId().equals(currentPlayerId)) {
-                idx = i;
-                break;
+                return active.get((i + 1) % active.size()).playerId();
             }
         }
-        if (idx < 0) return active.get(0).playerId();
-        return active.get((idx + 1) % active.size()).playerId();
+        int fromSeat = seatIndex.getOrDefault(currentPlayerId, -1);
+        for (PlayerSnapshot p : active) {
+            if (seatIndex.getOrDefault(p.playerId(), Integer.MAX_VALUE) > fromSeat) {
+                return p.playerId();
+            }
+        }
+        return active.get(0).playerId();
     }
 }

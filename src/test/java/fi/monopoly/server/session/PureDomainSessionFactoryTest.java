@@ -199,6 +199,24 @@ class PureDomainSessionFactoryTest {
         assertEquals("player-2", after.winningPlayerId());
     }
 
+    @Test
+    void middleSeatPlayerLeavingOnTheirTurnPassesTurnToNextSeat() {
+        // Seats 0,1,2 — the seat-1 player leaves during their own turn.
+        // The turn must continue clockwise to seat 2, not jump back to seat 0.
+        SessionState initialState = buildState(
+                List.of(player(PLAYER_1, 0, 1500), player("player-2", 1, 1500), player("player-3", 2, 1500)),
+                List.of()
+        ).toBuilder()
+                .turn(new TurnState("player-2", TurnPhase.WAITING_FOR_ROLL, true, false))
+                .build();
+        SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initialState);
+
+        assertTrue(service.handle(new LeaveGameCommand(SESSION_ID, "player-2")).accepted());
+
+        assertEquals("player-3", service.currentState().turn().activePlayerId(),
+                "the turn must pass to the seat after the leaver, not restart from seat 0");
+    }
+
     private static SessionApplicationService factoryWithThreePlayers() {
         return factoryWithThreePlayers(null);
     }
