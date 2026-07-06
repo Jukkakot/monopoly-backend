@@ -328,10 +328,15 @@ public final class AuctionCommandHandler {
             bankruptcyQueueSetter.accept(remaining);
             String triggeringPlayerId = currentStateSupplier.get().turn().activePlayerId();
             startAuction(triggeringPlayerId, nextPropertyId, resolveDisplayName(nextPropertyId), null);
-        } else if (postAuctionPauseAction != null && ctx.continuationState() != null) {
-            postAuctionPauseAction.accept(ctx.continuationState());
+            return;
+        }
+        // ctx can be null when the auction state was injected without startAuction
+        // (e.g. a debug state import) — resolve with no continuation instead of NPE.
+        TurnContinuationState continuation = ctx != null ? ctx.continuationState() : null;
+        if (postAuctionPauseAction != null && continuation != null) {
+            postAuctionPauseAction.accept(continuation);
         } else {
-            turnContinuationResolver.accept(ctx.continuationState());
+            turnContinuationResolver.accept(continuation);
         }
     }
 

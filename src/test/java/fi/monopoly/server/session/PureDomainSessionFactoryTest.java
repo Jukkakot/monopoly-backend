@@ -292,6 +292,32 @@ class PureDomainSessionFactoryTest {
         assertEquals("GAME_OVER", roll.rejections().get(0).code());
     }
 
+    @Test
+    void finishingAnInjectedWonAuctionDoesNotCrash() {
+        // An auction state injected without going through startAuction (debug import,
+        // scenario load) leaves the handler's in-memory context null — finishing the
+        // resolution must still transfer the property instead of throwing.
+        AuctionState wonAuction = new AuctionState(
+                "auction:B1", "B1", PLAYER_1, null, "player-2", 50, 60,
+                java.util.Set.of(PLAYER_1, "player-3"), List.of(PLAYER_1, "player-2", "player-3"),
+                AuctionStatus.WON_PENDING_RESOLUTION, 50, "player-2");
+        SessionState initialState = buildState(
+                List.of(player(PLAYER_1, 0, 1500), player("player-2", 1, 1500), player("player-3", 2, 1500)),
+                List.of(new PropertyStateSnapshot("B1", null, false, 0, 0))
+        ).toBuilder().auctionState(wonAuction).build();
+        SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initialState);
+
+        CommandResult result = service.handle(new FinishAuctionResolutionCommand(SESSION_ID, "auction:B1"));
+
+        assertTrue(result.accepted(), "finishing a decided auction must succeed without a live context");
+        SessionState after = service.currentState();
+        assertNull(after.auctionState(), "the auction must be cleared");
+        assertEquals("player-2", after.properties().stream()
+                .filter(p -> p.propertyId().equals("B1")).findFirst().orElseThrow().ownerPlayerId());
+        assertEquals(1450, after.players().stream()
+                .filter(p -> p.playerId().equals("player-2")).findFirst().orElseThrow().cash());
+    }
+
     private static SessionApplicationService factoryWithThreePlayers() {
         return factoryWithThreePlayers(null);
     }

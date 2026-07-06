@@ -66,6 +66,18 @@ public final class PureDomainSessionFactory {
     public static SessionApplicationService create(String sessionId, InMemorySessionState store, RandomSource randomSource) {
         OverlaySessionStateStore overlay = new OverlaySessionStateStore(store::get);
 
+        // Auctions and trades live exclusively in the overlay layer at runtime — the
+        // gateways never write them to the base store. If an initial state carries one
+        // (scenario/test injection), lift it into the overlay and strip it from the base;
+        // otherwise clearing it via the overlay (set to null) would fall back to the
+        // base copy and resurrect the auction/trade forever.
+        SessionState injected = store.get();
+        if (injected.auctionState() != null || injected.tradeState() != null) {
+            overlay.setAuctionState(injected.auctionState());
+            overlay.setTradeState(injected.tradeState());
+            store.update(s -> s.toBuilder().auctionState(null).tradeState(null).build());
+        }
+
         SessionApplicationService service = new SessionApplicationService(sessionId, overlay);
         service.configureAuctionFlow(new DomainAuctionGateway(store));
         service.configurePropertyPurchaseFlow(new DomainPropertyPurchaseGateway(store));
