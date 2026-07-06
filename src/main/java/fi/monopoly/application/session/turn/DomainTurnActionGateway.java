@@ -1130,11 +1130,17 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
                 completionAction,
                 spot.name(), null
         );
+        // Set the pending decision in the overlay FIRST, then bump the base store so the
+        // published snapshot is consistent (phase WAITING_FOR_DECISION *with* the decision).
+        // Doing the base update first would publish an intermediate snapshot whose phase is
+        // set but whose pendingDecision is still null; the later overlay-only change does not
+        // bump the version, so the SSE sendIfNewer guard drops the consistent follow-up and
+        // the client stays stuck on the decision-less snapshot until a manual refresh.
+        propertyPurchaseFlow.begin(playerId, spot.name(), displayName, price,
+                displayName + " €" + price, continuation);
         store.update(s -> s.toBuilder()
                 .turn(new TurnState(s.turn().activePlayerId(), TurnPhase.WAITING_FOR_DECISION, false, false, consecutiveDoubles, s.turn().lastDice()))
                 .build());
-        propertyPurchaseFlow.begin(playerId, spot.name(), displayName, price,
-                displayName + " €" + price, continuation);
     }
 
     private void applyRentOrDebt(SessionState state, String debtorId, String creditorId, int amount,

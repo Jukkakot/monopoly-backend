@@ -2,6 +2,10 @@ package fi.monopoly.application.session.turn;
 
 import fi.monopoly.application.session.InMemorySessionState;
 import fi.monopoly.application.session.purchase.PropertyPurchaseFlow;
+import fi.monopoly.domain.decision.DecisionAction;
+import fi.monopoly.domain.decision.DecisionType;
+import fi.monopoly.domain.decision.PendingDecision;
+import fi.monopoly.domain.decision.PropertyPurchaseDecisionPayload;
 import fi.monopoly.domain.session.*;
 import fi.monopoly.domain.turn.TurnPhase;
 import fi.monopoly.domain.turn.TurnState;
@@ -614,6 +618,40 @@ class DomainTurnActionGatewayTest {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    @Test
+    void landingOnUnownedPropertyNeverPublishesDecisionPhaseWithoutTheDecision() {
+        // Regression: openPropertyDecision must set the pending decision BEFORE the base-store
+        // update that flips the phase to WAITING_FOR_DECISION. If the phase update happens first,
+        // an intermediate snapshot is published with the phase set but pendingDecision still null.
+        // The later decision-setting change does not bump the version, so the SSE sendIfNewer
+        // guard drops the consistent follow-up — leaving the client stuck showing no buy buttons
+        // until a manual refresh.
+        InMemorySessionState store = storeWith(player(PLAYER_1, 0, 1500));   // at GO
+        // Flow mimics the real overlay begin(): it records a pending decision on the store.
+        PropertyPurchaseFlow flow = (playerId, propertyId, displayName, price, message, continuation) ->
+                store.update(s -> s.toBuilder().pendingDecision(new PendingDecision(
+                        "pd:" + propertyId, DecisionType.PROPERTY_PURCHASE, playerId,
+                        List.of(DecisionAction.BUY_PROPERTY, DecisionAction.DECLINE_PROPERTY),
+                        message, new PropertyPurchaseDecisionPayload(propertyId, displayName, price))).build());
+        DomainTurnActionGateway gateway = gatewayWithDice(store, flow, 2, 1);  // 2+1=3 → B2 (unowned)
+
+        List<SessionState> published = new ArrayList<>();
+        store.setOnChange(() -> published.add(store.get()));
+
+        gateway.rollDice();
+
+        assertFalse(published.isEmpty(), "the roll should publish at least one snapshot");
+        for (SessionState s : published) {
+            if (s.turn() != null && s.turn().phase() == TurnPhase.WAITING_FOR_DECISION) {
+                assertNotNull(s.pendingDecision(),
+                        "every published WAITING_FOR_DECISION snapshot must carry the pending decision");
+            }
+        }
+        // Sanity: the settled state is a consistent purchase decision.
+        assertEquals(TurnPhase.WAITING_FOR_DECISION, store.get().turn().phase());
+        assertNotNull(store.get().pendingDecision());
+    }
 
     private static DomainTurnActionGateway gatewayWithDice(InMemorySessionState store, int die1, int die2) {
         return gatewayWithDice(store, noOpFlow(), die1, die2);
