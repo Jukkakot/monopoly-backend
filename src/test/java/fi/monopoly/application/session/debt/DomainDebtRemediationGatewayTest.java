@@ -476,6 +476,64 @@ class DomainDebtRemediationGatewayTest {
     }
 
     // -------------------------------------------------------------------------
+    // Bank house supply must not be exceeded when a hotel is downgraded for debt
+    // -------------------------------------------------------------------------
+
+    @Test
+    void sellingHotelForDebtDropsToZeroWhenBankCannotMakeChange() {
+        // Board already holds 30 houses elsewhere; downgrading this hotel to 4 houses
+        // would push the total to 34 > 32. The hotel must instead be sold straight to 0,
+        // and the debtor is credited for all 5 building units.
+        // 30 houses parked elsewhere: LB(4,4,4)=12 + P(4,4,4)=12 + O1(4)+O2(2)=6 → 30.
+        List<PropertyStateSnapshot> props = List.of(
+                new PropertyStateSnapshot("B1", PLAYER_1, false, 0, 1), // debtor's hotel
+                new PropertyStateSnapshot("LB1", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("LB2", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("LB3", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("P1", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("P2", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("P3", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("O1", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("O2", PLAYER_2, false, 2, 0));
+        int housesElsewhere = props.stream().filter(p -> !p.propertyId().equals("B1"))
+                .mapToInt(PropertyStateSnapshot::houseCount).sum();
+        assertEquals(30, housesElsewhere, "test fixture must park exactly 30 houses elsewhere");
+
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 0), player(PLAYER_2, 500),
+                debt(PLAYER_1, null, 100), props);
+
+        boolean sold = new DomainDebtRemediationGateway(store).sellBuildings("B1", 1);
+
+        assertTrue(sold);
+        PropertyStateSnapshot b1 = propertyById(store.get(), "B1");
+        assertEquals(0, b1.houseCount(), "hotel must be sold to 0, not 4 houses");
+        assertEquals(0, b1.hotelCount());
+        int totalHouses = store.get().properties().stream()
+                .mapToInt(PropertyStateSnapshot::houseCount).sum();
+        assertTrue(totalHouses <= 32, "bank house supply must never be exceeded, got " + totalHouses);
+        // Credited for all 5 units (hotel fully liquidated): 5 * (housePrice/2)
+        assertEquals(5 * (B1_HOUSE_PRICE / 2), playerById(store.get(), PLAYER_1).cash());
+    }
+
+    @Test
+    void sellingHotelForDebtBecomesFourHousesWhenBankHasRoom() {
+        // Only 10 houses elsewhere: downgrading the hotel to 4 houses fits (14 ≤ 32).
+        List<PropertyStateSnapshot> props = List.of(
+                new PropertyStateSnapshot("B1", PLAYER_1, false, 0, 1),
+                new PropertyStateSnapshot("LB1", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("LB2", PLAYER_2, false, 4, 0),
+                new PropertyStateSnapshot("LB3", PLAYER_2, false, 2, 0));
+        InMemorySessionState store = storeWithDebt(player(PLAYER_1, 0), player(PLAYER_2, 500),
+                debt(PLAYER_1, null, 100), props);
+
+        new DomainDebtRemediationGateway(store).sellBuildings("B1", 1);
+
+        assertEquals(4, propertyById(store.get(), "B1").houseCount(), "hotel downgrades to 4 houses normally");
+        assertEquals(0, propertyById(store.get(), "B1").hotelCount());
+        assertEquals(B1_HOUSE_PRICE / 2, playerById(store.get(), PLAYER_1).cash(), "credited for 1 unit only");
+    }
+
+    // -------------------------------------------------------------------------
     // estimatedLiquidationValue
     // -------------------------------------------------------------------------
 

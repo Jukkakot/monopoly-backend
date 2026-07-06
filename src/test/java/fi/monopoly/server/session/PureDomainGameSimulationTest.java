@@ -49,7 +49,7 @@ class PureDomainGameSimulationTest {
                 SESSION_ID, List.of("Eka", "Toka"), List.of("#E63946", "#2A9D8F"), new Random(42));
         SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initial);
 
-        SimulationResult result = runSimulation(service);
+        SimulationResult result = runSimulation(service, 42L);
 
         assertFalse(result.stalled(),
                 "Pure domain simulation stalled after " + result.steps() + " steps without progress");
@@ -66,7 +66,7 @@ class PureDomainGameSimulationTest {
                 SESSION_ID, List.of("A", "B"), List.of("#F00", "#0F0"), new Random(seed));
         SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initial);
 
-        SimulationResult result = runSimulation(service);
+        SimulationResult result = runSimulation(service, seed);
 
         assertFalse(result.stalled(),
                 "Simulation stalled (seed=" + seed + ") after " + result.steps() + " steps");
@@ -80,7 +80,7 @@ class PureDomainGameSimulationTest {
                 List.of("#F00", "#0F0", "#00F", "#FF0"), new Random(7));
         SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initial);
 
-        SimulationResult result = runSimulation(service);
+        SimulationResult result = runSimulation(service, 7L);
 
         assertFalse(result.stalled(),
                 "4-player simulation stalled after " + result.steps() + " steps");
@@ -89,10 +89,45 @@ class PureDomainGameSimulationTest {
     }
 
     // -------------------------------------------------------------------------
+    // Invariant fuzzing — many seeded games, state validity checked after every command
+    // -------------------------------------------------------------------------
+
+    /**
+     * Drives many full games at every supported player count and asserts the game-state
+     * invariants after every single command. This is the highest-signal automated bug
+     * finder in the repo: it catches state-corruption bugs (desynced ownership tables,
+     * negative cash, turn-skipping, resurrected auctions, exceeded building supply) that
+     * no amount of code-reading finds. When a new class of corruption is discovered, add
+     * the check to {@link #assertInvariants} rather than writing a one-off test.
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3, 4, 6})
+    @Timeout(value = 120, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void stateInvariantsHoldAcrossManySeededGames(int playerCount) {
+        String[] palette = {"#E63946", "#2A9D8F", "#457B9D", "#F4A261", "#8E24AA", "#43A047"};
+        List<String> names = new java.util.ArrayList<>();
+        List<String> colors = new java.util.ArrayList<>();
+        for (int i = 0; i < playerCount; i++) {
+            names.add("P" + i);
+            colors.add(palette[i]);
+        }
+        // Seed count is tunable for a deep overnight hunt: mvn test -Dtest=PureDomainGameSimulationTest -Dsim.seeds=2000
+        int seedCount = Integer.getInteger("sim.seeds", 30);
+        for (long seed = 0; seed < seedCount; seed++) {
+            SessionState initial = PureDomainSessionFactory.initialGameState(
+                    SESSION_ID, names, colors, new Random(seed));
+            SessionApplicationService service = PureDomainSessionFactory.create(SESSION_ID, initial);
+            // runSimulation asserts invariants after every command; a violation fails here
+            // with a message pinpointing the seed and step.
+            runSimulation(service, seed);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Simulation engine
     // -------------------------------------------------------------------------
 
-    private SimulationResult runSimulation(SessionApplicationService service) {
+    private SimulationResult runSimulation(SessionApplicationService service, long seed) {
         int steps = 0;
         int turnSwitches = 0;
         int rejectedConsecutive = 0;
@@ -101,6 +136,7 @@ class PureDomainGameSimulationTest {
 
         while (steps < MAX_STEPS) {
             SessionState state = service.currentState();
+            assertInvariants(state, seed, steps);
 
             if (state.status() == SessionStatus.GAME_OVER) {
                 gameOver = true;
@@ -283,6 +319,68 @@ class PureDomainGameSimulationTest {
             return service.handle(new PlaceAuctionBidCommand(SESSION_ID, bidderId, auction.auctionId(), minBid));
         }
         return service.handle(new PassAuctionCommand(SESSION_ID, bidderId, auction.auctionId()));
+    }
+
+    /**
+     * Asserts every game-state invariant that must hold in any settled state. Called after
+     * every command across every seeded game. Each check is written to be unambiguously
+     * correct so a failure means a real domain bug, never a false positive.
+     */
+    private void assertInvariants(SessionState state, long seed, int step) {
+        String ctx = " (seed=" + seed + " step=" + step + ")";
+
+        // Building supply: the bank holds 32 houses and 12 hotels.
+        int houses = state.properties().stream().mapToInt(PropertyStateSnapshot::houseCount).sum();
+        int hotels = state.properties().stream().mapToInt(PropertyStateSnapshot::hotelCount).sum();
+        assertTrue(houses <= 32, "House supply exceeded: " + houses + ctx);
+        assertTrue(hotels <= 12, "Hotel supply exceeded: " + hotels + ctx);
+
+        for (PlayerSnapshot p : state.players()) {
+            assertTrue(p.cash() >= 0, "Player " + p.playerId() + " has negative cash " + p.cash() + ctx);
+            assertTrue(p.getOutOfJailCards() >= 0, "Player " + p.playerId() + " has negative jail cards" + ctx);
+            assertTrue(p.jailRoundsRemaining() >= 0, "Player " + p.playerId() + " has negative jail rounds" + ctx);
+
+            if (p.eliminated()) {
+                assertTrue(p.ownedPropertyIds().isEmpty(),
+                        "Eliminated player " + p.playerId() + " still lists owned properties" + ctx);
+            }
+            // Forward direction: every id a player claims to own must be a property owned by them.
+            for (String pid : p.ownedPropertyIds()) {
+                PropertyStateSnapshot prop = state.properties().stream()
+                        .filter(pr -> pr.propertyId().equals(pid)).findFirst().orElse(null);
+                assertNotNull(prop, "Player " + p.playerId() + " owns unknown property " + pid + ctx);
+                assertEquals(p.playerId(), prop.ownerPlayerId(),
+                        "ownedPropertyIds/properties desync: " + pid + " listed by " + p.playerId()
+                                + " but properties owner=" + prop.ownerPlayerId() + ctx);
+            }
+        }
+
+        // Reverse direction: every owned property points back into exactly its owner's list,
+        // and that owner is not eliminated.
+        for (PropertyStateSnapshot prop : state.properties()) {
+            String owner = prop.ownerPlayerId();
+            if (owner == null) continue;
+            PlayerSnapshot op = findPlayer(state, owner);
+            assertNotNull(op, "Property " + prop.propertyId() + " owned by unknown player " + owner + ctx);
+            assertTrue(op.ownedPropertyIds().contains(prop.propertyId()),
+                    "Property " + prop.propertyId() + " owner=" + owner + " but missing from their list" + ctx);
+            assertFalse(op.eliminated(),
+                    "Property " + prop.propertyId() + " is owned by eliminated player " + owner + ctx);
+        }
+
+        // Game-lifecycle consistency: an in-progress multiplayer game always has at least two
+        // players still standing, and the active turn belongs to one of them.
+        if (state.status() == SessionStatus.IN_PROGRESS && state.players().size() >= 2) {
+            long active = state.players().stream().filter(p -> !p.eliminated() && !p.bankrupt()).count();
+            assertTrue(active >= 2,
+                    "Only " + active + " active player(s) but status is still IN_PROGRESS — game should have ended" + ctx);
+            String activeId = state.turn() != null ? state.turn().activePlayerId() : null;
+            if (activeId != null) {
+                PlayerSnapshot ap = findPlayer(state, activeId);
+                assertNotNull(ap, "Active turn player " + activeId + " is not in the player list" + ctx);
+                assertFalse(ap.eliminated(), "Active turn belongs to eliminated player " + activeId + ctx);
+            }
+        }
     }
 
     private static PlayerSnapshot findPlayer(SessionState state, String playerId) {

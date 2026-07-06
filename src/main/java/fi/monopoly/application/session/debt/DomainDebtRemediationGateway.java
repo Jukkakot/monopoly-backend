@@ -38,6 +38,8 @@ import java.util.Map;
 public final class DomainDebtRemediationGateway implements DebtRemediationGateway {
 
     private static final int UNMORTGAGE_SURCHARGE_PERCENT = 10;
+    /** The bank stocks 32 houses. Downgrading a hotel to houses draws from this supply. */
+    private static final int BANK_HOUSE_SUPPLY = 32;
 
     private final SessionStateStore store;
 
@@ -154,11 +156,24 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
         if (currentLevel < count) return false;
 
         int newLevel = currentLevel - count;
-        int proceeds = count * (housePrice / 2);
-        log.debug("sellBuildings player={} property={} count={} proceeds={}", debtorId, propertyId, count, proceeds);
+        // Downgrading a hotel (level 5) to houses draws from the bank's 32-house supply.
+        // If the bank cannot make change, the official rule sells the hotel straight to 0
+        // rather than leaving more than 32 houses on the board.
+        int housesElsewhere = state.properties().stream()
+                .filter(p -> !p.propertyId().equals(propertyId))
+                .mapToInt(PropertyStateSnapshot::houseCount)
+                .sum();
+        boolean materializesHouses = currentLevel == 5 && newLevel >= 1;
+        int finalLevel = (materializesHouses && housesElsewhere + newLevel > BANK_HOUSE_SUPPLY)
+                ? 0 : newLevel;
+        int unitsRemoved = currentLevel - finalLevel;
+        int proceeds = unitsRemoved * (housePrice / 2);
+        int finalLevelFinal = finalLevel;
+        log.debug("sellBuildings player={} property={} count={} finalLevel={} proceeds={}",
+                debtorId, propertyId, count, finalLevel, proceeds);
 
         store.update(s -> s.toBuilder()
-                .properties(replaceProperty(s.properties(), propertyId, withBuildingLevel(prop, newLevel)))
+                .properties(replaceProperty(s.properties(), propertyId, withBuildingLevel(prop, finalLevelFinal)))
                 .players(addCash(s.players(), debtorId, proceeds))
                 .build());
         return true;
@@ -182,17 +197,34 @@ public final class DomainDebtRemediationGateway implements DebtRemediationGatewa
         List<SpotType> colorSet = spotsOfType(spotType.streetType);
 
         store.update(s -> {
+            // Houses that stay put outside this color set reserve part of the 32-house supply.
+            int housesOutsideSet = s.properties().stream()
+                    .filter(p -> colorSet.stream().noneMatch(cs -> cs.name().equals(p.propertyId())))
+                    .mapToInt(PropertyStateSnapshot::houseCount)
+                    .sum();
+            int houseBudget = BANK_HOUSE_SUPPLY - housesOutsideSet;
+            int[] housesPlaced = {0};
             int[] totalSold = {0};
-            List<PropertyStateSnapshot> updatedProps = s.properties().stream()
-                    .map(p -> {
-                        boolean inSet = colorSet.stream().anyMatch(cs -> cs.name().equals(p.propertyId()));
-                        if (!inSet || !debtorId.equals(p.ownerPlayerId())) return p;
-                        int origLevel = buildingLevel(p);
-                        int newLevel = Math.max(0, origLevel - rounds);
-                        totalSold[0] += origLevel - newLevel;
-                        return withBuildingLevel(p, newLevel);
-                    })
-                    .toList();
+            List<PropertyStateSnapshot> updatedProps = new java.util.ArrayList<>();
+            for (PropertyStateSnapshot p : s.properties()) {
+                boolean inSet = colorSet.stream().anyMatch(cs -> cs.name().equals(p.propertyId()));
+                if (!inSet || !debtorId.equals(p.ownerPlayerId())) {
+                    updatedProps.add(p);
+                    continue;
+                }
+                int origLevel = buildingLevel(p);
+                int newLevel = Math.max(0, origLevel - rounds);
+                int housesThisProp = newLevel >= 5 ? 0 : newLevel;
+                // If materializing a hotel's houses would overflow the bank supply, this
+                // property's buildings are liquidated to 0 instead (bank can't make change).
+                if (housesPlaced[0] + housesThisProp > houseBudget) {
+                    newLevel = 0;
+                    housesThisProp = 0;
+                }
+                housesPlaced[0] += housesThisProp;
+                totalSold[0] += origLevel - newLevel;
+                updatedProps.add(withBuildingLevel(p, newLevel));
+            }
             int proceeds = totalSold[0] * (housePrice / 2);
             log.debug("sellBuildingRoundsAcrossSet player={} set={} rounds={} sold={} proceeds={}",
                     debtorId, spotType.streetType, rounds, totalSold[0], proceeds);

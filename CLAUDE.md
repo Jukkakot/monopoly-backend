@@ -115,10 +115,19 @@ fi.monopoly.
 
 - **Unit tests** (e.g. `TurnActionCommandHandlerTest`) construct a handler with a `FakeGateway` and assert `CommandResult.accepted()` / rejection codes — no HTTP, no server.
 - **Integration tests** (e.g. `SessionRegistryHttpIntegrationTest`, `HttpApiE2EGameTest`) spin up a real in-process Javalin server and hit it with HTTP.
-- **Simulation tests** (`PureDomainGameSimulationTest`) run bot-vs-bot games to end and verify no crashes.
+- **Simulation tests** (`PureDomainGameSimulationTest`) run bot-vs-bot games to end and verify no crashes **and that state invariants hold after every command** (`assertInvariants`: no negative cash, ownership tables in sync, building supply ≤ 32/12, no eliminated owner, `IN_PROGRESS ⟹ ≥2 active players`). This is the highest-signal automated bug finder — run `mvn test -Dtest=PureDomainGameSimulationTest` after any state-mutating change. When you find a new class of state corruption, add an invariant here, not just a one-off test.
 - The client repo has a Vitest rule suite (`e2e/rules/`) that runs against a live backend — when changing game rules, check whether those tests need updating too.
 
 **Bug → test rule:** When a bug is fixed, always add a regression test that would have caught it. Name the test after the scenario, not the fix (e.g. `strongBotBidsWhenHumanBidReachesFacePrice`). Place it in the nearest existing test class.
+
+## Autonomous bug-hunting workflow
+
+Standing conventions for autonomous "find & fix bugs" sessions (so they survive a fresh cold start — the human should not have to re-state these):
+
+- **Push each fix to BOTH the working branch AND `master`** (`git push origin HEAD:master`). This is the project owner's chosen cadence for both repos; the sibling `monopoly-client` repo follows the same rule.
+- **Every fix gets a regression test** named after the scenario (see Bug → test rule), and `mvn test` must be green before committing.
+- **After any state-mutating change, run `PureDomainGameSimulationTest`** — its invariant harness catches the state-corruption class of bug (turn-skipping, desynced ownership, resurrected auctions, negative cash) that code-reading misses.
+- Backend fixes only reach live play after a **Render deploy** — flag this to the owner when a fix matters for real games.
 
 ## Logging gotcha
 
