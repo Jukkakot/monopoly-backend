@@ -109,6 +109,9 @@ public final class SessionRegistry {
 
     public CreateResult create(List<String> names, List<String> colors, List<SeatKind> seatKinds, String botStrategyName) {
         checkCapacity();
+        if (names.size() > MAX_SEATS) {
+            throw new IllegalArgumentException("Too many players: max " + MAX_SEATS);
+        }
         validateNoDuplicateNames(names);
         validateNoDuplicateColors(colors);
         String sessionId = SessionIdGenerator.generate();

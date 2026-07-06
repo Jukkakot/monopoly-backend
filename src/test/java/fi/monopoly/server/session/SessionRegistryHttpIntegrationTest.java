@@ -118,6 +118,16 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     @Test
+    void createSessionWithMoreThanSixPlayersReturns400() throws Exception {
+        HttpResponse<String> response = post("/sessions",
+                "{\"names\":[\"P1\",\"P2\",\"P3\",\"P4\",\"P5\",\"P6\",\"P7\"],"
+                        + "\"colors\":[\"#111111\",\"#222222\",\"#333333\",\"#444444\",\"#555555\",\"#666666\",\"#777777\"]}");
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("Too many players"),
+                "Error body should mention the seat limit, got: " + response.body());
+    }
+
+    @Test
     void createSessionWithDuplicateColorsReturns400() throws Exception {
         HttpResponse<String> response = post("/sessions",
                 "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#E63946\",\"#E63946\"]}");
