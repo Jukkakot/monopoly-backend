@@ -594,13 +594,29 @@ public final class DomainTurnActionGateway implements TurnActionGateway {
             } else {
                 applyLandingEffects(playerId, landedSpot, false, 0, total);
             }
+        } else if (roundsLeft <= 1) {
+            // Final forced round, no doubles, and the player cannot afford the €50 fine.
+            // On the last round the fine is mandatory (real Monopoly), so release the
+            // player from jail and open a bank debt for the fee. The debt subsystem then
+            // forces a mortgage/sale — or bankruptcy — rather than leaving the player
+            // stuck in jail forever (the old code clamped rounds at 1 and required cash
+            // for release, so a broke player was deadlocked while the UI kept promising
+            // "released next turn"). The player forfeits this turn's move; once the debt
+            // is settled the turn ends and they are out of jail for their next turn.
+            log.info("Player {} cannot afford the €{} jail fine on the last round — releasing into a bank debt",
+                    activePlayer.name(), GET_OUT_OF_JAIL_FEE);
+            store.update(s -> appendEvents(
+                    s.toBuilder()
+                            .players(clearJailFlag(s.players(), playerId))
+                            .turn(withDice(withConsecutive(s.turn(), 0), die1, die2))
+                            .build(),
+                    ev("DICE_ROLLED", playerId, Map.of("d1", d1s, "d2", d2s)),
+                    ev("RELEASED_FROM_JAIL", playerId)));
+            openDebt(store.get(), playerId, null, GET_OUT_OF_JAIL_FEE, false, 0, "vankilamaksu");
         } else {
-            // Stays in jail: either rounds remain, or the forced last-round fine is
-            // unaffordable. A broke player can neither be released into negative cash nor
-            // have the fee silently discounted (the old code clamped cash at 0, waiving up
-            // to €50) — they stay on their final round until they roll doubles or can pay,
-            // raising cash by mortgaging during their end-turn if needed.
-            int newRounds = Math.max(1, roundsLeft - 1);
+            // Genuinely stays in jail — more than one round remains. Decrement toward the
+            // final forced round (roundsLeft is > 1 here, so this never clamps).
+            int newRounds = roundsLeft - 1;
             log.debug("Player {} stays in jail, roundsLeft → {}", activePlayer.name(), newRounds);
             store.update(s -> {
                 List<PlayerSnapshot> updated = s.players().stream()

@@ -338,21 +338,28 @@ class DomainTurnActionGatewayTest {
     }
 
     @Test
-    void brokePlayerStaysInJailWhenForcedFineIsUnaffordable() {
-        // Last round without doubles but only €30 cash: the fee must not be partially
-        // waived (old code clamped cash to 0) nor drive cash negative — the player stays
-        // on their final round until they can pay or roll doubles.
+    void brokePlayerReleasedIntoDebtWhenForcedFineIsUnaffordable() {
+        // Last round without doubles and only €30 cash: the €50 fine is mandatory on the
+        // final round, so the player is released from jail and put into a bank debt for the
+        // fine (they must mortgage/sell or go bankrupt). They must NEVER be deadlocked in
+        // jail forever — the old code clamped rounds at 1 and required cash for release, so
+        // a broke player was stuck permanently while the UI kept promising "released next turn".
         InMemorySessionState store = storeWith(playerInJail(PLAYER_1, 30, 1));
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1); // not doubles
 
         gateway.rollDice();
 
-        PlayerSnapshot updated = playerById(store.get(), PLAYER_1);
-        assertTrue(updated.inJail(), "must stay jailed when the fine is unaffordable");
-        assertEquals(30, updated.cash(), "no partial fee may be taken");
-        assertEquals(1, updated.jailRoundsRemaining(), "the final round does not expire");
-        assertEquals(JAIL_INDEX, updated.boardIndex());
+        SessionState after = store.get();
+        PlayerSnapshot updated = playerById(after, PLAYER_1);
+        assertFalse(updated.inJail(), "released from jail rather than deadlocked forever");
+        assertEquals(30, updated.cash(), "no cash taken yet — the fine becomes a debt");
+        assertEquals(TurnPhase.RESOLVING_DEBT, after.turn().phase());
+        assertNotNull(after.activeDebt(), "a bank debt for the jail fine must be opened");
+        assertEquals(GET_OUT_OF_JAIL_FEE_EXPECTED, after.activeDebt().amountRemaining());
+        assertEquals(DebtCreditorType.BANK, after.activeDebt().creditorType());
     }
+
+    private static final int GET_OUT_OF_JAIL_FEE_EXPECTED = 50;
 
     // -------------------------------------------------------------------------
     // endTurn
