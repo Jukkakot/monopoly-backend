@@ -2,6 +2,8 @@ package fi.monopoly.application.session.trade;
 
 import fi.monopoly.application.session.SessionStateStore;
 import fi.monopoly.domain.session.*;
+import fi.monopoly.types.PlaceType;
+import fi.monopoly.types.SpotType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -155,6 +157,18 @@ public final class DomainTradeGateway implements TradeGateway {
             PropertyStateSnapshot prop = findProperty(state, propertyId);
             if (prop == null || !player.playerId().equals(prop.ownerPlayerId())) return false;
             if (prop.houseCount() > 0 || prop.hotelCount() > 0) return false;
+            // Mirror the mortgage rule (TurnActionCommandHandler): a street cannot leave
+            // its owner while ANY property in its color group still has buildings — all
+            // buildings in the group must be sold first. Without this, an even-building
+            // intermediate like (1,0,0) lets a 0-house sibling be traded away, splitting
+            // the monopoly while a building remains behind (invalid game state).
+            SpotType st = SpotType.valueOf(propertyId);
+            if (st.streetType.placeType == PlaceType.STREET) {
+                boolean groupHasBuildings = state.properties().stream()
+                        .filter(p -> SpotType.valueOf(p.propertyId()).streetType == st.streetType)
+                        .anyMatch(p -> p.houseCount() > 0 || p.hotelCount() > 0);
+                if (groupHasBuildings) return false;
+            }
         }
         return true;
     }

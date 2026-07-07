@@ -114,6 +114,30 @@ class DomainTradeGatewayTest {
         assertFalse(new DomainTradeGateway(store).isValidOffer(offer));
     }
 
+    @Test
+    void isValidReturnsFalseWhenTradingZeroHouseSiblingWhileColorGroupHasBuildings() {
+        // Even-building can leave a group at (0,1): B2 holds a house, B1 has none.
+        // Trading the 0-house B1 must be rejected — all buildings in the color group
+        // must be sold first (mirrors the mortgage rule). Otherwise the monopoly splits
+        // while a building stays stranded on B2, an invalid game state.
+        PropertyStateSnapshot b1 = prop("B1", P1, false, 0, 0);
+        PropertyStateSnapshot b2 = prop("B2", P1, false, 1, 0);
+        InMemorySessionState store = storeWithPlayers(player(P1, 500), player(P2, 500), List.of(b1, b2));
+        TradeOfferState offer = new TradeOfferState(P1, P2, properties(List.of("B1")), TradeSelectionState.NONE);
+        assertFalse(new DomainTradeGateway(store).isValidOffer(offer));
+    }
+
+    @Test
+    void isValidReturnsTrueTradingSiblingWhenColorGroupHasNoBuildings() {
+        // Guard against over-blocking: a building-free group must still be tradeable
+        // even with the sibling present in state.
+        PropertyStateSnapshot b1 = prop("B1", P1, false, 0, 0);
+        PropertyStateSnapshot b2 = prop("B2", P1, false, 0, 0);
+        InMemorySessionState store = storeWithPlayers(player(P1, 500), player(P2, 500), List.of(b1, b2));
+        TradeOfferState offer = new TradeOfferState(P1, P2, properties(List.of("B1")), TradeSelectionState.NONE);
+        assertTrue(new DomainTradeGateway(store).isValidOffer(offer));
+    }
+
     // -------------------------------------------------------------------------
     // isValidOffer — jail card checks
     // -------------------------------------------------------------------------
