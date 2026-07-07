@@ -80,6 +80,34 @@ paths:
                   version:
                     type: string
                     example: 1.0-SNAPSHOT
+                  buildTime:
+                    type: string
+                    description: ISO-8601 UTC timestamp of when the jar was built
+                    example: 2026-07-07T06:55:12Z
+
+  /version:
+    get:
+      tags: [meta]
+      summary: Backend build info
+      description: |
+        Returns the backend's version and build timestamp so a client can display
+        which backend build it is connected to. No authentication required.
+      operationId: getVersion
+      responses:
+        '200':
+          description: Build info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: 1.0-SNAPSHOT
+                  buildTime:
+                    type: string
+                    description: ISO-8601 UTC timestamp of when the jar was built
+                    example: 2026-07-07T06:55:12Z
 
   /metrics:
     get:

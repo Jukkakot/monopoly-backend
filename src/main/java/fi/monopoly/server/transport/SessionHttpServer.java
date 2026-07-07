@@ -108,7 +108,7 @@ public final class SessionHttpServer {
             config.routes.after(ctx -> {
                 String method = ctx.method().name();
                 String path = ctx.path();
-                if (path.equals("/health") || path.equals("/ping") || path.endsWith("/events")
+                if (path.equals("/health") || path.equals("/ping") || path.equals("/version") || path.endsWith("/events")
                         || (method.equals("GET") && path.endsWith("/snapshot"))
                         || method.equals("OPTIONS")) return;
                 int status = ctx.status().getCode();
@@ -126,9 +126,16 @@ public final class SessionHttpServer {
                         "status", "ok",
                         "sessions", activeSessions,
                         "uptimeSeconds", uptimeSeconds,
-                        "version", "1.0-SNAPSHOT"
+                        "version", fi.monopoly.server.BuildInfo.VERSION,
+                        "buildTime", fi.monopoly.server.BuildInfo.BUILD_TIME
                 ));
             });
+            // Lightweight build-info endpoint the client polls to show which backend
+            // build it is connected to (version + when the jar was built).
+            config.routes.get("/version", ctx -> ctx.json(Map.of(
+                    "version", fi.monopoly.server.BuildInfo.VERSION,
+                    "buildTime", fi.monopoly.server.BuildInfo.BUILD_TIME
+            )));
             config.routes.get("/openapi.yaml", ctx -> {
                 ctx.contentType("text/yaml");
                 var stream = getClass().getResourceAsStream("/openapi.yaml");
