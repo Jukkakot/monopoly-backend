@@ -283,7 +283,8 @@ public final class SessionHttpServer {
                 String hostName = request.path("hostName").asText("Pelaaja").trim();
                 if (hostName.isEmpty()) hostName = "Pelaaja";
                 String hostColor = request.path("hostColor").textValue();
-                var result = registry.createLobby(hostName, hostColor, null);
+                int initialBots = request.path("initialBots").asInt(0);
+                var result = registry.createLobby(hostName, hostColor, null, initialBots);
                 ctx.status(201).json(Map.of(
                         "sessionId", result.sessionId(),
                         "hostToken", result.hostToken(),

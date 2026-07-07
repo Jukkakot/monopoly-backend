@@ -873,6 +873,21 @@ components:
           description: |
             When `true`, creates a lobby session in `LOBBY` state.
             `names` and `seatKinds` are ignored; use `seatCount` instead.
+        hostName:
+          type: string
+          description: Host player's display name (lobby mode only).
+        hostColor:
+          type: string
+          description: Host player's token colour hex (lobby mode only).
+        initialBots:
+          type: integer
+          minimum: 0
+          maximum: 5
+          default: 0
+          description: |
+            Lobby mode only. Number of bot opponents to seat atomically during creation,
+            so the waiting room opens fully populated instead of the client adding bots one
+            by one afterwards. Clamped to at most 5 (one host + 5 bots = 6 seats).
         seatCount:
           type: integer
           minimum: 2

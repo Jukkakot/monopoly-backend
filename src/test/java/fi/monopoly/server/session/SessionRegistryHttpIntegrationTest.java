@@ -180,6 +180,41 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     @Test
+    void lobbyCreatedWithInitialBotsSeatsThemImmediately() throws Exception {
+        // Regression: the client used to create a lobby then add bots one-by-one over the
+        // network, so bots trickled into the waiting room with a visible delay. Passing
+        // initialBots seats them atomically during creation — the lobby opens fully populated.
+        HttpResponse<String> create = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Isanta\",\"hostColor\":\"#E63946\",\"initialBots\":3}");
+        assertEquals(201, create.statusCode());
+        String sessionId = extractSessionId(create.body());
+
+        String snap = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snap.contains("\"status\":\"LOBBY\""), "should be a lobby, got: " + snap);
+        long botSeats = countOccurrences(snap, "\"seatKind\":\"BOT\"");
+        assertEquals(3, botSeats, "all 3 bots must be seated at creation time");
+        // host + 3 bots = 4 seats
+        assertEquals(4, countOccurrences(snap, "\"seatIndex\""), "host + 3 bots = 4 seats");
+    }
+
+    @Test
+    void lobbyInitialBotsClampedToSixSeats() throws Exception {
+        // One host + at most 5 bots = 6 seats; extra requested bots are dropped.
+        HttpResponse<String> create = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Isanta\",\"initialBots\":20}");
+        assertEquals(201, create.statusCode());
+        String snap = get("/sessions/" + extractSessionId(create.body()) + "/snapshot").body();
+        assertEquals(5, countOccurrences(snap, "\"seatKind\":\"BOT\""), "capped at 5 bots");
+    }
+
+    private static long countOccurrences(String haystack, String needle) {
+        long count = 0;
+        int idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) != -1) { count++; idx += needle.length(); }
+        return count;
+    }
+
+    @Test
     void rollDiceCommandAcceptedForCreatedSession() throws Exception {
         String sessionId = extractSessionId(post("/sessions",
                 "{\"names\":[\"Eka\",\"Toka\"],\"colors\":[\"#E63946\",\"#2A9D8F\"]}").body());

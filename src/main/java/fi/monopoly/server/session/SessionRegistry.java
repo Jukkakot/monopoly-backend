@@ -161,6 +161,21 @@ public final class SessionRegistry {
         return createLobby(hostName, hostColor, null);
     }
 
+    /**
+     * Creates a lobby and atomically seats {@code initialBots} bot opponents in the same
+     * call, so the lobby is returned fully populated. This avoids the client having to fire
+     * N separate add-bot requests after creation — which made the bots trickle into the
+     * waiting room one by one with a visible delay.
+     */
+    public CreateResult createLobby(String hostName, String hostColor, String botStrategyName, int initialBots) {
+        CreateResult result = createLobby(hostName, hostColor, botStrategyName);
+        int bots = Math.max(0, Math.min(initialBots, MAX_SEATS - 1));
+        for (int i = 0; i < bots; i++) {
+            addLobbyBot(result.sessionId());
+        }
+        return result;
+    }
+
     public CreateResult createLobby(String hostName, String hostColor, String botStrategyName) {
         checkCapacity();
         String sessionId = SessionIdGenerator.generate();
