@@ -86,6 +86,7 @@ public final class BotChatter {
     private static final String K_SELL_BUILDING = "soldBuilding";
     private static final String K_JAIL_TAUNT = "jailTaunt";
     private static final String K_PLAYER_LEFT = "playerLeft";
+    private static final String K_REJECT_OFFER = "rejectOffer";
 
     private static final String[] BOUGHT = {
             "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
@@ -122,6 +123,12 @@ public final class BotChatter {
     };
     private static final String[] TRADE_DONE = {
             "Hyvä diili! 🤝", "Kaupat kunnossa.", "Molemmat voittaa — tai ainakin minä. 😏",
+            "Tämä kauppa vahvistaa asemaani. 💼", "Sain tarvitsemani tontin. 🎯", "Hyväksyn — tästä on hyötyä.",
+    };
+    private static final String[] REJECT_OFFER = {
+            "Ei kiitos — tuo ei hyödytä minua.", "En luovu tästä tontista. 🚫",
+            "Tarjous on liian yksipuolinen. 🤨", "Pidän omani, kiitos.",
+            "Tuosta kaupasta häviäisin. Ei käy.", "Mieti parempi tarjous. 😏",
     };
     private static final String[] GREETING = {
             "Aloitetaan! 🎲", "Tsemppiä kaikille! 🍀", "Nyt pelataan. 😎", "Onnea matkaan, tarvitsette sitä. 😏",
@@ -150,6 +157,7 @@ public final class BotChatter {
     private static final String[] BANTER = {
             "Katsotaanpa mitä nopat antavat. 🎲", "Tuuria peliin!", "Nyt ei saa mennä vankilaan... 🤞",
             "Rahaa on, uskallan pelata. 💰", "Tämä kierros on mun. 😎",
+            "Mietin seuraavaa siirtoa... 🤔", "Nyt kannattaa säästää käteistä.", "Kohta iskee monopoli. 😏",
     };
     private static final String[] DREW_CARD = {
             "Katsotaan mitä kortti sanoo... 🃏", "Sattumaa peliin!", "Toivotaan hyvää korttia. 🤞",
@@ -271,12 +279,16 @@ public final class BotChatter {
                 // A non-bot mortgaging signals trouble — a bot might smell blood.
                 return maybeReactionFromOther(author, REACT_TROUBLE, 0.14, state, botIds, nowMs);
             case "TRADE_DECLINED":
-            case "TRADE_CANCELLED":
-                // playerIds: [initiator, recipient]. The bot on either side can shrug it off.
-                for (String pid : e.playerIds()) {
-                    if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE_NO, TRADE_NO, 0.28, nowMs);
-                }
+            case "TRADE_CANCELLED": {
+                // playerIds: [initiator, recipient]. The recipient is the one who was asked, so
+                // a bot recipient is the one saying no → a reasoning line about why. A bot whose
+                // own offer got turned down instead just shrugs it off.
+                String initiator = e.playerIds().isEmpty() ? null : e.playerIds().get(0);
+                String recipient = e.playerIds().size() > 1 ? e.playerIds().get(1) : null;
+                if (isBot(recipient, botIds)) return maybeMessage(recipient, K_REJECT_OFFER, REJECT_OFFER, 0.35, nowMs);
+                if (isBot(initiator, botIds)) return maybeMessage(initiator, K_TRADE_NO, TRADE_NO, 0.28, nowMs);
                 break;
+            }
             case "PAID_RENT": {
                 // playerIds: [payer, creditor]. amount in data.
                 String creditor = e.playerIds().size() > 1 ? e.playerIds().get(1) : null;

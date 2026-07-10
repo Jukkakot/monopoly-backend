@@ -195,6 +195,20 @@ class BotChatterTest {
     }
 
     @Test
+    void botGivesAReasoningLineWhenItRejectsAnOffer() {
+        BotChatter chatter = seededChatter(0.0);
+
+        // TRADE_DECLINED playerIds = [initiator, recipient]; the bot recipient is the rejecter.
+        var intents = chatter.onNewEvents(
+                List.of(ev(3, "TRADE_DECLINED", List.of(HUMAN, BOT), Map.of())),
+                twoBotsAndHuman(), BOTS, 25_000L);
+
+        assertEquals(1, intents.size());
+        assertEquals(BOT, intents.get(0).botId());
+        assertEquals("rejectOffer", intents.get(0).msgKey(), "the rejecter explains its reasoning");
+    }
+
+    @Test
     void botGloatsWhenItReceivesBigRent() {
         BotChatter chatter = seededChatter(0.0);
 
