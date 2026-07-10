@@ -311,6 +311,24 @@ class DomainTurnActionGatewayTest {
     }
 
     @Test
+    void jailEscapeOnDoublesPaysUtilityRentOnLanding() {
+        // Regression for the reported case: escape jail with 1+1, land on an opponent's utility
+        // (Sähkölaitos = U1, index 12 = jail 10 + 2). Utility rent = dice total (2) × 4 = €8.
+        PropertyStateSnapshot ownedU1 = new PropertyStateSnapshot("U1", PLAYER_2, false, 0, 0);
+        InMemorySessionState store = storeWithTwoPlayersActiveSeat(
+                playerInJail(PLAYER_1, 1500, 3), player(PLAYER_2, 20, 1500), PLAYER_1, ownedU1);
+        DomainTurnActionGateway gateway = gatewayWithDice(store, 1, 1); // doubles, sum=2 → index 12 (U1)
+
+        gateway.rollDice();
+
+        PlayerSnapshot p1 = playerById(store.get(), PLAYER_1);
+        assertFalse(p1.inJail());
+        assertEquals(12, p1.boardIndex());
+        assertEquals(1500 - 8, p1.cash(), "escapee should pay €8 utility rent (dice 2 × 4)");
+        assertEquals(1500 + 8, playerById(store.get(), PLAYER_2).cash(), "owner should receive the rent");
+    }
+
+    @Test
     void rollDiceDecrementsJailRoundsOnNoDoubles() {
         InMemorySessionState store = storeWith(playerInJail(PLAYER_1, 1500, 3));
         DomainTurnActionGateway gateway = gatewayWithDice(store, 2, 1); // not doubles
