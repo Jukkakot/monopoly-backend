@@ -13,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,6 +55,18 @@ class BotChatterTest {
         return state(player(BOT, false), player(BOT2, false), player(HUMAN, false));
     }
 
+    /** A chatter that has already seeded its event cursor (event ids 1–2) and consumed the
+     *  one-time game-start greeting, so situational assertions on later events (id ≥ 3) aren't
+     *  perturbed by it. */
+    private static BotChatter seededChatter(double gate) {
+        BotChatter c = new BotChatter(new FixedRng(gate));
+        c.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+        c.onNewEvents(List.of(ev(2, "PLAYER_MOVED", List.of(BOT), Map.of())),
+                twoBotsAndHuman(), BOTS, 1_000L);
+        return c;
+    }
+
     @Test
     void firstCallSeedsAndEmitsNothingEvenForAnEligibleEvent() {
         BotChatter chatter = new BotChatter(new FixedRng(0.0)); // gate always passes
@@ -65,14 +78,29 @@ class BotChatterTest {
     }
 
     @Test
-    void botCommentsOnItsOwnPurchaseAfterSeeding() {
+    void botsGreetOnceWhenTheGameStarts() {
         BotChatter chatter = new BotChatter(new FixedRng(0.0));
         chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
                 twoBotsAndHuman(), BOTS, 0L);
 
+        var first = chatter.onNewEvents(
+                List.of(ev(2, "PASSED_GO", List.of(BOT), Map.of())), twoBotsAndHuman(), BOTS, 10_000L);
+        assertEquals(1, first.size());
+        assertEquals("greeting", first.get(0).msgKey(), "a bot greets at the start of the game");
+
+        // Much later — no second greeting.
+        var later = chatter.onNewEvents(
+                List.of(ev(3, "BOUGHT_PROPERTY", List.of(BOT2), Map.of())), twoBotsAndHuman(), BOTS, 40_000L);
+        for (var i : later) assertNotEquals("greeting", i.msgKey());
+    }
+
+    @Test
+    void botCommentsOnItsOwnPurchaseAfterSeeding() {
+        BotChatter chatter = seededChatter(0.0);
+
         var intents = chatter.onNewEvents(
-                List.of(ev(2, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
-                twoBotsAndHuman(), BOTS, 10_000L);
+                List.of(ev(3, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
 
         assertEquals(1, intents.size());
         assertEquals(BOT, intents.get(0).botId());
@@ -82,23 +110,19 @@ class BotChatterTest {
 
     @Test
     void aMessageCarriesALocalizationKeyAndVariantButAReactionDoesNot() {
-        BotChatter chatter = new BotChatter(new FixedRng(0.0));
-        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
-                twoBotsAndHuman(), BOTS, 0L);
-
+        BotChatter chatter = seededChatter(0.0);
         var msg = chatter.onNewEvents(
-                List.of(ev(2, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
-                twoBotsAndHuman(), BOTS, 10_000L);
+                List.of(ev(3, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
         assertEquals(1, msg.size());
         assertEquals("boughtProperty", msg.get(0).msgKey(), "messages must be localizable by key");
         assertTrue(msg.get(0).variant() >= 0);
 
         // A doubles reaction is an emoji — no localization key needed.
-        BotChatter r = new BotChatter(new FixedRng(0.0));
-        r.onNewEvents(List.of(ev(1, "PLAYER_MOVED", List.of(BOT), Map.of())), twoBotsAndHuman(), BOTS, 0L);
+        BotChatter r = seededChatter(0.0);
         var react = r.onNewEvents(
-                List.of(ev(2, "DICE_ROLLED", List.of(BOT), Map.of("d1", "5", "d2", "5"))),
-                twoBotsAndHuman(), BOTS, 10_000L);
+                List.of(ev(3, "DICE_ROLLED", List.of(BOT), Map.of("d1", "5", "d2", "5"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
         assertEquals(1, react.size());
         assertEquals("REACTION", react.get(0).kind());
         assertNull(react.get(0).msgKey());
@@ -106,45 +130,39 @@ class BotChatterTest {
 
     @Test
     void lowProbabilityGateSuppressesChatter() {
-        BotChatter chatter = new BotChatter(new FixedRng(0.99)); // gate always fails
-        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
-                twoBotsAndHuman(), BOTS, 0L);
+        BotChatter chatter = seededChatter(0.99); // gate always fails
 
         var intents = chatter.onNewEvents(
-                List.of(ev(2, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
-                twoBotsAndHuman(), BOTS, 10_000L);
+                List.of(ev(3, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
 
         assertTrue(intents.isEmpty());
     }
 
     @Test
     void perBotCooldownBlocksBackToBackChatterFromTheSameBot() {
-        BotChatter chatter = new BotChatter(new FixedRng(0.0));
-        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
-                twoBotsAndHuman(), BOTS, 0L);
-        // First event lands a line for BOT at t=10_000.
+        BotChatter chatter = seededChatter(0.0);
+        // First event lands a line for BOT.
         var first = chatter.onNewEvents(
-                List.of(ev(2, "BUILT_HOTEL", List.of(BOT), Map.of("property", "B1"))),
-                twoBotsAndHuman(), BOTS, 10_000L);
+                List.of(ev(3, "BUILT_HOTEL", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
         assertEquals(1, first.size());
 
         // A second eligible event only 1s later — global + per-bot cooldown must suppress it.
         var second = chatter.onNewEvents(
-                List.of(ev(3, "BUILT_HOTEL", List.of(BOT), Map.of("property", "B2"))),
-                twoBotsAndHuman(), BOTS, 11_000L);
+                List.of(ev(4, "BUILT_HOTEL", List.of(BOT), Map.of("property", "B2"))),
+                twoBotsAndHuman(), BOTS, 26_000L);
         assertTrue(second.isEmpty(), "cooldowns keep a single bot from chattering every event");
     }
 
     @Test
     void aSurvivingBotReactsToAnotherPlayersBankruptcy() {
-        BotChatter chatter = new BotChatter(new FixedRng(0.0));
-        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
-                twoBotsAndHuman(), BOTS, 0L);
+        BotChatter chatter = seededChatter(0.0);
 
         var intents = chatter.onNewEvents(
-                List.of(ev(2, "WENT_BANKRUPT", List.of(HUMAN), Map.of())),
+                List.of(ev(3, "WENT_BANKRUPT", List.of(HUMAN), Map.of())),
                 state(player(BOT, false), player(BOT2, false), player(HUMAN, true)),
-                BOTS, 20_000L);
+                BOTS, 25_000L);
 
         assertEquals(1, intents.size());
         assertTrue(BOTS.contains(intents.get(0).botId()));
@@ -153,14 +171,12 @@ class BotChatterTest {
 
     @Test
     void botGloatsWhenItReceivesBigRent() {
-        BotChatter chatter = new BotChatter(new FixedRng(0.0));
-        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(HUMAN), Map.of("d1", "3", "d2", "4"))),
-                twoBotsAndHuman(), BOTS, 0L);
+        BotChatter chatter = seededChatter(0.0);
 
         // Human pays 150 rent to BOT (playerIds = [payer, creditor]).
         var intents = chatter.onNewEvents(
-                List.of(ev(2, "PAID_RENT", List.of(HUMAN, BOT), Map.of("amount", "150"))),
-                twoBotsAndHuman(), BOTS, 30_000L);
+                List.of(ev(3, "PAID_RENT", List.of(HUMAN, BOT), Map.of("amount", "150"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
 
         assertEquals(1, intents.size());
         assertEquals(BOT, intents.get(0).botId());
