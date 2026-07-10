@@ -79,22 +79,30 @@ public final class BotChatter {
     private static final String K_JAIL_OUT = "releasedFromJail";
     private static final String K_MORTGAGE = "mortgaged";
     private static final String K_TRADE_NO = "tradeDeclined";
+    private static final String K_HOUSE = "builtHouse";
+    private static final String K_REDEEM = "redeemed";
+    private static final String K_BANTER = "banter";
 
     private static final String[] BOUGHT = {
             "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
             "Ostoslistaa lyhemmäks. 🏠", "Mun kokoelma kasvaa.", "Ei jätetä hyviä tontteja väliin.",
+            "Tää täydentää väriryhmää. 🎯", "Halpa hinta tästä paikasta.",
+            "Strateginen osto — estän muita. 😏", "Rautatiet tuottaa varmaa tuloa. 🚂",
     };
     private static final String[] BUILT_HOTEL = {
             "Hotelli pystyssä! 🏨", "Tervetuloa — vuokra ei oo halpa. 😏",
             "Nyt alkaa kilahtaa kassaan.", "Tästä tuli kallis kulma.",
+            "Hotelli maksaa itsensä pian takaisin. 💰", "Täältä pesee jos tänne osutte. 💸",
     };
     private static final String[] RENT_GLOAT = {
             "Kiitos vuokrasta! 💰", "Kassa kasvaa. 😎", "Mukava lisä tilille.",
             "Aina yhtä kivaa periä vuokraa. 🤑", "Kohta ostan lisää tontteja näillä.",
+            "Sijoitus tuottaa. 📈", "Passiivista tuloa parhaimmillaan.",
     };
     private static final String[] RENT_PAIN = {
             "Auts, kallis pysähdys. 😩", "No tuo sattui.", "Voi ei, melkein koko kassa meni.",
             "Kallista huseerausta. 💸", "Pitää alkaa myydä taloja...",
+            "Tuo vei budjetin. 😰", "Väärä ruutu, väärä hetki.",
     };
     private static final String[] JAIL = {
             "No niin, vankilaan taas. 😅", "Nähdään parin kierroksen päästä.",
@@ -122,9 +130,22 @@ public final class BotChatter {
     };
     private static final String[] MORTGAGE = {
             "Pakko kiinnittää... 😬", "Tarvitaan käteistä nopeasti.", "Ei muuta vaihtoehtoa nyt.",
+            "Kiinnitän tämän, tarvitsen rahaa ostoon.", "Väliaikainen kiinnitys — nostan pian takaisin.",
     };
     private static final String[] TRADE_NO = {
             "No ei sitten. 🤷", "Harmi, olisi ollut hyvä diili.", "Ehkä ensi kerralla. 🤔",
+    };
+    private static final String[] BUILT_HOUSE = {
+            "Talo nostaa vuokraa mukavasti. 🏠", "Rakennan tästä vahvan.",
+            "Pieni investointi, iso tuotto. 📈", "Talo kerrallaan kohti hotellia.",
+    };
+    private static final String[] REDEEM = {
+            "Nostin kiinnityksen — kassa kestää taas. 💪", "Takaisin omistukseen ilman lainaa.",
+            "Nyt tämä tuottaa taas täyttä vuokraa. 💰",
+    };
+    private static final String[] BANTER = {
+            "Katsotaanpa mitä nopat antavat. 🎲", "Tuuria peliin!", "Nyt ei saa mennä vankilaan... 🤞",
+            "Rahaa on, uskallan pelata. 💰", "Tämä kierros on mun. 😎",
     };
 
     // ── Reaction pools (must be from the backend allow-list) ────────────────────────────────
@@ -195,6 +216,13 @@ public final class BotChatter {
                 if (isBot(author, botIds)) return maybeMessage(author, K_HOTEL, BUILT_HOTEL, 0.55, nowMs);
                 // A non-bot builds a hotel — a bot might react with awe.
                 return maybeReactionFromOther(author, REACT_HOTEL, 0.20, state, botIds, nowMs);
+            case "BUILT_HOUSE":
+                // Frequent (each house), so keep it low — an occasional line on the investment.
+                if (isBot(author, botIds)) return maybeMessage(author, K_HOUSE, BUILT_HOUSE, 0.14, nowMs);
+                break;
+            case "REDEEMED":
+                if (isBot(author, botIds)) return maybeMessage(author, K_REDEEM, REDEEM, 0.28, nowMs);
+                break;
             case "WENT_TO_JAIL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_JAIL, JAIL, 0.30, nowMs);
                 break;
@@ -245,6 +273,9 @@ public final class BotChatter {
                 if (d1 > 0 && d1 == d2 && isBot(author, botIds)) {
                     return maybeReaction(author, REACT_DOUBLES, 0.15, state, nowMs);
                 }
+                // Occasional idle banter on the bot's own roll — every roll fires this, so keep
+                // the probability very low; cooldowns thin it further.
+                if (isBot(author, botIds)) return maybeMessage(author, K_BANTER, BANTER, 0.06, nowMs);
                 break;
             }
             default:
