@@ -170,6 +170,31 @@ class BotChatterTest {
     }
 
     @Test
+    void aBotTauntsWhenAnotherPlayerGoesToJail() {
+        BotChatter chatter = seededChatter(0.0);
+
+        var intents = chatter.onNewEvents(
+                List.of(ev(3, "WENT_TO_JAIL", List.of(HUMAN), Map.of())), twoBotsAndHuman(), BOTS, 25_000L);
+
+        assertEquals(1, intents.size());
+        assertTrue(BOTS.contains(intents.get(0).botId()));
+        assertFalse(intents.get(0).content().isBlank());
+    }
+
+    @Test
+    void botCommentsWhenItSellsBuildingsForCash() {
+        BotChatter chatter = seededChatter(0.0);
+
+        var intents = chatter.onNewEvents(
+                List.of(ev(3, "SOLD_HOUSE", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
+
+        assertEquals(1, intents.size());
+        assertEquals(BOT, intents.get(0).botId());
+        assertEquals("soldBuilding", intents.get(0).msgKey());
+    }
+
+    @Test
     void botGloatsWhenItReceivesBigRent() {
         BotChatter chatter = seededChatter(0.0);
 

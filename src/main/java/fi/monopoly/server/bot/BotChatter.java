@@ -82,6 +82,10 @@ public final class BotChatter {
     private static final String K_HOUSE = "builtHouse";
     private static final String K_REDEEM = "redeemed";
     private static final String K_BANTER = "banter";
+    private static final String K_CARD = "drewCard";
+    private static final String K_SELL_BUILDING = "soldBuilding";
+    private static final String K_JAIL_TAUNT = "jailTaunt";
+    private static final String K_PLAYER_LEFT = "playerLeft";
 
     private static final String[] BOUGHT = {
             "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
@@ -147,6 +151,20 @@ public final class BotChatter {
             "Katsotaanpa mitä nopat antavat. 🎲", "Tuuria peliin!", "Nyt ei saa mennä vankilaan... 🤞",
             "Rahaa on, uskallan pelata. 💰", "Tämä kierros on mun. 😎",
     };
+    private static final String[] DREW_CARD = {
+            "Katsotaan mitä kortti sanoo... 🃏", "Sattumaa peliin!", "Toivotaan hyvää korttia. 🤞",
+            "Kortit ratkaisee. 🎴",
+    };
+    private static final String[] SOLD_BUILDING = {
+            "Pakko myydä rakennuksia... 😔", "Ikävä kyllä, talot lähtee.",
+            "Tarvitsen käteistä, myyn taloja. 💸", "Askel taaksepäin, mutta pakko.",
+    };
+    private static final String[] JAIL_TAUNT = {
+            "Hei, vankilaan siitä! 😂", "Nauttikaa selleistä. 😏", "Yksi vähemmän liikkeellä. 😎",
+    };
+    private static final String[] PLAYER_LEFT = {
+            "No sepä harmi, pelaaja lähti.", "Yksi vähemmän pöydässä.", "Peli jatkuu ilman häntä. 🤷",
+    };
 
     // ── Reaction pools (must be from the backend allow-list) ────────────────────────────────
     private static final String[] REACT_RENT = { "💰", "😎", "🔥" };
@@ -154,6 +172,8 @@ public final class BotChatter {
     private static final String[] REACT_HOTEL = { "😮", "🔥", "👏" };
     private static final String[] REACT_DOUBLES = { "🎲", "🍀", "😅" };
     private static final String[] REACT_TROUBLE = { "😎", "🔥", "🤔" };
+    private static final String[] REACT_JAIL_TAUNT = { "😂", "😎", "👏" };
+    private static final String[] REACT_OPP_BUY = { "🤔", "😎", "😮" };
 
     /**
      * Given the freshly-arrived events and current state, returns any chat lines bots should
@@ -211,7 +231,8 @@ public final class BotChatter {
         switch (e.type()) {
             case "BOUGHT_PROPERTY":
                 if (isBot(author, botIds)) return maybeMessage(author, K_BOUGHT, BOUGHT, 0.30, nowMs);
-                break;
+                // A rival grabs a deed — a bot occasionally eyes it.
+                return maybeReactionFromOther(author, REACT_OPP_BUY, 0.10, state, botIds, nowMs);
             case "BUILT_HOTEL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_HOTEL, BUILT_HOTEL, 0.55, nowMs);
                 // A non-bot builds a hotel — a bot might react with awe.
@@ -223,9 +244,21 @@ public final class BotChatter {
             case "REDEEMED":
                 if (isBot(author, botIds)) return maybeMessage(author, K_REDEEM, REDEEM, 0.28, nowMs);
                 break;
+            case "SOLD_HOUSE":
+            case "SOLD_HOTEL":
+                // Selling buildings back means cash trouble — a rueful money-decision line.
+                if (isBot(author, botIds)) return maybeMessage(author, K_SELL_BUILDING, SOLD_BUILDING, 0.30, nowMs);
+                break;
+            case "DREW_CARD":
+                if (isBot(author, botIds)) return maybeMessage(author, K_CARD, DREW_CARD, 0.14, nowMs);
+                break;
+            case "PLAYER_LEFT":
+                // A player quit — a surviving bot remarks on it.
+                return maybeMessageFromOther(author, K_PLAYER_LEFT, PLAYER_LEFT, REACT_TROUBLE, 0.50, state, botIds, nowMs);
             case "WENT_TO_JAIL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_JAIL, JAIL, 0.30, nowMs);
-                break;
+                // Someone else gets sent down — a bot enjoys it.
+                return maybeMessageFromOther(author, K_JAIL_TAUNT, JAIL_TAUNT, REACT_JAIL_TAUNT, 0.25, state, botIds, nowMs);
             case "RELEASED_FROM_JAIL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_JAIL_OUT, JAIL_OUT, 0.28, nowMs);
                 break;
@@ -238,9 +271,10 @@ public final class BotChatter {
                 // A non-bot mortgaging signals trouble — a bot might smell blood.
                 return maybeReactionFromOther(author, REACT_TROUBLE, 0.14, state, botIds, nowMs);
             case "TRADE_DECLINED":
+            case "TRADE_CANCELLED":
                 // playerIds: [initiator, recipient]. The bot on either side can shrug it off.
                 for (String pid : e.playerIds()) {
-                    if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE_NO, TRADE_NO, 0.30, nowMs);
+                    if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE_NO, TRADE_NO, 0.28, nowMs);
                 }
                 break;
             case "PAID_RENT": {
