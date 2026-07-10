@@ -42,6 +42,10 @@ class BotChatterTest {
         return new PlayerSnapshot(id, "seat-" + id, id, 500, 1, bankrupt, bankrupt, false, 0, 0, List.of());
     }
 
+    private static PlayerSnapshot playerCash(String id, int cash) {
+        return new PlayerSnapshot(id, "seat-" + id, id, cash, 1, false, false, false, 0, 0, List.of());
+    }
+
     private static SessionState state(PlayerSnapshot... players) {
         return new SessionState("s", 1L, SessionStatus.IN_PROGRESS,
                 List.of(), List.of(players), List.of(), null, null, null, null, null, null);
@@ -206,6 +210,25 @@ class BotChatterTest {
         assertEquals(1, intents.size());
         assertEquals(BOT, intents.get(0).botId());
         assertEquals("rejectOffer", intents.get(0).msgKey(), "the rejecter explains its reasoning");
+    }
+
+    @Test
+    void idleBanterFitsTheBotsCashStanding() {
+        // Very low cash → the "low cash" banter pool.
+        BotChatter low = seededChatter(0.0);
+        var lowIntents = low.onNewEvents(
+                List.of(ev(3, "DICE_ROLLED", List.of(BOT), Map.of("d1", "2", "d2", "5"))),
+                state(playerCash(BOT, 80), playerCash(BOT2, 900), playerCash(HUMAN, 900)), BOTS, 25_000L);
+        assertEquals(1, lowIntents.size());
+        assertEquals("banterLow", lowIntents.get(0).msgKey());
+
+        // Most cash at the table → the "leading" banter pool.
+        BotChatter lead = seededChatter(0.0);
+        var leadIntents = lead.onNewEvents(
+                List.of(ev(3, "DICE_ROLLED", List.of(BOT), Map.of("d1", "2", "d2", "5"))),
+                state(playerCash(BOT, 2000), playerCash(BOT2, 500), playerCash(HUMAN, 500)), BOTS, 25_000L);
+        assertEquals(1, leadIntents.size());
+        assertEquals("banterLead", leadIntents.get(0).msgKey());
     }
 
     @Test

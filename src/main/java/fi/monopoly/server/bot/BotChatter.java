@@ -87,27 +87,38 @@ public final class BotChatter {
     private static final String K_JAIL_TAUNT = "jailTaunt";
     private static final String K_PLAYER_LEFT = "playerLeft";
     private static final String K_REJECT_OFFER = "rejectOffer";
+    private static final String K_BANTER_LEAD = "banterLead";
+    private static final String K_BANTER_TRAIL = "banterTrail";
+    private static final String K_BANTER_LOW = "banterLow";
 
     private static final String[] BOUGHT = {
             "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
             "Ostoslistaa lyhemmäks. 🏠", "Mun kokoelma kasvaa.", "Ei jätetä hyviä tontteja väliin.",
             "Tää täydentää väriryhmää. 🎯", "Halpa hinta tästä paikasta.",
             "Strateginen osto — estän muita. 😏", "Rautatiet tuottaa varmaa tuloa. 🚂",
+            "Naapuritontti — nyt ne ovat parina. 👫", "Tämä oli pakko napata.",
+            "Sijainti, sijainti, sijainti. 📍", "Hyvä lisä salkkuun. 💼",
     };
     private static final String[] BUILT_HOTEL = {
             "Hotelli pystyssä! 🏨", "Tervetuloa — vuokra ei oo halpa. 😏",
             "Nyt alkaa kilahtaa kassaan.", "Tästä tuli kallis kulma.",
             "Hotelli maksaa itsensä pian takaisin. 💰", "Täältä pesee jos tänne osutte. 💸",
+            "Loistohotelli valmis. 🏨", "Nyt tästä ruudusta tuli myrkkyä muille. ☠️",
+            "Investointi joka tuottaa. 📈",
     };
     private static final String[] RENT_GLOAT = {
             "Kiitos vuokrasta! 💰", "Kassa kasvaa. 😎", "Mukava lisä tilille.",
             "Aina yhtä kivaa periä vuokraa. 🤑", "Kohta ostan lisää tontteja näillä.",
             "Sijoitus tuottaa. 📈", "Passiivista tuloa parhaimmillaan.",
+            "Kiitos, maksa vain. 😌", "Tämä tili kasvaa mukavasti.",
+            "Vuokralaiset ovat parhaita. 🏦", "Cha-ching! 🤑",
     };
     private static final String[] RENT_PAIN = {
             "Auts, kallis pysähdys. 😩", "No tuo sattui.", "Voi ei, melkein koko kassa meni.",
             "Kallista huseerausta. 💸", "Pitää alkaa myydä taloja...",
             "Tuo vei budjetin. 😰", "Väärä ruutu, väärä hetki.",
+            "No niin, sinne meni säästöt.", "Tästä toivuttava nopeasti.",
+            "Kallis oppitunti. 📚", "Ai että sattui kukkaroon. 😖",
     };
     private static final String[] JAIL = {
             "No niin, vankilaan taas. 😅", "Nähdään parin kierroksen päästä.",
@@ -158,6 +169,30 @@ public final class BotChatter {
             "Katsotaanpa mitä nopat antavat. 🎲", "Tuuria peliin!", "Nyt ei saa mennä vankilaan... 🤞",
             "Rahaa on, uskallan pelata. 💰", "Tämä kierros on mun. 😎",
             "Mietin seuraavaa siirtoa... 🤔", "Nyt kannattaa säästää käteistä.", "Kohta iskee monopoli. 😏",
+            "Ei kiirettä, peli on pitkä.", "Rento fiilis, homma hanskassa. 😎",
+            "Katsotaan mihin nappula päätyy.", "Pörssi nousee, ostan lisää. 📈",
+    };
+    // Idle banter tuned to how the bot is doing, so a random line still fits the situation.
+    private static final String[] BANTER_LEAD = {
+            "Johdan peliä — ja aion pitää sen niin. 😎", "Kassani on paksuin pöydässä. 💰",
+            "Voitto häämöttää jo. 🏆", "Kukaan ei taida saada minua kiinni.",
+            "Imperiumini kasvaa kasvamistaan. 🏰", "Muut pelaa toisesta sijasta. 😏",
+            "Helppoa tämä on. 😌", "Vuokrat virtaa, kiitos kaikille.",
+            "Pidän ohjat käsissäni.", "Kohta koko lauta on minun. 🗺️",
+    };
+    private static final String[] BANTER_TRAIL = {
+            "En ole vielä ulkona pelistä. 💪", "Käännän vielä tämän pelin.",
+            "Yksi hyvä kauppa ja olen taas mukana.", "Alakynnessä, mutta en luovuta.",
+            "Tästä noustaan vielä. 📈", "Vähän tuuria kaipaisin nyt... 🍀",
+            "Ei tämä tähän lopu.", "Comeback on tulossa, uskokaa pois. 😤",
+            "Pakko pelata varovasti nyt.", "Odottakaa vaan, käännän tuulen. 🌬️",
+    };
+    private static final String[] BANTER_LOW = {
+            "Kassa hupenee huolestuttavasti... 😰", "Nyt on tiukkaa, pitää säästää.",
+            "Toivottavasti en osu kenenkään hotelliin. 😬", "Vähän rahaa, paljon riskiä.",
+            "Yksi iso vuokra ja olen pulassa.", "Pitää ehkä kiinnittää tontteja pian.",
+            "Sydän hakkaa jokaisella heitolla. 💓", "Rukoilen pieniä vuokria. 🙏",
+            "Selviänkö tästä kierroksesta?", "Kassakriisi lähellä... 😅",
     };
     private static final String[] DREW_CARD = {
             "Katsotaan mitä kortti sanoo... 🃏", "Sattumaa peliin!", "Toivotaan hyvää korttia. 🤞",
@@ -319,9 +354,20 @@ public final class BotChatter {
                 if (d1 > 0 && d1 == d2 && isBot(author, botIds)) {
                     return maybeReaction(author, REACT_DOUBLES, 0.15, state, nowMs);
                 }
-                // Occasional idle banter on the bot's own roll — every roll fires this, so keep
-                // the probability very low; cooldowns thin it further.
-                if (isBot(author, botIds)) return maybeMessage(author, K_BANTER, BANTER, 0.06, nowMs);
+                // Occasional idle banter on the bot's own roll, tuned to how the bot is doing so a
+                // random line still fits the moment. Every roll fires this, so keep the probability
+                // low; cooldowns thin it further.
+                if (isBot(author, botIds)) {
+                    String key = K_BANTER;
+                    String[] pool = BANTER;
+                    switch (cashStanding(author, state)) {
+                        case LOW:   key = K_BANTER_LOW;   pool = BANTER_LOW;   break;
+                        case LEAD:  key = K_BANTER_LEAD;  pool = BANTER_LEAD;  break;
+                        case TRAIL: key = K_BANTER_TRAIL; pool = BANTER_TRAIL; break;
+                        default: break;
+                    }
+                    return maybeMessage(author, key, pool, 0.09, nowMs);
+                }
                 break;
             }
             default:
@@ -392,6 +438,27 @@ public final class BotChatter {
 
     private static boolean isBot(String playerId, Set<String> botIds) {
         return playerId != null && botIds.contains(playerId);
+    }
+
+    private enum Standing { LEAD, TRAIL, LOW, MID }
+
+    /** Classifies a bot's position by cash: worryingly low, clear leader, clear trailer, or mid-pack.
+     *  Cash is a cheap proxy for standing that avoids computing full net worth every roll. */
+    private static Standing cashStanding(String botId, SessionState state) {
+        PlayerSnapshot me = find(botId, state);
+        if (me == null) return Standing.MID;
+        if (me.cash() < 150) return Standing.LOW;
+        int max = Integer.MIN_VALUE, min = Integer.MAX_VALUE, active = 0;
+        for (PlayerSnapshot p : state.players()) {
+            if (p.bankrupt() || p.eliminated()) continue;
+            active++;
+            max = Math.max(max, p.cash());
+            min = Math.min(min, p.cash());
+        }
+        if (active < 2) return Standing.MID;
+        if (me.cash() == max) return Standing.LEAD;
+        if (me.cash() == min) return Standing.TRAIL;
+        return Standing.MID;
     }
 
     private static boolean isActive(String playerId, SessionState state) {
