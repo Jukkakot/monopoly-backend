@@ -18,8 +18,13 @@ import java.util.Set;
  *
  * <p>Design goals:
  * <ul>
- *   <li><b>Variance</b> — every situation has a pool of phrasings; a random one is picked so the
- *       same event never yields the same line twice in a row.</li>
+ *   <li><b>Localised per viewer</b> — a message is emitted as a {@code (msgKey, variant)} pair,
+ *       not literal text. Each client renders it in its own current language from a matching
+ *       phrase table, so the same bot line reads Finnish for one viewer and English for another,
+ *       and re-localises live when a viewer toggles language. The Finnish text is also carried as
+ *       a fallback so an out-of-date client still shows something. Emoji reactions need no key.</li>
+ *   <li><b>Variance</b> — every situation has a pool of phrasings; a random variant is picked so
+ *       the same event never yields the same line twice in a row.</li>
  *   <li><b>Restraint</b> — a per-bot cooldown plus a global cooldown plus per-situation
  *       probabilities keep the chatter occasional, never spammy.</li>
  *   <li><b>Purity</b> — {@link #onNewEvents} is a plain function of (events, state, now); all
@@ -27,14 +32,19 @@ import java.util.Set;
  *       thread, so no synchronisation is needed.</li>
  * </ul>
  *
- * <p>Messages are Finnish (the game is Helsinki-themed and its audience Finnish); emoji
- * reactions are language-neutral. Reaction emoji are drawn only from the backend's curated
- * allow-list so they always render.</p>
+ * <p>The {@code msgKey} values and the per-key variant counts must stay in sync with the client's
+ * {@code botChat} phrase tables (src/i18n/translations.ts). The client clamps the variant index
+ * modulo its pool length, so a count mismatch degrades gracefully to a different phrasing rather
+ * than a crash.</p>
  */
 public final class BotChatter {
 
-    /** A queued bot utterance: post {@code content} (kind MESSAGE|REACTION) as {@code botId} after {@code delayMs}. */
-    public record ChatIntent(String botId, String kind, String content, long delayMs) {}
+    /**
+     * A queued bot utterance. For a MESSAGE, {@code msgKey}/{@code variant} localise it on the
+     * client and {@code content} is the Finnish fallback; for a REACTION, {@code content} is the
+     * emoji and {@code msgKey} is null.
+     */
+    public record ChatIntent(String botId, String kind, String content, String msgKey, int variant, long delayMs) {}
 
     // A bot won't chat again until this long after its last line — keeps any single bot from dominating.
     private static final long PER_BOT_COOLDOWN_MS = 9_000L;
@@ -54,7 +64,16 @@ public final class BotChatter {
         this.rng = rng;
     }
 
-    // ── Message pools (Finnish, with variance) ──────────────────────────────────────────────
+    // ── Message situation keys (must match client botChat table) + Finnish fallback pools ────
+    private static final String K_BOUGHT = "boughtProperty";
+    private static final String K_HOTEL = "builtHotel";
+    private static final String K_RENT_GLOAT = "rentGloat";
+    private static final String K_RENT_PAIN = "rentPain";
+    private static final String K_JAIL = "jail";
+    private static final String K_OPP_BANKRUPT = "opponentBankrupt";
+    private static final String K_SELF_BANKRUPT = "selfBankrupt";
+    private static final String K_TRADE = "tradeDone";
+
     private static final String[] BOUGHT = {
             "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
             "Ostoslistaa lyhemmäks. 🏠", "Mun kokoelma kasvaa.", "Ei jätetä hyviä tontteja väliin.",
@@ -133,14 +152,14 @@ public final class BotChatter {
 
         switch (e.type()) {
             case "BOUGHT_PROPERTY":
-                if (isBot(author, botIds)) return maybeMessage(author, BOUGHT, 0.30, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_BOUGHT, BOUGHT, 0.30, nowMs);
                 break;
             case "BUILT_HOTEL":
-                if (isBot(author, botIds)) return maybeMessage(author, BUILT_HOTEL, 0.55, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_HOTEL, BUILT_HOTEL, 0.55, nowMs);
                 // A non-bot builds a hotel — a bot might react with awe.
                 return maybeReactionFromOther(author, REACT_HOTEL, 0.20, state, botIds, nowMs);
             case "WENT_TO_JAIL":
-                if (isBot(author, botIds)) return maybeMessage(author, JAIL, 0.30, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_JAIL, JAIL, 0.30, nowMs);
                 break;
             case "PAID_RENT": {
                 // playerIds: [payer, creditor]. amount in data.
@@ -148,21 +167,21 @@ public final class BotChatter {
                 int amount = parseInt(e.data().get("amount"));
                 if (isBot(creditor, botIds)) {
                     // Bot received rent — gloat on a big one, otherwise a small chance of a 💰.
-                    if (amount >= BIG_RENT) return maybeMessage(creditor, RENT_GLOAT, 0.45, nowMs);
-                    return maybeReaction(creditor, REACT_RENT, 0.18, state, botIds, nowMs);
+                    if (amount >= BIG_RENT) return maybeMessage(creditor, K_RENT_GLOAT, RENT_GLOAT, 0.45, nowMs);
+                    return maybeReaction(creditor, REACT_RENT, 0.18, state, nowMs);
                 }
                 if (isBot(author, botIds) && amount >= BIG_RENT) {
-                    return maybeMessage(author, RENT_PAIN, 0.40, nowMs);
+                    return maybeMessage(author, K_RENT_PAIN, RENT_PAIN, 0.40, nowMs);
                 }
                 break;
             }
             case "WENT_BANKRUPT":
-                if (isBot(author, botIds)) return maybeMessage(author, SELF_BANKRUPT, 0.85, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_SELF_BANKRUPT, SELF_BANKRUPT, 0.85, nowMs);
                 // A human (or another already-processed player) went bankrupt — a surviving bot reacts.
-                return maybeMessageFromOther(author, OPPONENT_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_BANKRUPT, OPPONENT_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs);
             case "TRADE_ACCEPTED": {
                 for (String pid : e.playerIds()) {
-                    if (isBot(pid, botIds)) return maybeMessage(pid, TRADE_DONE, 0.30, nowMs);
+                    if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE, TRADE_DONE, 0.30, nowMs);
                 }
                 break;
             }
@@ -170,7 +189,7 @@ public final class BotChatter {
                 int d1 = parseInt(e.data().get("d1"));
                 int d2 = parseInt(e.data().get("d2"));
                 if (d1 > 0 && d1 == d2 && isBot(author, botIds)) {
-                    return maybeReaction(author, REACT_DOUBLES, 0.15, state, botIds, nowMs);
+                    return maybeReaction(author, REACT_DOUBLES, 0.15, state, nowMs);
                 }
                 break;
             }
@@ -182,14 +201,15 @@ public final class BotChatter {
 
     // ── Emission helpers ────────────────────────────────────────────────────────────────────
 
-    private ChatIntent maybeMessage(String botId, String[] pool, double probability, long nowMs) {
+    private ChatIntent maybeMessage(String botId, String msgKey, String[] pool, double probability, long nowMs) {
         if (!canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
-        return new ChatIntent(botId, "MESSAGE", pick(pool), thinkDelay());
+        int variant = rng.nextInt(pool.length);
+        return new ChatIntent(botId, "MESSAGE", pool[variant], msgKey, variant, thinkDelay());
     }
 
-    private ChatIntent maybeReaction(String botId, String[] pool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+    private ChatIntent maybeReaction(String botId, String[] pool, double probability, SessionState state, long nowMs) {
         if (!isActive(botId, state) || !canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
-        return new ChatIntent(botId, "REACTION", pick(pool), thinkDelay());
+        return new ChatIntent(botId, "REACTION", pick(pool), null, 0, thinkDelay());
     }
 
     /** A random surviving bot other than {@code excludeId} reacts with an emoji. */
@@ -197,16 +217,19 @@ public final class BotChatter {
         if (rng.nextDouble() >= probability) return null;
         String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
         if (reactor == null) return null;
-        return new ChatIntent(reactor, "REACTION", pick(pool), thinkDelay());
+        return new ChatIntent(reactor, "REACTION", pick(pool), null, 0, thinkDelay());
     }
 
     /** A random surviving bot other than {@code excludeId} comments — a message, or (30 %) an emoji reaction. */
-    private ChatIntent maybeMessageFromOther(String excludeId, String[] msgPool, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+    private ChatIntent maybeMessageFromOther(String excludeId, String msgKey, String[] msgPool, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs) {
         if (rng.nextDouble() >= probability) return null;
         String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
         if (reactor == null) return null;
-        boolean reaction = rng.nextDouble() < 0.30;
-        return new ChatIntent(reactor, reaction ? "REACTION" : "MESSAGE", pick(reaction ? reactPool : msgPool), thinkDelay());
+        if (rng.nextDouble() < 0.30) {
+            return new ChatIntent(reactor, "REACTION", pick(reactPool), null, 0, thinkDelay());
+        }
+        int variant = rng.nextInt(msgPool.length);
+        return new ChatIntent(reactor, "MESSAGE", msgPool[variant], msgKey, variant, thinkDelay());
     }
 
     private String pickEligibleBot(String excludeId, SessionState state, Set<String> botIds, long nowMs) {

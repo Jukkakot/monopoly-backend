@@ -126,7 +126,7 @@ public final class SessionRegistry {
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, botConfigs, strategy,
-                (botId, kind, content) -> postBotChat(sessionId, botId, kind, content));
+                (botId, kind, content, msgKey, variant) -> postBotChat(sessionId, botId, kind, content, msgKey, variant));
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
         // Generate player tokens for all human seats so that commands can be authenticated.
         // Player IDs are deterministic: "player-" + (inputIndex + 1).
@@ -645,7 +645,7 @@ public final class SessionRegistry {
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, botConfigs, strategy,
-                (botId, kind, content) -> postBotChat(sessionId, botId, kind, content));
+                (botId, kind, content, msgKey, variant) -> postBotChat(sessionId, botId, kind, content, msgKey, variant));
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
 
         List<String> humanNames = gameState.seats().stream()
@@ -704,36 +704,49 @@ public final class SessionRegistry {
         // runExclusive serializes the append with command handling so it can't be lost to a
         // concurrently-executing command's derived state (see SessionCommandPublisher#runExclusive).
         entry.publisher().runExclusive(() ->
-                entry.baseStore().update(state -> appendChatEvent(state, playerId, eventKind, finalText)));
+                entry.baseStore().update(state -> appendChatEvent(state, playerId,
+                        java.util.Map.of("kind", eventKind, "content", finalText))));
         lastActivityAt.put(sessionId, System.currentTimeMillis());
         return true;
     }
 
-    /** Appends a CHAT event authored by {@code playerId}. Returns the state unchanged if that
-     *  player is not in the session (so a just-left player's queued chat is silently dropped). */
-    private static SessionState appendChatEvent(SessionState state, String playerId, String eventKind, String content) {
+    /** Appends a CHAT event authored by {@code playerId}, filling in the sender's display name.
+     *  Returns the state unchanged if that player is not in the session (so a just-left player's
+     *  queued chat is silently dropped). */
+    private static SessionState appendChatEvent(SessionState state, String playerId, Map<String, String> data) {
         PlayerSnapshot sender = state.players().stream()
                 .filter(p -> p.playerId().equals(playerId)).findFirst().orElse(null);
         if (sender == null) return state;
-        return GameEventHelper.appendEvents(state, GameEventHelper.ev("CHAT", playerId,
-                java.util.Map.of("kind", eventKind, "content", content, "name", sender.name())));
+        Map<String, String> full = new HashMap<>(data);
+        full.put("name", sender.name());
+        return GameEventHelper.appendEvents(state, GameEventHelper.ev("CHAT", playerId, full));
     }
 
     /**
      * Server-internal: posts a chat message or emoji reaction on behalf of a bot. Unlike
      * {@link #postChat} there is no token check — the caller is the trusted in-process bot
      * driver, not a network client. Silently no-ops if the session or bot has gone away.
+     *
+     * <p>For a MESSAGE, {@code msgKey}/{@code variant} let each client localise the line to its
+     * own language; {@code content} is the Finnish fallback for clients that don't know the key.
+     * For a REACTION {@code msgKey} is null.</p>
      */
-    void postBotChat(String sessionId, String botPlayerId, String kind, String content) {
+    void postBotChat(String sessionId, String botPlayerId, String kind, String content, String msgKey, int variant) {
         Entry entry = sessions.get(sessionId);
         if (entry == null || botPlayerId == null || content == null) return;
         String eventKind = "REACTION".equals(kind) ? "REACTION" : "MESSAGE";
         String text = content.strip();
         if (text.isEmpty()) return;
         if (!"REACTION".equals(eventKind) && text.length() > MAX_CHAT_LEN) text = text.substring(0, MAX_CHAT_LEN);
-        final String finalText = text;
+        Map<String, String> data = new HashMap<>();
+        data.put("kind", eventKind);
+        data.put("content", text);
+        if (msgKey != null && !msgKey.isBlank()) {
+            data.put("botMsgKey", msgKey);
+            data.put("botMsgVariant", Integer.toString(variant));
+        }
         entry.publisher().runExclusive(() ->
-                entry.baseStore().update(state -> appendChatEvent(state, botPlayerId, eventKind, finalText)));
+                entry.baseStore().update(state -> appendChatEvent(state, botPlayerId, data)));
     }
 
     public double getBotSpeedMultiplier(String sessionId) {

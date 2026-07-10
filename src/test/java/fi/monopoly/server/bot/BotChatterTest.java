@@ -13,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -77,6 +78,30 @@ class BotChatterTest {
         assertEquals(BOT, intents.get(0).botId());
         assertEquals("MESSAGE", intents.get(0).kind());
         assertFalse(intents.get(0).content().isBlank());
+    }
+
+    @Test
+    void aMessageCarriesALocalizationKeyAndVariantButAReactionDoesNot() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.0));
+        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+
+        var msg = chatter.onNewEvents(
+                List.of(ev(2, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 10_000L);
+        assertEquals(1, msg.size());
+        assertEquals("boughtProperty", msg.get(0).msgKey(), "messages must be localizable by key");
+        assertTrue(msg.get(0).variant() >= 0);
+
+        // A doubles reaction is an emoji — no localization key needed.
+        BotChatter r = new BotChatter(new FixedRng(0.0));
+        r.onNewEvents(List.of(ev(1, "PLAYER_MOVED", List.of(BOT), Map.of())), twoBotsAndHuman(), BOTS, 0L);
+        var react = r.onNewEvents(
+                List.of(ev(2, "DICE_ROLLED", List.of(BOT), Map.of("d1", "5", "d2", "5"))),
+                twoBotsAndHuman(), BOTS, 10_000L);
+        assertEquals(1, react.size());
+        assertEquals("REACTION", react.get(0).kind());
+        assertNull(react.get(0).msgKey());
     }
 
     @Test

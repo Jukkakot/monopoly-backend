@@ -28,7 +28,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
      *  event on behalf of a (token-less) bot. Null in tests / headless tournaments — no chat. */
     @FunctionalInterface
     public interface ChatPoster {
-        void post(String botPlayerId, String kind, String content);
+        /** {@code msgKey}/{@code variant} localise a MESSAGE on the client ({@code content} is the
+         *  Finnish fallback); for a REACTION {@code msgKey} is null and {@code content} is the emoji. */
+        void post(String botPlayerId, String kind, String content, String msgKey, int variant);
     }
 
     // Fallback delay used when situational logic cannot determine a better value.
@@ -372,7 +374,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         for (var intent : intents) {
             scheduler.schedule(
                     () -> {
-                        try { chatPoster.post(intent.botId(), intent.kind(), intent.content()); }
+                        try { chatPoster.post(intent.botId(), intent.kind(), intent.content(), intent.msgKey(), intent.variant()); }
                         catch (Exception e) { log.warn("Bot chat post failed", e); }
                     },
                     intent.delayMs(), TimeUnit.MILLISECONDS);
