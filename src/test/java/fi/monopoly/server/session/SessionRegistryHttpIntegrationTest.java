@@ -452,6 +452,32 @@ class SessionRegistryHttpIntegrationTest {
                 "Command with correct playerToken must not return 403, got: " + correctResp.body());
     }
 
+    @Test
+    void postChatBroadcastsReactionAndRejectsBadInput() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId    = extractSessionId(createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String validToken   = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+
+        // Wrong token → rejected.
+        assertEquals(400, post("/sessions/" + sessionId + "/chat",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"nope\",\"kind\":\"REACTION\",\"content\":\"🎉\"}").statusCode());
+
+        // Disallowed emoji → rejected.
+        assertEquals(400, post("/sessions/" + sessionId + "/chat",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken + "\",\"kind\":\"REACTION\",\"content\":\"🦄\"}").statusCode());
+
+        // Valid reaction → accepted and broadcast into the event log.
+        HttpResponse<String> ok = post("/sessions/" + sessionId + "/chat",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken + "\",\"kind\":\"REACTION\",\"content\":\"🎉\"}");
+        assertEquals(200, ok.statusCode(), ok.body());
+
+        String snap = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snap.contains("\"CHAT\"") && snap.contains("🎉"),
+                "Snapshot events should carry the CHAT reaction, got: " + snap);
+    }
+
     // -------------------------------------------------------------------------
     // Lobby join uniqueness (validated atomically inside the store update)
     // -------------------------------------------------------------------------

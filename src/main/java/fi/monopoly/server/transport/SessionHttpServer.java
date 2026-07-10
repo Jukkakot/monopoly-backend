@@ -192,6 +192,7 @@ public final class SessionHttpServer {
                 config.routes.post("/sessions/{id}/lobby/ready", this::handleLobbyReady);
                 config.routes.get("/sessions/{id}/settings", this::handleGetSettings);
                 config.routes.put("/sessions/{id}/settings", this::handleSettings);
+                config.routes.post("/sessions/{id}/chat", this::handleChat);
                 config.routes.post("/sessions/{id}/bot/retrigger", this::handleBotRetrigger);
                 config.routes.post("/sessions/{id}/ack", this::handleClientAck);
                 config.routes.put("/sessions/{id}/debug/state", this::handleDebugStateImport);
@@ -499,6 +500,24 @@ public final class SessionHttpServer {
     }
 
     private record SettingsRequest(BotSpeed botSpeed, Boolean viewerGating) {}
+
+    private record ChatRequest(String playerId, String playerToken, String kind, String content) {}
+
+    private void handleChat(Context ctx) {
+        String id = ctx.pathParam("id");
+        if (registry.get(id).isEmpty()) throw new NotFoundResponse("Session not found: " + id);
+        ChatRequest req;
+        try {
+            req = strictReader.readValue(ctx.bodyAsBytes(), ChatRequest.class);
+        } catch (JsonProcessingException e) {
+            throw new BadRequestResponse("Invalid chat body: " + e.getOriginalMessage());
+        } catch (Exception e) {
+            throw new BadRequestResponse("Could not parse chat body");
+        }
+        boolean ok = registry.postChat(id, req.playerId(), req.playerToken(), req.kind(), req.content());
+        if (!ok) throw new BadRequestResponse("Chat rejected");
+        ctx.status(200).json(Map.of("ok", true));
+    }
 
     private void handleSettings(Context ctx) {
         String id = ctx.pathParam("id");

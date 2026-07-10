@@ -542,6 +542,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /sessions/{sessionId}/chat:
+    post:
+      tags: [session]
+      summary: Post a chat message or emoji reaction
+      operationId: postChat
+      description: |
+        Sends a chat message (`kind: MESSAGE`) or an emoji reaction (`kind: REACTION`)
+        from a player. Broadcast to everyone as a `CHAT` game event
+        (`data.kind`, `data.content`, `data.name`). The sender is authenticated by
+        `playerToken`; messages are capped at 200 chars and reactions must be one of a
+        curated emoji set.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, playerToken, kind, content]
+              properties:
+                playerId: { type: string }
+                playerToken: { type: string }
+                kind: { type: string, enum: [MESSAGE, REACTION] }
+                content: { type: string, description: 'message text, or a single emoji for reactions' }
+            example:
+              playerId: player-abc
+              playerToken: tok-123
+              kind: REACTION
+              content: "🎉"
+      responses:
+        '200':
+          description: Posted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        '400':
+          description: Rejected (bad token, empty/oversized message, or disallowed reaction)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sessions/{sessionId}/debug/state:
     put:
       tags: [session]

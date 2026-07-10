@@ -673,6 +673,43 @@ public final class SessionRegistry {
         return true;
     }
 
+    private static final int MAX_CHAT_LEN = 200;
+    /** Reactions are restricted to a curated emoji set — never arbitrary user text. */
+    private static final java.util.Set<String> ALLOWED_REACTIONS = java.util.Set.of(
+            "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "💰", "🎲", "🤝", "😎", "🍀", "👏", "🤔", "😅", "💀");
+
+    /**
+     * Posts a chat message or emoji reaction from a player, broadcast to everyone as a CHAT
+     * game event (data: kind=MESSAGE|REACTION, content, name). Validates the sender's token;
+     * caps message length and whitelists reaction emoji. Returns false if rejected.
+     */
+    public boolean postChat(String sessionId, String playerId, String playerToken, String kind, String content) {
+        Entry entry = sessions.get(sessionId);
+        if (entry == null || playerId == null) return false;
+        String expected = entry.playerTokens().get(playerId);
+        if (expected == null || !expected.equals(playerToken)) return false;  // impersonation guard
+
+        boolean reaction = "REACTION".equals(kind);
+        String text = content == null ? "" : content.strip();
+        if (reaction) {
+            if (!ALLOWED_REACTIONS.contains(text)) return false;
+        } else {
+            if (text.isEmpty()) return false;
+            if (text.length() > MAX_CHAT_LEN) text = text.substring(0, MAX_CHAT_LEN);
+        }
+        final String finalText = text;
+        final String eventKind = reaction ? "REACTION" : "MESSAGE";
+        entry.baseStore().update(state -> {
+            PlayerSnapshot sender = state.players().stream()
+                    .filter(p -> p.playerId().equals(playerId)).findFirst().orElse(null);
+            if (sender == null) return state;  // not a player in this session
+            return GameEventHelper.appendEvents(state, GameEventHelper.ev("CHAT", playerId,
+                    java.util.Map.of("kind", eventKind, "content", finalText, "name", sender.name())));
+        });
+        lastActivityAt.put(sessionId, System.currentTimeMillis());
+        return true;
+    }
+
     public double getBotSpeedMultiplier(String sessionId) {
         Entry entry = sessions.get(sessionId);
         if (entry == null || entry.botDriver() == null) return -1;
