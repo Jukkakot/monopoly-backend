@@ -1,0 +1,144 @@
+package fi.monopoly.server.bot;
+
+import fi.monopoly.domain.session.GameEventEntry;
+import fi.monopoly.domain.session.PlayerSnapshot;
+import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.domain.session.SessionStatus;
+import fi.monopoly.utils.RandomSource;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Unit tests for {@link BotChatter}: the situational bot-chat decision logic. Uses a
+ * controllable RandomSource so probability gates are deterministic.
+ */
+class BotChatterTest {
+
+    private static final String BOT = "bot-1";
+    private static final String BOT2 = "bot-2";
+    private static final String HUMAN = "human-1";
+    private static final Set<String> BOTS = Set.of(BOT, BOT2);
+
+    /** RandomSource whose gate value (nextDouble) is fixed, and whose nextInt always returns 0. */
+    private static final class FixedRng implements RandomSource {
+        private final double d;
+        FixedRng(double d) { this.d = d; }
+        @Override public int nextInt(int bound) { return 0; }
+        @Override public double nextDouble() { return d; }
+        @Override public long nextLong(long o, long b) { return o; }
+        @Override public RandomSource derive(String salt) { return this; }
+    }
+
+    private static PlayerSnapshot player(String id, boolean bankrupt) {
+        return new PlayerSnapshot(id, "seat-" + id, id, 500, 1, bankrupt, bankrupt, false, 0, 0, List.of());
+    }
+
+    private static SessionState state(PlayerSnapshot... players) {
+        return new SessionState("s", 1L, SessionStatus.IN_PROGRESS,
+                List.of(), List.of(players), List.of(), null, null, null, null, null, null);
+    }
+
+    private static GameEventEntry ev(long id, String type, List<String> pids, Map<String, String> data) {
+        return new GameEventEntry(id, id, type, pids, data);
+    }
+
+    private static SessionState twoBotsAndHuman() {
+        return state(player(BOT, false), player(BOT2, false), player(HUMAN, false));
+    }
+
+    @Test
+    void firstCallSeedsAndEmitsNothingEvenForAnEligibleEvent() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.0)); // gate always passes
+        var events = List.of(ev(5, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1")));
+
+        var intents = chatter.onNewEvents(events, twoBotsAndHuman(), BOTS, 1_000L);
+
+        assertTrue(intents.isEmpty(), "the first snapshot seeds the cursor without replaying history");
+    }
+
+    @Test
+    void botCommentsOnItsOwnPurchaseAfterSeeding() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.0));
+        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+
+        var intents = chatter.onNewEvents(
+                List.of(ev(2, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 10_000L);
+
+        assertEquals(1, intents.size());
+        assertEquals(BOT, intents.get(0).botId());
+        assertEquals("MESSAGE", intents.get(0).kind());
+        assertFalse(intents.get(0).content().isBlank());
+    }
+
+    @Test
+    void lowProbabilityGateSuppressesChatter() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.99)); // gate always fails
+        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+
+        var intents = chatter.onNewEvents(
+                List.of(ev(2, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 10_000L);
+
+        assertTrue(intents.isEmpty());
+    }
+
+    @Test
+    void perBotCooldownBlocksBackToBackChatterFromTheSameBot() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.0));
+        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+        // First event lands a line for BOT at t=10_000.
+        var first = chatter.onNewEvents(
+                List.of(ev(2, "BUILT_HOTEL", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 10_000L);
+        assertEquals(1, first.size());
+
+        // A second eligible event only 1s later — global + per-bot cooldown must suppress it.
+        var second = chatter.onNewEvents(
+                List.of(ev(3, "BUILT_HOTEL", List.of(BOT), Map.of("property", "B2"))),
+                twoBotsAndHuman(), BOTS, 11_000L);
+        assertTrue(second.isEmpty(), "cooldowns keep a single bot from chattering every event");
+    }
+
+    @Test
+    void aSurvivingBotReactsToAnotherPlayersBankruptcy() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.0));
+        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(BOT), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+
+        var intents = chatter.onNewEvents(
+                List.of(ev(2, "WENT_BANKRUPT", List.of(HUMAN), Map.of())),
+                state(player(BOT, false), player(BOT2, false), player(HUMAN, true)),
+                BOTS, 20_000L);
+
+        assertEquals(1, intents.size());
+        assertTrue(BOTS.contains(intents.get(0).botId()));
+        assertFalse(intents.get(0).content().isBlank());
+    }
+
+    @Test
+    void botGloatsWhenItReceivesBigRent() {
+        BotChatter chatter = new BotChatter(new FixedRng(0.0));
+        chatter.onNewEvents(List.of(ev(1, "DICE_ROLLED", List.of(HUMAN), Map.of("d1", "3", "d2", "4"))),
+                twoBotsAndHuman(), BOTS, 0L);
+
+        // Human pays 150 rent to BOT (playerIds = [payer, creditor]).
+        var intents = chatter.onNewEvents(
+                List.of(ev(2, "PAID_RENT", List.of(HUMAN, BOT), Map.of("amount", "150"))),
+                twoBotsAndHuman(), BOTS, 30_000L);
+
+        assertEquals(1, intents.size());
+        assertEquals(BOT, intents.get(0).botId());
+        assertEquals("MESSAGE", intents.get(0).kind());
+    }
+}

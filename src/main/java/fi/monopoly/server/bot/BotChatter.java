@@ -1,0 +1,258 @@
+package fi.monopoly.server.bot;
+
+import fi.monopoly.domain.session.GameEventEntry;
+import fi.monopoly.domain.session.PlayerSnapshot;
+import fi.monopoly.domain.session.SessionState;
+import fi.monopoly.utils.RandomSource;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Decides when — and what — a bot says in the in-game chat. Bots occasionally comment on
+ * notable game events (buying, building, receiving/paying rent, jail, bankruptcy, trades)
+ * and drop the odd emoji reaction, so a table of bots feels alive rather than silent.
+ *
+ * <p>Design goals:
+ * <ul>
+ *   <li><b>Variance</b> — every situation has a pool of phrasings; a random one is picked so the
+ *       same event never yields the same line twice in a row.</li>
+ *   <li><b>Restraint</b> — a per-bot cooldown plus a global cooldown plus per-situation
+ *       probabilities keep the chatter occasional, never spammy.</li>
+ *   <li><b>Purity</b> — {@link #onNewEvents} is a plain function of (events, state, now); all
+ *       mutable pacing state lives here and is only touched from the driver's single scheduler
+ *       thread, so no synchronisation is needed.</li>
+ * </ul>
+ *
+ * <p>Messages are Finnish (the game is Helsinki-themed and its audience Finnish); emoji
+ * reactions are language-neutral. Reaction emoji are drawn only from the backend's curated
+ * allow-list so they always render.</p>
+ */
+public final class BotChatter {
+
+    /** A queued bot utterance: post {@code content} (kind MESSAGE|REACTION) as {@code botId} after {@code delayMs}. */
+    public record ChatIntent(String botId, String kind, String content, long delayMs) {}
+
+    // A bot won't chat again until this long after its last line — keeps any single bot from dominating.
+    private static final long PER_BOT_COOLDOWN_MS = 9_000L;
+    // No two bot lines closer together than this — staggers the table so reactions don't pile up.
+    private static final long GLOBAL_COOLDOWN_MS = 2_500L;
+    // A "big" rent that's worth complaining / gloating about.
+    private static final int BIG_RENT = 90;
+
+    private final RandomSource rng;
+    private final Map<String, Long> lastChatAtByBot = new HashMap<>();
+    // 0 = "no chat yet" (never negative, so the cooldown subtraction can't overflow a MIN_VALUE seed).
+    private long lastAnyChatAt = 0L;
+    private long lastSeenEventId = Long.MIN_VALUE;
+    private boolean seeded = false;
+
+    public BotChatter(RandomSource rng) {
+        this.rng = rng;
+    }
+
+    // ── Message pools (Finnish, with variance) ──────────────────────────────────────────────
+    private static final String[] BOUGHT = {
+            "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
+            "Ostoslistaa lyhemmäks. 🏠", "Mun kokoelma kasvaa.", "Ei jätetä hyviä tontteja väliin.",
+    };
+    private static final String[] BUILT_HOTEL = {
+            "Hotelli pystyssä! 🏨", "Tervetuloa — vuokra ei oo halpa. 😏",
+            "Nyt alkaa kilahtaa kassaan.", "Tästä tuli kallis kulma.",
+    };
+    private static final String[] RENT_GLOAT = {
+            "Kiitos vuokrasta! 💰", "Kassa kasvaa. 😎", "Mukava lisä tilille.",
+            "Aina yhtä kivaa periä vuokraa. 🤑", "Kohta ostan lisää tontteja näillä.",
+    };
+    private static final String[] RENT_PAIN = {
+            "Auts, kallis pysähdys. 😩", "No tuo sattui.", "Voi ei, melkein koko kassa meni.",
+            "Kallista huseerausta. 💸", "Pitää alkaa myydä taloja...",
+    };
+    private static final String[] JAIL = {
+            "No niin, vankilaan taas. 😅", "Nähdään parin kierroksen päästä.",
+            "Ei taas...", "Vankila kutsuu. 🚔",
+    };
+    private static final String[] OPPONENT_BANKRUPT = {
+            "Yksi vähemmän. 😎", "Peli on peli. 🤝", "Hyvää peliä!",
+            "Sääli, mutta bisnes on bisnestä.",
+    };
+    private static final String[] SELF_BANKRUPT = {
+            "Hyvää peliä kaikille! 💀", "No tähän se loppui — onnea muille!",
+            "Konkurssi. Hyvin pelattu, muut.",
+    };
+    private static final String[] TRADE_DONE = {
+            "Hyvä diili! 🤝", "Kaupat kunnossa.", "Molemmat voittaa — tai ainakin minä. 😏",
+    };
+
+    // ── Reaction pools (must be from the backend allow-list) ────────────────────────────────
+    private static final String[] REACT_RENT = { "💰", "😎", "🔥" };
+    private static final String[] REACT_BANKRUPT = { "😮", "😢", "😎" };
+    private static final String[] REACT_HOTEL = { "😮", "🔥", "👏" };
+    private static final String[] REACT_DOUBLES = { "🎲", "🍀", "😅" };
+
+    /**
+     * Given the freshly-arrived events and current state, returns any chat lines bots should
+     * post now. On the first call it silently seeds its event cursor to the current log tail so
+     * a mid-game reconnect (which re-delivers up to 50 old events) doesn't trigger a chatter
+     * burst.
+     */
+    public List<ChatIntent> onNewEvents(List<GameEventEntry> eventLog, SessionState state, Set<String> botIds, long nowMs) {
+        List<ChatIntent> out = new ArrayList<>();
+        if (eventLog == null || eventLog.isEmpty() || botIds.isEmpty()) return out;
+
+        long maxId = Long.MIN_VALUE;
+        for (GameEventEntry e : eventLog) maxId = Math.max(maxId, e.id());
+
+        if (!seeded) {
+            seeded = true;
+            lastSeenEventId = maxId;
+            return out;
+        }
+        if (maxId <= lastSeenEventId) return out;
+
+        for (GameEventEntry e : eventLog) {
+            if (e.id() <= lastSeenEventId) continue;
+            ChatIntent intent = considerEvent(e, state, botIds, nowMs);
+            if (intent != null) {
+                out.add(intent);
+                // Reserve the slot so a burst of events in one snapshot doesn't all fire at once.
+                lastAnyChatAt = nowMs + intent.delayMs();
+                lastChatAtByBot.put(intent.botId(), nowMs + intent.delayMs());
+            }
+        }
+        lastSeenEventId = maxId;
+        return out;
+    }
+
+    private ChatIntent considerEvent(GameEventEntry e, SessionState state, Set<String> botIds, long nowMs) {
+        if (nowMs - lastAnyChatAt < GLOBAL_COOLDOWN_MS) return null;
+        String author = e.playerIds().isEmpty() ? null : e.playerIds().get(0);
+
+        switch (e.type()) {
+            case "BOUGHT_PROPERTY":
+                if (isBot(author, botIds)) return maybeMessage(author, BOUGHT, 0.30, nowMs);
+                break;
+            case "BUILT_HOTEL":
+                if (isBot(author, botIds)) return maybeMessage(author, BUILT_HOTEL, 0.55, nowMs);
+                // A non-bot builds a hotel — a bot might react with awe.
+                return maybeReactionFromOther(author, REACT_HOTEL, 0.20, state, botIds, nowMs);
+            case "WENT_TO_JAIL":
+                if (isBot(author, botIds)) return maybeMessage(author, JAIL, 0.30, nowMs);
+                break;
+            case "PAID_RENT": {
+                // playerIds: [payer, creditor]. amount in data.
+                String creditor = e.playerIds().size() > 1 ? e.playerIds().get(1) : null;
+                int amount = parseInt(e.data().get("amount"));
+                if (isBot(creditor, botIds)) {
+                    // Bot received rent — gloat on a big one, otherwise a small chance of a 💰.
+                    if (amount >= BIG_RENT) return maybeMessage(creditor, RENT_GLOAT, 0.45, nowMs);
+                    return maybeReaction(creditor, REACT_RENT, 0.18, state, botIds, nowMs);
+                }
+                if (isBot(author, botIds) && amount >= BIG_RENT) {
+                    return maybeMessage(author, RENT_PAIN, 0.40, nowMs);
+                }
+                break;
+            }
+            case "WENT_BANKRUPT":
+                if (isBot(author, botIds)) return maybeMessage(author, SELF_BANKRUPT, 0.85, nowMs);
+                // A human (or another already-processed player) went bankrupt — a surviving bot reacts.
+                return maybeMessageFromOther(author, OPPONENT_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs);
+            case "TRADE_ACCEPTED": {
+                for (String pid : e.playerIds()) {
+                    if (isBot(pid, botIds)) return maybeMessage(pid, TRADE_DONE, 0.30, nowMs);
+                }
+                break;
+            }
+            case "DICE_ROLLED": {
+                int d1 = parseInt(e.data().get("d1"));
+                int d2 = parseInt(e.data().get("d2"));
+                if (d1 > 0 && d1 == d2 && isBot(author, botIds)) {
+                    return maybeReaction(author, REACT_DOUBLES, 0.15, state, botIds, nowMs);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        return null;
+    }
+
+    // ── Emission helpers ────────────────────────────────────────────────────────────────────
+
+    private ChatIntent maybeMessage(String botId, String[] pool, double probability, long nowMs) {
+        if (!canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
+        return new ChatIntent(botId, "MESSAGE", pick(pool), thinkDelay());
+    }
+
+    private ChatIntent maybeReaction(String botId, String[] pool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+        if (!isActive(botId, state) || !canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
+        return new ChatIntent(botId, "REACTION", pick(pool), thinkDelay());
+    }
+
+    /** A random surviving bot other than {@code excludeId} reacts with an emoji. */
+    private ChatIntent maybeReactionFromOther(String excludeId, String[] pool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+        if (rng.nextDouble() >= probability) return null;
+        String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
+        if (reactor == null) return null;
+        return new ChatIntent(reactor, "REACTION", pick(pool), thinkDelay());
+    }
+
+    /** A random surviving bot other than {@code excludeId} comments — a message, or (30 %) an emoji reaction. */
+    private ChatIntent maybeMessageFromOther(String excludeId, String[] msgPool, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+        if (rng.nextDouble() >= probability) return null;
+        String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
+        if (reactor == null) return null;
+        boolean reaction = rng.nextDouble() < 0.30;
+        return new ChatIntent(reactor, reaction ? "REACTION" : "MESSAGE", pick(reaction ? reactPool : msgPool), thinkDelay());
+    }
+
+    private String pickEligibleBot(String excludeId, SessionState state, Set<String> botIds, long nowMs) {
+        List<String> eligible = new ArrayList<>();
+        for (String id : botIds) {
+            if (id.equals(excludeId)) continue;
+            if (!isActive(id, state) || !canChat(id, nowMs)) continue;
+            eligible.add(id);
+        }
+        if (eligible.isEmpty()) return null;
+        return eligible.get(rng.nextInt(eligible.size()));
+    }
+
+    // ── Small utilities ─────────────────────────────────────────────────────────────────────
+
+    private boolean canChat(String botId, long nowMs) {
+        Long last = lastChatAtByBot.get(botId);
+        return last == null || nowMs - last >= PER_BOT_COOLDOWN_MS;
+    }
+
+    /** A short, slightly random "typing" delay so lines land after the event's animation, staggered. */
+    private long thinkDelay() {
+        return 700L + rng.nextInt(1800);
+    }
+
+    private String pick(String[] pool) {
+        return pool[rng.nextInt(pool.length)];
+    }
+
+    private static boolean isBot(String playerId, Set<String> botIds) {
+        return playerId != null && botIds.contains(playerId);
+    }
+
+    private static boolean isActive(String playerId, SessionState state) {
+        PlayerSnapshot p = find(playerId, state);
+        return p != null && !p.bankrupt() && !p.eliminated();
+    }
+
+    private static PlayerSnapshot find(String playerId, SessionState state) {
+        if (playerId == null) return null;
+        for (PlayerSnapshot p : state.players()) if (p.playerId().equals(playerId)) return p;
+        return null;
+    }
+
+    private static int parseInt(String s) {
+        if (s == null) return 0;
+        try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return 0; }
+    }
+}

@@ -24,6 +24,13 @@ import java.util.concurrent.atomic.AtomicLong;
 @Slf4j
 public final class PureDomainBotDriver implements ClientSessionListener {
 
+    /** Sink for bot-authored chat. Supplied by the registry, which knows how to append a CHAT
+     *  event on behalf of a (token-less) bot. Null in tests / headless tournaments — no chat. */
+    @FunctionalInterface
+    public interface ChatPoster {
+        void post(String botPlayerId, String kind, String content);
+    }
+
     // Fallback delay used when situational logic cannot determine a better value.
     private static final long DEFAULT_BOT_DELAY_MS = 900L;
 
@@ -53,6 +60,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     private final RandomSource rng;
     private final fi.monopoly.server.bot.BotStrategy strategy;
     private final BotExecutor executor;
+    // Bot chatter — occasionally posts situational messages / emoji reactions. Null poster = disabled.
+    private final ChatPoster chatPoster;
+    private final fi.monopoly.server.bot.BotChatter chatter;
     private final Map<String, fi.monopoly.server.bot.BotMemory> memories;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pendingAction = new AtomicBoolean(false);
@@ -79,7 +89,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             Set<String> botPlayerIds,
             Map<String, StrongBotConfig> configs,
             RandomSource rng,
-            fi.monopoly.server.bot.BotStrategy strategyOverride) {
+            fi.monopoly.server.bot.BotStrategy strategyOverride,
+            ChatPoster chatPoster) {
         this.publisher = publisher;
         this.sessionId = sessionId;
         this.botPlayerIds = botPlayerIds;
@@ -87,6 +98,8 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         this.rng = rng;
         this.strategy = strategyOverride != null ? strategyOverride : new PureDomainStrategy(configs);
         this.executor = new BotExecutor(publisher, sessionId);
+        this.chatPoster = chatPoster;
+        this.chatter = new fi.monopoly.server.bot.BotChatter(rng);
         var mem = new java.util.concurrent.ConcurrentHashMap<String, fi.monopoly.server.bot.BotMemory>();
         for (String id : botPlayerIds) mem.put(id, fi.monopoly.server.bot.BotMemory.empty());
         this.memories = java.util.Collections.unmodifiableMap(mem);
@@ -156,10 +169,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             SessionState initialState,
             Map<String, StrongBotConfig> configs,
             fi.monopoly.server.bot.BotStrategy strategy) {
+        return createAndRegisterIfNeeded(publisher, initialState, configs, strategy, null);
+    }
+
+    // Full overload: adds a chat sink so bots can post situational messages / reactions.
+    static PureDomainBotDriver createAndRegisterIfNeeded(
+            SessionCommandPublisher publisher,
+            SessionState initialState,
+            Map<String, StrongBotConfig> configs,
+            fi.monopoly.server.bot.BotStrategy strategy,
+            ChatPoster chatPoster) {
         Set<String> botIds = collectBotPlayerIds(initialState);
         if (botIds.isEmpty()) return null;
         PureDomainBotDriver driver = new PureDomainBotDriver(
-                publisher, initialState.sessionId(), botIds, configs, RandomSource.threadLocal(), strategy);
+                publisher, initialState.sessionId(), botIds, configs, RandomSource.threadLocal(), strategy, chatPoster);
         publisher.addListener(driver);
         log.info("Bot driver registered for session {} — bots: {}",
                 initialState.sessionId().substring(0, 8), botIds);
@@ -321,6 +344,12 @@ public final class PureDomainBotDriver implements ClientSessionListener {
                 fi.monopoly.server.bot.BotMemory.recordTradeKilledByPartner(memories, prevTrade, closer);
             }
         }
+
+        // Bot chatter: have bots occasionally comment on notable events or drop an emoji reaction.
+        // Runs on every in-progress snapshot (even a human's turn) so bots can react to human
+        // actions too. Each intent is scheduled with its own think-delay so lines land naturally.
+        maybeChat(state);
+
         if (!needsBotAction(state)) {
             return;
         }
@@ -334,6 +363,20 @@ public final class PureDomainBotDriver implements ClientSessionListener {
             return;
         }
         scheduler.schedule(this::takeStep, computeDelay(snapshot.state()), TimeUnit.MILLISECONDS);
+    }
+
+    /** Runs the chatter over the latest event log and schedules any bot lines it decides on. */
+    private void maybeChat(SessionState state) {
+        if (chatPoster == null) return;
+        var intents = chatter.onNewEvents(state.eventLog(), state, botPlayerIds, System.currentTimeMillis());
+        for (var intent : intents) {
+            scheduler.schedule(
+                    () -> {
+                        try { chatPoster.post(intent.botId(), intent.kind(), intent.content()); }
+                        catch (Exception e) { log.warn("Bot chat post failed", e); }
+                    },
+                    intent.delayMs(), TimeUnit.MILLISECONDS);
+        }
     }
 
     // Bot step

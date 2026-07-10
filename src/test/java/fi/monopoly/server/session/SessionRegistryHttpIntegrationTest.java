@@ -5,6 +5,7 @@ import fi.monopoly.application.result.CommandResult;
 import fi.monopoly.client.session.ClientSessionListener;
 import fi.monopoly.client.session.ClientSessionUpdates;
 import fi.monopoly.client.session.SessionCommandPort;
+import fi.monopoly.domain.session.SeatKind;
 import fi.monopoly.domain.session.SessionState;
 import fi.monopoly.server.transport.SessionHttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -476,6 +477,24 @@ class SessionRegistryHttpIntegrationTest {
         String snap = get("/sessions/" + sessionId + "/snapshot").body();
         assertTrue(snap.contains("\"CHAT\"") && snap.contains("🎉"),
                 "Snapshot events should carry the CHAT reaction, got: " + snap);
+    }
+
+    @Test
+    void postBotChatAppendsChatEventWithoutATokenCheck() throws Exception {
+        // Bots have no player token, so they can't use the /chat endpoint — the registry posts
+        // on their behalf via postBotChat (no impersonation guard). Verify a bot line lands in
+        // the event log all the same.
+        var created = registry.create(
+                List.of("Botti Yksi", "Botti Kaksi"),
+                List.of("#E63946", "#2A9D8F"),
+                List.of(SeatKind.BOT, SeatKind.BOT));
+        String sessionId = created.sessionId();
+
+        registry.postBotChat(sessionId, "player-1", "MESSAGE", "Hyvä siirto! 😎");
+
+        String snap = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snap.contains("\"CHAT\"") && snap.contains("Hyvä siirto"),
+                "Bot chat should appear in the event log, got: " + snap);
     }
 
     // -------------------------------------------------------------------------
