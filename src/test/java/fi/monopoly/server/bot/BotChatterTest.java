@@ -89,8 +89,8 @@ class BotChatterTest {
 
         var first = chatter.onNewEvents(
                 List.of(ev(2, "PASSED_GO", List.of(BOT), Map.of())), twoBotsAndHuman(), BOTS, 10_000L);
-        assertEquals(1, first.size());
-        assertEquals("greeting", first.get(0).msgKey(), "a bot greets at the start of the game");
+        assertTrue(first.stream().anyMatch(i -> "greeting".equals(i.msgKey())),
+                "a bot greets at the start of the game");
 
         // Much later — no second greeting.
         var later = chatter.onNewEvents(

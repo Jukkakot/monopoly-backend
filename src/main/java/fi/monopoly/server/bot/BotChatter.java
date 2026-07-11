@@ -46,17 +46,15 @@ public final class BotChatter {
      */
     public record ChatIntent(String botId, String kind, String content, String msgKey, int variant, long delayMs) {}
 
-    // A bot won't chat again until this long after its last line — keeps any single bot from dominating.
+    // A bot won't chat again until this long after its own last line — keeps a single bot from
+    // dominating. There is deliberately NO shared/global cooldown: each bot chatters on its own
+    // schedule, so several can talk close together.
     private static final long PER_BOT_COOLDOWN_MS = 9_000L;
-    // No two bot lines closer together than this — staggers the table so reactions don't pile up.
-    private static final long GLOBAL_COOLDOWN_MS = 2_500L;
     // A "big" rent that's worth complaining / gloating about.
     private static final int BIG_RENT = 90;
 
     private final RandomSource rng;
     private final Map<String, Long> lastChatAtByBot = new HashMap<>();
-    // 0 = "no chat yet" (never negative, so the cooldown subtraction can't overflow a MIN_VALUE seed).
-    private long lastAnyChatAt = 0L;
     private long lastSeenEventId = Long.MIN_VALUE;
     private boolean seeded = false;
     private boolean greeted = false;
@@ -92,121 +90,122 @@ public final class BotChatter {
     private static final String K_BANTER_LOW = "banterLow";
 
     private static final String[] BOUGHT = {
-            "Tää tontti on nyt mun. 😎", "Hyvä sijoitus!", "Tästä tulee hyvä.",
-            "Ostoslistaa lyhemmäks. 🏠", "Mun kokoelma kasvaa.", "Ei jätetä hyviä tontteja väliin.",
-            "Tää täydentää väriryhmää. 🎯", "Halpa hinta tästä paikasta.",
-            "Strateginen osto — estän muita. 😏", "Rautatiet tuottaa varmaa tuloa. 🚂",
-            "Naapuritontti — nyt ne ovat parina. 👫", "Tämä oli pakko napata.",
-            "Sijainti, sijainti, sijainti. 📍", "Hyvä lisä salkkuun. 💼",
+            "Joo-o, tää on nyt mun. 😎", "Hyvä läträys!", "Täst tulee kultakaivos.",
+            "Yks tontti listalt pois. 🏠", "Mun imperiumi kasvaa taas.", "Ei jätetä hyvii paloi muille.",
+            "Tää täydentää setin. 🎯", "Halvalla sain, kiitti.",
+            "Otin tän vaan et te ette saa. 😏", "Rautatiet on varmaa fyrkkaa. 🚂",
+            "Vieres tontti — nyt on pari kasas. 👫", "Pakko ottaa, en voinu vastustaa.",
+            "Sijainti ratkasee, aina. 📍", "Nam, hyvä lisä salkkuun. 💼",
     };
     private static final String[] BUILT_HOTEL = {
-            "Hotelli pystyssä! 🏨", "Tervetuloa — vuokra ei oo halpa. 😏",
-            "Nyt alkaa kilahtaa kassaan.", "Tästä tuli kallis kulma.",
-            "Hotelli maksaa itsensä pian takaisin. 💰", "Täältä pesee jos tänne osutte. 💸",
-            "Loistohotelli valmis. 🏨", "Nyt tästä ruudusta tuli myrkkyä muille. ☠️",
-            "Investointi joka tuottaa. 📈",
+            "Hotelli pystys! 🏨", "Tervetuloa — ei oo halpaa lystii. 😏",
+            "Nyt alkaa kilahtaa kassaan. 🤑", "Täst tuli kallis kulma teille.",
+            "Maksaa ittensä takas ihan just. 💰", "Jos tänne osutte ni voi voi. 💸",
+            "Superhotelli valmis. 🏨", "Tää ruutu on nyt puhdasta myrkkyy. ☠️",
+            "Tällasii sijotuksii mä diggaan. 📈",
     };
     private static final String[] RENT_GLOAT = {
-            "Kiitos vuokrasta! 💰", "Kassa kasvaa. 😎", "Mukava lisä tilille.",
-            "Aina yhtä kivaa periä vuokraa. 🤑", "Kohta ostan lisää tontteja näillä.",
-            "Sijoitus tuottaa. 📈", "Passiivista tuloa parhaimmillaan.",
-            "Kiitos, maksa vain. 😌", "Tämä tili kasvaa mukavasti.",
-            "Vuokralaiset ovat parhaita. 🏦", "Cha-ching! 🤑",
+            "Kiitti vuokrist! 💰", "Kassa kasvaa taas. 😎", "Nam, kivaa lisää.",
+            "Vuokran periminen on kyl parasta. 🤑", "Näillä ostan lisää läträimii.",
+            "Sijotus tuottaa, mitäs mä sanoin. 📈", "Passiivist tuloo, rakastan tätä.",
+            "Kiitti vaan, maksa pois. 😌", "Tää tili paisuu mukavasti.",
+            "Vuokralaiset on mun bestii. 🏦", "Cha-ching! 🤑",
     };
     private static final String[] RENT_PAIN = {
-            "Auts, kallis pysähdys. 😩", "No tuo sattui.", "Voi ei, melkein koko kassa meni.",
-            "Kallista huseerausta. 💸", "Pitää alkaa myydä taloja...",
-            "Tuo vei budjetin. 😰", "Väärä ruutu, väärä hetki.",
-            "No niin, sinne meni säästöt.", "Tästä toivuttava nopeasti.",
-            "Kallis oppitunti. 📚", "Ai että sattui kukkaroon. 😖",
+            "Auts, kallis pysähdys. 😩", "No täähän sattu.", "Voi ei, melkein koko kassa meni. 😱",
+            "Kallist lystii tää. 💸", "Nyt pitää alkaa myymään taloi...",
+            "Tos meni budjetti. 😰", "Väärä ruutu, väärä hetki, äh.",
+            "No siin meni säästöt, kiitti.", "Täst pitää toipuu äkkii.",
+            "Kallis oppiläksy tää. 📚", "Auts, sattu kukkaroon. 😖",
     };
     private static final String[] JAIL = {
-            "No niin, vankilaan taas. 😅", "Nähdään parin kierroksen päästä.",
-            "Ei taas...", "Vankila kutsuu. 🚔",
+            "No niin, koppiin taas. 😅", "Nähää parin kierroksen päästä.",
+            "Ei taas... äh.", "Vankila kutsuu. 🚔",
     };
     private static final String[] OPPONENT_BANKRUPT = {
-            "Yksi vähemmän. 😎", "Peli on peli. 🤝", "Hyvää peliä!",
-            "Sääli, mutta bisnes on bisnestä.",
+            "Yks vähemmän. 😎", "Peli on peli. 🤝", "Hyvin pelattu silti!",
+            "Sääli, mut bisnes on bisnestä.",
     };
     private static final String[] SELF_BANKRUPT = {
-            "Hyvää peliä kaikille! 💀", "No tähän se loppui — onnea muille!",
-            "Konkurssi. Hyvin pelattu, muut.",
+            "Hyvää peliä kaikille! 💀", "No tähän se tyssäs — onnee muille!",
+            "Konkkaan mentiin. Hyvin pelattu, muut.",
     };
     private static final String[] TRADE_DONE = {
-            "Hyvä diili! 🤝", "Kaupat kunnossa.", "Molemmat voittaa — tai ainakin minä. 😏",
-            "Tämä kauppa vahvistaa asemaani. 💼", "Sain tarvitsemani tontin. 🎯", "Hyväksyn — tästä on hyötyä.",
+            "Hyvä diili! 🤝", "Kaupat klaari.", "Molemmat voittaa — tai ainaki mä. 😏",
+            "Tää kauppa vahvistaa mun asemaa. 💼", "Sain just sen tontin mitä tarvin. 🎯", "Jees, tästä on hyötyy.",
     };
     private static final String[] REJECT_OFFER = {
-            "Ei kiitos — tuo ei hyödytä minua.", "En luovu tästä tontista. 🚫",
-            "Tarjous on liian yksipuolinen. 🤨", "Pidän omani, kiitos.",
-            "Tuosta kaupasta häviäisin. Ei käy.", "Mieti parempi tarjous. 😏",
+            "Ei kiitti — ei hyödytä mua.", "En luovu täst tontist. 🚫",
+            "Toi tarjous on ihan yksipuolinen. 🤨", "Pidän omani, kiitti.",
+            "Tost mä häviäisin. Ei käy.", "Keksi parempi tarjous. 😏",
     };
     private static final String[] GREETING = {
-            "Aloitetaan! 🎲", "Tsemppiä kaikille! 🍀", "Nyt pelataan. 😎", "Onnea matkaan, tarvitsette sitä. 😏",
+            "No niin, pistetään pystyyn! 🎲", "Tsemppii kaikille — mä en tarvii. 😏",
+            "Antaa palaa!", "Onnee vaan, kyl te sitä tarttette. 😎",
     };
     private static final String[] PASS_GO = {
-            "Kierros täynnä, +200! 💰", "Kiitos, pankki. 💵", "Taas 200 taskuun.",
+            "Kierros täys, +200! 💰", "Kiitti pankki. 💵", "Taas 200 taskuun. 😎",
     };
     private static final String[] JAIL_OUT = {
-            "Vapaana taas! 🔓", "Takaisin peliin. 😎", "Ei minua kauaa pidellä.",
+            "Vapaana taas! 🔓", "Takas peliin. 😎", "Ei mua kauaa pidellä.",
     };
     private static final String[] MORTGAGE = {
-            "Pakko kiinnittää... 😬", "Tarvitaan käteistä nopeasti.", "Ei muuta vaihtoehtoa nyt.",
-            "Kiinnitän tämän, tarvitsen rahaa ostoon.", "Väliaikainen kiinnitys — nostan pian takaisin.",
+            "Pakko kiinnittää, äh... 😬", "Tarviin cashii nyt heti.", "Ei muuta vaihtoehtoo.",
+            "Kiinnitän tän, tarviin fyrkkaa ostoon.", "Väliaikanen juttu, nostan pian takas.",
     };
     private static final String[] TRADE_NO = {
-            "No ei sitten. 🤷", "Harmi, olisi ollut hyvä diili.", "Ehkä ensi kerralla. 🤔",
+            "No ei sitten. 🤷", "Harmi, ois ollu hyvä diili.", "Ehkä ens kerral. 🤔",
     };
     private static final String[] BUILT_HOUSE = {
-            "Talo nostaa vuokraa mukavasti. 🏠", "Rakennan tästä vahvan.",
-            "Pieni investointi, iso tuotto. 📈", "Talo kerrallaan kohti hotellia.",
+            "Talo nostaa vuokraa, jees. 🏠", "Rakennan täst vahvan.",
+            "Pieni panostus, iso tuotto. 📈", "Talo kerrallaan kohti hotellii.",
     };
     private static final String[] REDEEM = {
-            "Nostin kiinnityksen — kassa kestää taas. 💪", "Takaisin omistukseen ilman lainaa.",
-            "Nyt tämä tuottaa taas täyttä vuokraa. 💰",
+            "Nostin kiinnityksen — kassa kestää taas. 💪", "Takas omaks ilman velkaa.",
+            "Nyt tää tuottaa taas täydet. 💰",
     };
     private static final String[] BANTER = {
-            "Katsotaanpa mitä nopat antavat. 🎲", "Tuuria peliin!", "Nyt ei saa mennä vankilaan... 🤞",
-            "Rahaa on, uskallan pelata. 💰", "Tämä kierros on mun. 😎",
-            "Mietin seuraavaa siirtoa... 🤔", "Nyt kannattaa säästää käteistä.", "Kohta iskee monopoli. 😏",
-            "Ei kiirettä, peli on pitkä.", "Rento fiilis, homma hanskassa. 😎",
-            "Katsotaan mihin nappula päätyy.", "Pörssi nousee, ostan lisää. 📈",
+            "Katotaas mitä nopat antaa. 🎲", "Tuuria peliin!", "Kunhan en mee vankilaan... 🤞",
+            "Fyrkkaa on, uskallan pelaa. 💰", "Tää kierros on mun. 😎",
+            "Mietin seuraavaa siirtoo... 🤔", "Nyt kannattaa säästää cashii.", "Kohta iskee monopoli. 😏",
+            "Ei kiirettä, peli on pitkä.", "Rento meininki, homma hanskas. 😎",
+            "Katotaan mihin toi nappula päätyy.", "Pörssi nousee, ostan lisää. 📈",
     };
     // Idle banter tuned to how the bot is doing, so a random line still fits the situation.
     private static final String[] BANTER_LEAD = {
-            "Johdan peliä — ja aion pitää sen niin. 😎", "Kassani on paksuin pöydässä. 💰",
-            "Voitto häämöttää jo. 🏆", "Kukaan ei taida saada minua kiinni.",
-            "Imperiumini kasvaa kasvamistaan. 🏰", "Muut pelaa toisesta sijasta. 😏",
-            "Helppoa tämä on. 😌", "Vuokrat virtaa, kiitos kaikille.",
-            "Pidän ohjat käsissäni.", "Kohta koko lauta on minun. 🗺️",
+            "Mä johdan — ja aion pitää sen niin. 😎", "Mun kassa on paksuin täs pöydäs. 💰",
+            "Voitto haisee jo. 🏆", "Ei kukaan saa mua kii.",
+            "Mun imperiumi vaan kasvaa. 🏰", "Te muut pelaatte kakkossijast. 😏",
+            "Helppoo tää on. 😌", "Vuokrat virtaa, kiitti kaikille.",
+            "Mä pidän ohjat käsis.", "Kohta koko lauta on mun. 🗺️",
     };
     private static final String[] BANTER_TRAIL = {
-            "En ole vielä ulkona pelistä. 💪", "Käännän vielä tämän pelin.",
-            "Yksi hyvä kauppa ja olen taas mukana.", "Alakynnessä, mutta en luovuta.",
-            "Tästä noustaan vielä. 📈", "Vähän tuuria kaipaisin nyt... 🍀",
-            "Ei tämä tähän lopu.", "Comeback on tulossa, uskokaa pois. 😤",
-            "Pakko pelata varovasti nyt.", "Odottakaa vaan, käännän tuulen. 🌬️",
+            "En oo viel ulkona täst. 💪", "Kyl mä tän viel käännän.",
+            "Yks hyvä diili ni oon taas mukan.", "Alakynnes ollaan, mut en luovuta.",
+            "Täst noustaan viel. 📈", "Vähän tuuria kaipaisin nyt... 🍀",
+            "Ei tää tähän lopu.", "Comeback tulee, uskokaa pois. 😤",
+            "Pakko pelaa varovasti nyt.", "Odottakaa vaan, käännän tuulen. 🌬️",
     };
     private static final String[] BANTER_LOW = {
-            "Kassa hupenee huolestuttavasti... 😰", "Nyt on tiukkaa, pitää säästää.",
-            "Toivottavasti en osu kenenkään hotelliin. 😬", "Vähän rahaa, paljon riskiä.",
-            "Yksi iso vuokra ja olen pulassa.", "Pitää ehkä kiinnittää tontteja pian.",
-            "Sydän hakkaa jokaisella heitolla. 💓", "Rukoilen pieniä vuokria. 🙏",
-            "Selviänkö tästä kierroksesta?", "Kassakriisi lähellä... 😅",
+            "Kassa hupenee ihan hurjaa vauhtii... 😰", "Nyt on tiukkaa, pitää säästää.",
+            "Kunhan en osu kenenkään hotelliin. 😬", "Vähän rahaa, paljon riskii.",
+            "Yks iso vuokra ni oon liemes.", "Pitää kai kiinnittää tontteja pian.",
+            "Sydän hakkaa joka heitol. 💓", "Rukoilen pieniä vuokrii. 🙏",
+            "Selviänks mä täst kierrokses?", "Kohta on kassakriisi... 😅",
     };
     private static final String[] DREW_CARD = {
-            "Katsotaan mitä kortti sanoo... 🃏", "Sattumaa peliin!", "Toivotaan hyvää korttia. 🤞",
-            "Kortit ratkaisee. 🎴",
+            "Katotaas mitä kortti sanoo... 🃏", "Vähän sattumaa peliin!", "Toivotaan hyvää korttii. 🤞",
+            "Kortit ratkasee. 🎴",
     };
     private static final String[] SOLD_BUILDING = {
-            "Pakko myydä rakennuksia... 😔", "Ikävä kyllä, talot lähtee.",
-            "Tarvitsen käteistä, myyn taloja. 💸", "Askel taaksepäin, mutta pakko.",
+            "Pakko myydä rakennuksii... 😔", "Harmi, talot lähtee.",
+            "Tarviin cashii, myyn taloi. 💸", "Askel taakspäin, mut pakko.",
     };
     private static final String[] JAIL_TAUNT = {
-            "Hei, vankilaan siitä! 😂", "Nauttikaa selleistä. 😏", "Yksi vähemmän liikkeellä. 😎",
+            "Hei, koppiin siitä! 😂", "Nauttikaa sellist. 😏", "Yks vähemmän liikkeel. 😎",
     };
     private static final String[] PLAYER_LEFT = {
-            "No sepä harmi, pelaaja lähti.", "Yksi vähemmän pöydässä.", "Peli jatkuu ilman häntä. 🤷",
+            "No sepä harmi, joku lähti.", "Yks vähemmän pöydäs.", "Peli jatkuu ilman sitä. 🤷",
     };
 
     // ── Reaction pools (must be from the backend allow-list) ────────────────────────────────
@@ -243,11 +242,10 @@ public final class BotChatter {
             greeted = true;
             if (rng.nextDouble() < 0.80) {
                 String greeter = pickEligibleBot(null, state, botIds, nowMs);
-                if (greeter != null && nowMs - lastAnyChatAt >= GLOBAL_COOLDOWN_MS) {
+                if (greeter != null) {
                     int v = rng.nextInt(GREETING.length);
                     ChatIntent g = new ChatIntent(greeter, "MESSAGE", GREETING[v], K_GREETING, v, thinkDelay());
                     out.add(g);
-                    lastAnyChatAt = nowMs + g.delayMs();
                     lastChatAtByBot.put(greeter, nowMs + g.delayMs());
                 }
             }
@@ -258,8 +256,6 @@ public final class BotChatter {
             ChatIntent intent = considerEvent(e, state, botIds, nowMs);
             if (intent != null) {
                 out.add(intent);
-                // Reserve the slot so a burst of events in one snapshot doesn't all fire at once.
-                lastAnyChatAt = nowMs + intent.delayMs();
                 lastChatAtByBot.put(intent.botId(), nowMs + intent.delayMs());
             }
         }
@@ -268,7 +264,6 @@ public final class BotChatter {
     }
 
     private ChatIntent considerEvent(GameEventEntry e, SessionState state, Set<String> botIds, long nowMs) {
-        if (nowMs - lastAnyChatAt < GLOBAL_COOLDOWN_MS) return null;
         String author = e.playerIds().isEmpty() ? null : e.playerIds().get(0);
 
         switch (e.type()) {
