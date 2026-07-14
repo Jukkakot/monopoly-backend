@@ -94,6 +94,10 @@ public final class BotChatter {
     private static final String K_CARD_GAIN = "cardGain";
     private static final String K_OPP_JAIL_OUT = "opponentJailOut";
     private static final String K_OPP_PASSED_GO = "opponentPassedGo";
+    private static final String K_DOUBLES = "doubles";
+    private static final String K_OPP_HOTEL = "opponentHotel";
+    private static final String K_OPP_MORTGAGE = "opponentMortgage";
+    private static final String K_OPP_REDEEM = "opponentRedeem";
 
     private static final String[] BOUGHT = {
             "Joo-o, tää on nyt mun. 😎", "Hyvä läträys!", "Täst tulee kultakaivos. 💰",
@@ -116,6 +120,10 @@ public final class BotChatter {
             "Omistan taas vähän enemmän. 📈",
             "Sori et olin nopee. 🏃‍♂️",
             "Kohta koko kortteli on mun. 🏘️",
+            "Osto tehty. ✅",
+            "Tää nappaa. 🎯",
+            "Lisää mun kokoelmaan. 📚",
+            "Sori et otin sen. 😏",
     };
     private static final String[] BUILT_HOTEL = {
             "Hotelli pystys! 🏨", "Tervetuloa — ei oo halpaa lystii. 😏",
@@ -133,6 +141,10 @@ public final class BotChatter {
             "Rakennettu voittamaan. 🏆",
             "Vuokra tuplattu, kiitti. 📈",
             "Tervetuloa maksamaan. 😈",
+            "Hotelli, jees! 🏨",
+            "Kallis kulma valmis. 💰",
+            "Nyt vasta alkaa. 😈",
+            "Vieraat, tervetuloa. 🛎️",
     };
     private static final String[] RENT_GLOAT = {
             "Kiitti vuokrist! 💰", "Kassa kasvaa taas. 😎", "Nam, kivaa lisää.",
@@ -154,6 +166,10 @@ public final class BotChatter {
             "Tää fiilis on paras. 🥳",
             "Lisää vuokraa, kiitti. 🙏",
             "Mun kassa vaan kasvaa. 📈",
+            "Kiitti taas. 😌",
+            "Raha virtaa. 🌊",
+            "Mun tili paisuu. 📈",
+            "Vuokra, herkkua. 😋",
     };
     private static final String[] RENT_PAIN = {
             "Auts, kallis pysähdys. 😩", "No täähän sattu.", "Voi ei, melkein koko kassa meni. 😱",
@@ -175,6 +191,10 @@ public final class BotChatter {
             "Mun budjetti ei tästä tykkää. 📉",
             "Sattui pahasti. 😖",
             "Ei taas, oikeesti? 🙄",
+            "Auts taas. 😩",
+            "Rahat meni. 💸",
+            "Ei kivaa. 😖",
+            "Sattu taas. 😭",
     };
     private static final String[] JAIL = {
             "No niin, koppiin taas. 😅", "Nähää parin kierroksen päästä.",
@@ -188,6 +208,10 @@ public final class BotChatter {
             "Ei tää nyt niin paha. 😌",
             "Kolme kierrosta chilliä. 🛋️",
             "Sinne meni vuoro taas. 😔",
+            "Koppiin. 🚔",
+            "Ei taas. 😅",
+            "Tauko tuli. ⏸️",
+            "Sellielämää. 🧱",
     };
     private static final String[] OPPONENT_BANKRUPT = {
             "Yks vähemmän. 😎", "Peli on peli. 🤝", "Hyvin pelattu silti!",
@@ -201,6 +225,10 @@ public final class BotChatter {
             "Hyvin taisteltu! 🤝",
             "Sori, mut näin käy. 🤷",
             "Yks kilpailija maasta. ⚰️",
+            "Yks pois taas. 😎",
+            "Sori vaan. 🤷",
+            "Hyvä peli! 🤝",
+            "Nähää vielä! 👋",
     };
     private static final String[] SELF_BANKRUPT = {
             "Hyvää peliä kaikille! 💀", "No tähän se tyssäs — onnee muille!",
@@ -213,6 +241,10 @@ public final class BotChatter {
             "Kassa nolla, kiitos kaikille. 🙏",
             "Menoks, GG. 💀",
             "Tää oli hauskaa silti! 😄",
+            "Mä lopetan tähän. 🫡",
+            "GG kaikille. 💀",
+            "Kiitos pelistä. 🙏",
+            "Onnee muille. 👋",
     };
     private static final String[] TRADE_DONE = {
             "Hyvä diili! 🤝", "Kaupat klaari.", "Molemmat voittaa — tai ainaki mä. 😏",
@@ -226,6 +258,10 @@ public final class BotChatter {
             "Sain mitä halusin. 🎯",
             "Kiva bisnes. 💼",
             "Deal done, kiitti. ✅",
+            "Diili valmis! 🤝",
+            "Kaupat kunnos. ✅",
+            "Mä hyödyin. 😏",
+            "Kiva kauppa. 💼",
     };
     private static final String[] REJECT_OFFER = {
             "Ei kiitti — ei hyödytä mua.", "En luovu täst tontist. 🚫",
@@ -240,6 +276,10 @@ public final class BotChatter {
             "En oo noin tyhmä. 😅",
             "Pidä ne, kiitti. 🚫",
             "Ei nappaa yhtään. 😐",
+            "Ei käy. 🙅",
+            "Tarjoo lisää. 😏",
+            "Höh, ei. 😐",
+            "Pidä ne itse. 🚫",
     };
     private static final String[] GREETING = {
             "No niin, pistetään pystyyn! 🎲", "Tsemppii kaikille — mä en tarvii. 😏",
@@ -257,6 +297,10 @@ public final class BotChatter {
             "Valmiina? Mä oon. 💪",
             "Tänään voitan mä. 🏆",
             "Antaa mennä! 🚀",
+            "Moro kaikki! 👋",
+            "Pelataanpa! 🎲",
+            "Tsemppiä! 💪",
+            "Voittajaks! 🏆",
     };
     private static final String[] PASS_GO = {
             "Kierros täys, +200! 💰", "Kiitti pankki. 💵", "Taas 200 taskuun. 😎",
@@ -270,6 +314,10 @@ public final class BotChatter {
             "+200, aina yhtä kiva. 🤑",
             "Rahaa lisää, jees. 💸",
             "Startti maksaa jälleen. ✅",
+            "+200, jes! 💰",
+            "Palkkaa taas! 🤑",
+            "Startti makso. 💵",
+            "Rahaa lisää. 💸",
     };
     private static final String[] JAIL_OUT = {
             "Vapaana taas! 🔓", "Takas peliin. 😎", "Ei mua kauaa pidellä.",
@@ -281,6 +329,10 @@ public final class BotChatter {
             "Takas kehiin. 🔥",
             "Ei enää kaltereita. 🔓",
             "Nyt jyrätään. 💪",
+            "Vapaana taas! 🔓",
+            "Ulos vaan! 🏃",
+            "Takas peliin. 😎",
+            "Menoks! 🔥",
     };
     private static final String[] MORTGAGE = {
             "Pakko kiinnittää, äh... 😬", "Tarviin cashii nyt heti.", "Ei muuta vaihtoehtoo.",
@@ -294,6 +346,10 @@ public final class BotChatter {
             "Sori tontti, hetkeks. 😔",
             "Hätäkassa käyttöön. 🚨",
             "Ei muuta keinoo. 😞",
+            "Kiinnitän tän. 😬",
+            "Cashii tarttee. 💸",
+            "Pakko vaan. 😔",
+            "Väliaikasta. ⏳",
     };
     private static final String[] TRADE_NO = {
             "No ei sitten. 🤷", "Harmi, ois ollu hyvä diili.", "Ehkä ens kerral. 🤔",
@@ -306,6 +362,10 @@ public final class BotChatter {
             "Ehkä myöhemmin. 🤔",
             "Sun valinta. 😏",
             "Okei, ei sit. 😌",
+            "Ei siis. 🤷",
+            "Harmi juttu. 😕",
+            "Ehkä toiste. 🤔",
+            "No okei sit. 😌",
     };
     private static final String[] BUILT_HOUSE = {
             "Talo nostaa vuokraa, jees. 🏠", "Rakennan täst vahvan.",
@@ -319,6 +379,10 @@ public final class BotChatter {
             "Investointi rullaa. 📈",
             "Kohti hotellii. 🏗️",
             "Yks talo kerrallaan. 🧱",
+            "Talo lisää. 🏠",
+            "Rakennetaan. 🔨",
+            "Vuokra ylös. 📈",
+            "Kohti hotellii. 🏗️",
     };
     private static final String[] REDEEM = {
             "Nostin kiinnityksen — kassa kestää taas. 💪", "Takas omaks ilman velkaa.",
@@ -331,6 +395,10 @@ public final class BotChatter {
             "Nyt täydet vuokrat. 💰",
             "Puhtaat paperit. 📄",
             "Ei enää pantiss. 🔓",
+            "Velat pois. ✅",
+            "Takas mulle. 💪",
+            "Täydet vuokrat. 💰",
+            "Vapaa tontti. 🔓",
     };
     private static final String[] BANTER = {
             "Katotaas mitä nopat antaa. 🎲", "Tuuria peliin!", "Kunhan en mee vankilaan... 🤞",
@@ -353,6 +421,10 @@ public final class BotChatter {
             "Katotaan vaan. 👀",
             "Nyt tapahtuu. ✨",
             "Peli jatkuu. ➡️",
+            "Mennääs. 🎲",
+            "Fiilis on kohillaan. 😎",
+            "Katotaan vaan. 👀",
+            "Peli jatkuu. ➡️",
     };
     // Idle banter tuned to how the bot is doing, so a random line still fits the situation.
     private static final String[] BANTER_LEAD = {
@@ -374,6 +446,10 @@ public final class BotChatter {
             "Voitto tulee. 🏆",
             "Kingi täs. 👑",
             "Muut jää jälkeen. 😏",
+            "Kärjes ollaan. 🥇",
+            "Helppoo tää. 😌",
+            "Voitto tulee. 🏆",
+            "Kingi pysyy. 👑",
     };
     private static final String[] BANTER_TRAIL = {
             "En oo viel ulkona täst. 💪", "Kyl mä tän viel käännän.",
@@ -394,6 +470,10 @@ public final class BotChatter {
             "Käännän tän viel. 🔄",
             "Katsokaa vaan. 👀",
             "Comeback tulee. 😤",
+            "En luovu koskaan. 💪",
+            "Käännän tän viel. 🔄",
+            "Comeback tulee! 😤",
+            "Vielä ei ohi. 🙏",
     };
     private static final String[] BANTER_LOW = {
             "Kassa hupenee ihan hurjaa vauhtii... 😰", "Nyt on tiukkaa, pitää säästää.",
@@ -414,6 +494,10 @@ public final class BotChatter {
             "Plis armoo. 🙏",
             "Vähä rahaa jäl. 📉",
             "Yks moka ni loppu. 😨",
+            "Kassa itkee. 😭",
+            "Jännittää sikana. 😰",
+            "Plis armoa. 🙏",
+            "Tosi tiukkaa. 😨",
     };
     private static final String[] DREW_CARD = {
             "Katotaas mitä kortti sanoo... 🃏", "Vähän sattumaa peliin!", "Toivotaan hyvää korttii. 🤞",
@@ -426,6 +510,10 @@ public final class BotChatter {
             "Kortti puhukoon. 🃏",
             "Onni, ole kaa. 🍀",
             "Jännä hetki. 😄",
+            "Mitäköhän tulee. 👀",
+            "Plis hyvä. 🤞",
+            "Kortti puhukoon. 🃏",
+            "Onnea. 🍀",
     };
     private static final String[] SOLD_BUILDING = {
             "Pakko myydä rakennuksii... 😔", "Harmi, talot lähtee.",
@@ -439,6 +527,10 @@ public final class BotChatter {
             "Kehitys peruutti. 📉",
             "Cashii tarvitaan. 🏚️",
             "Ei kiva mut pakko. 😞",
+            "Myyn talot. 💸",
+            "Pakko myydä. 😔",
+            "Cashii tarvitaan. 🏚️",
+            "Ei kiva. 😞",
     };
     private static final String[] JAIL_TAUNT = {
             "Hei, koppiin siitä! 😂", "Nauttikaa sellist. 😏", "Yks vähemmän liikkeel. 😎",
@@ -452,6 +544,10 @@ public final class BotChatter {
             "Yks pois pelist. 😎",
             "Terkut sisältä! 👋",
             "Sinne meni toi. 😆",
+            "Hah, koppiin! 😂",
+            "Nauti sellist! 😏",
+            "Yks pois pelist. 😎",
+            "Terkut! 👋",
     };
     private static final String[] PLAYER_LEFT = {
             "No sepä harmi, joku lähti.", "Yks vähemmän pöydäs.", "Peli jatkuu ilman sitä. 🤷",
@@ -462,6 +558,10 @@ public final class BotChatter {
             "Yks vähemmän. 🤷",
             "Lisää mulle. 😎",
             "Harmi mut ok. 😌",
+            "Jatketaan. 🎲",
+            "No moikka. 👋",
+            "Yks vähemmän. 🤷",
+            "Lisää mulle. 😎",
             "Jatketaan. 🎲",
     };
     // Bystander commentary: a bot enjoys the drama when two OTHER players trade a big rent.
@@ -476,6 +576,10 @@ public final class BotChatter {
             "Onneks en mä. 😅",
             "Draamaa! 🎪",
             "Kiva ku ei mun. 😌",
+            "Ohoh, kallista! 😮",
+            "Popkornit esiin. 🍿",
+            "Ei mun rahat. 😅",
+            "Draamaa! 🎪",
     };
     // Own tax payment (MONEY_FLOW reason "vero").
     private static final String[] TAX = {
@@ -486,21 +590,57 @@ public final class BotChatter {
             "Verot, aina. 🧾",
             "Pakolliset menot. 😔",
             "Kiitti vero. 🙄",
+            "Verot vie taas. 😤",
+            "Rahat valtiolle. 💸",
+            "Verolappu, äh. 🧾",
+            "No niin, verot. 😔",
+    };
+    // Own doubles roll (a message alternative to the emoji reaction).
+    private static final String[] DOUBLES = {
+            "Tuplat! Uus heitto! 🎲🎲", "Tuplaa, jatkuu! 🔥", "Kaksoset, jees! 😎",
+            "Uus vuoro mulle! 🎯", "Nopat tykkää musta. 🍀",
+    };
+    // A rival built a hotel.
+    private static final String[] OPP_HOTEL = {
+            "Ohoh, hotelli tolla. 😮", "Toi rakensi ison. 👀", "Nyt tost tulee kallis. 😬",
+            "Vaikuttavaa, mut varon sitä. 🤔", "Kilpailija panostaa. 😏",
+    };
+    // A rival mortgaged a property.
+    private static final String[] OPP_MORTGAGE = {
+            "Ohoh, kiinnittää tontteja. 👀", "Näyttää tiukalt toisella. 😏", "Rahapula naapurilla? 🤭",
+            "Kiinnityksii, ei hyvä merkki. 😈", "Joku kaipaa cashii. 🍿",
+    };
+    // A rival redeemed a mortgage (recovering).
+    private static final String[] OPP_REDEEM = {
+            "No toi pääs jaloilleen. 🤔", "Kiinnitys pois toiselt, harmi. 🙄", "Palas peliin toi. 😌",
+            "No nyt sil on taas rahaa. 👀", "Toipuipa nopeesti. 😏",
     };
     // Own money gain from a card (MONEY_FLOW reason "kortti", bank → bot).
     private static final String[] CARD_GAIN = {
             "Ilmasta rahaa kortista! 🃏💰", "Kiitti kortti! 😄", "Nam, bonusta. 🤑",
             "Onnen kortti osu. 🍀", "Kiva lisä kassaan. 💵",
+            "Ilmasta rahaa! 💰",
+            "Kiitti kortti! 😄",
+            "Nam, bonusta. 🤑",
+            "Onni! 🍀",
     };
     // An opponent got out of jail.
     private static final String[] OPP_JAIL_OUT = {
             "No niin, sekin pääs ulos. 😏", "Vapaana taas, harmi. 🙄", "Takas kehiin toi. 😌",
             "Loma loppu sult. 😏", "No nyt se palaa. 👀",
+            "Sekin ulos. 😏",
+            "Vapaana, harmi. 🙄",
+            "Takas peliin toi. 😌",
+            "Palaa taas. 👀",
     };
     // An opponent passed GO and collected.
     private static final String[] OPP_PASSED_GO = {
             "Sekin sai palkkaa. 💸", "+200 toiselle, hmph. 😒", "Onnee startist. 🙄",
             "Kaikki tienaa paitsi mä. 😩", "Raha kiertää muille. 💰",
+            "Sekin sai palkkaa. 💸",
+            "+200 toiselle. 😒",
+            "Onnee startist. 🙄",
+            "Muut tienaa. 😩",
     };
     // An opponent is selling buildings — someone's in trouble, and a bot notices. 🍿
     private static final String[] OPP_STRUGGLE = {
@@ -509,6 +649,10 @@ public final class BotChatter {
             "Ohoh, pulassa? 👀",
             "Toisella menee huonosti. 😏",
             "Talot lähtee toiselt. 😎",
+            "Verta vedessä. 🦈",
+            "Naapuri kärsii. 🤭",
+            "Pulassa? 👀",
+            "Menee huonosti toisella. 😏",
             "Verta vedessä. 🦈",
             "Naapuri kärsii. 🤭",
     };
@@ -578,8 +722,8 @@ public final class BotChatter {
                 return maybeReactionFromOther(author, REACT_OPP_BUY, 0.10, state, botIds, nowMs);
             case "BUILT_HOTEL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_HOTEL, BUILT_HOTEL, 0.55, nowMs);
-                // A non-bot builds a hotel — a bot might react with awe.
-                return maybeReactionFromOther(author, REACT_HOTEL, 0.20, state, botIds, nowMs);
+                // A non-bot builds a hotel — a bot notes it (awe / wariness).
+                return maybeMessageFromOther(author, K_OPP_HOTEL, OPP_HOTEL, REACT_HOTEL, 0.22, state, botIds, nowMs);
             case "BUILT_HOUSE":
                 // Frequent (each house), so keep it low — an occasional line on the investment.
                 if (isBot(author, botIds)) return maybeMessage(author, K_HOUSE, BUILT_HOUSE, 0.14, nowMs);
@@ -587,7 +731,8 @@ public final class BotChatter {
                 return maybeReactionFromOther(author, REACT_OPP_BUY, 0.07, state, botIds, nowMs);
             case "REDEEMED":
                 if (isBot(author, botIds)) return maybeMessage(author, K_REDEEM, REDEEM, 0.28, nowMs);
-                break;
+                // A rival is recovering — a grudging note.
+                return maybeMessageFromOther(author, K_OPP_REDEEM, OPP_REDEEM, REACT_TROUBLE, 0.10, state, botIds, nowMs);
             case "SOLD_HOUSE":
             case "SOLD_HOTEL":
                 // Selling buildings back means cash trouble — a rueful money-decision line.
@@ -629,8 +774,8 @@ public final class BotChatter {
                 return maybeMessageFromOther(author, K_OPP_PASSED_GO, OPP_PASSED_GO, REACT_TROUBLE, 0.05, state, botIds, nowMs);
             case "MORTGAGED":
                 if (isBot(author, botIds)) return maybeMessage(author, K_MORTGAGE, MORTGAGE, 0.30, nowMs);
-                // A non-bot mortgaging signals trouble — a bot might smell blood.
-                return maybeReactionFromOther(author, REACT_TROUBLE, 0.14, state, botIds, nowMs);
+                // A non-bot mortgaging signals trouble — a bot smells blood.
+                return maybeMessageFromOther(author, K_OPP_MORTGAGE, OPP_MORTGAGE, REACT_TROUBLE, 0.16, state, botIds, nowMs);
             case "TRADE_DECLINED":
             case "TRADE_CANCELLED": {
                 // playerIds: [initiator, recipient]. The recipient is the one who was asked, so
@@ -674,6 +819,8 @@ public final class BotChatter {
                 int d1 = parseInt(e.data().get("d1"));
                 int d2 = parseInt(e.data().get("d2"));
                 if (d1 > 0 && d1 == d2 && isBot(author, botIds)) {
+                    // Half the time a spoken "doubles!" line, otherwise the emoji reaction.
+                    if (rng.nextInt(2) == 0) return maybeMessage(author, K_DOUBLES, DOUBLES, 0.20, nowMs);
                     return maybeReaction(author, REACT_DOUBLES, 0.15, state, nowMs);
                 }
                 // Occasional idle banter on the bot's own roll, tuned to how the bot is doing so a

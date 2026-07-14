@@ -122,10 +122,10 @@ class BotChatterTest {
         assertEquals("boughtProperty", msg.get(0).msgKey(), "messages must be localizable by key");
         assertTrue(msg.get(0).variant() >= 0);
 
-        // A doubles reaction is an emoji — no localization key needed.
+        // A small rent received by a bot is an emoji reaction — no localization key needed.
         BotChatter r = seededChatter(0.0);
         var react = r.onNewEvents(
-                List.of(ev(3, "DICE_ROLLED", List.of(BOT), Map.of("d1", "5", "d2", "5"))),
+                List.of(ev(3, "PAID_RENT", List.of(HUMAN, BOT), Map.of("amount", "40"))),
                 twoBotsAndHuman(), BOTS, 25_000L);
         assertEquals(1, react.size());
         assertEquals("REACTION", react.get(0).kind());
