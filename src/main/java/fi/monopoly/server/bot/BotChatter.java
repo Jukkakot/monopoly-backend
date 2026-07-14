@@ -88,6 +88,7 @@ public final class BotChatter {
     private static final String K_BANTER_LEAD = "banterLead";
     private static final String K_BANTER_TRAIL = "banterTrail";
     private static final String K_BANTER_LOW = "banterLow";
+    private static final String K_SPECTATE = "spectateRent";
 
     private static final String[] BOUGHT = {
             "Joo-o, tää on nyt mun. 😎", "Hyvä läträys!", "Täst tulee kultakaivos. 💰",
@@ -133,7 +134,7 @@ public final class BotChatter {
     private static final String[] OPPONENT_BANKRUPT = {
             "Yks vähemmän. 😎", "Peli on peli. 🤝", "Hyvin pelattu silti!",
             "Sääli, mut bisnes on bisnestä.", "F sulle. 💀", "Nähää ens pelis! 👋",
-            "Yks kilpailija pois laskuist. 😏",
+            "Yks kilpailija pois laskuist. 😏", "GG, hyvä yritys. 🫡", "Kilpailu just kevens. 😏",
     };
     private static final String[] SELF_BANKRUPT = {
             "Hyvää peliä kaikille! 💀", "No tähän se tyssäs — onnee muille!",
@@ -155,10 +156,12 @@ public final class BotChatter {
             "No niin, pistetään pystyyn! 🎲", "Tsemppii kaikille — mä en tarvii. 😏",
             "Antaa palaa, jäbät!", "Onnee vaan, kyl te sitä tarttette. 😎",
             "Mennääks? Mä oon valmis. 🔥", "Letsgooo! Valmiina häviää? 😜",
+            "Nyt näytetään kuka on kingi. 👑", "Mä oon jo voittanu mieles. 😎",
     };
     private static final String[] PASS_GO = {
             "Kierros täys, +200! 💰", "Kiitti pankki. 💵", "Taas 200 taskuun. 😎",
             "Palkkapäivä! 🤑", "Startti maksaa, jees. 💵",
+            "Rahaa tuli, jees jees. 🤑", "Kiva ku pankki maksaa. 💵",
     };
     private static final String[] JAIL_OUT = {
             "Vapaana taas! 🔓", "Takas peliin. 😎", "Ei mua kauaa pidellä.",
@@ -189,6 +192,7 @@ public final class BotChatter {
             "Ei kiirettä, peli on pitkä.", "Rento meininki, homma hanskas. 😎",
             "Katotaan mihin toi nappula päätyy.", "Pörssi nousee, ostan lisää. 📈",
             "Chillii vaan, ei stressii. 😌", "Nopat, älkää pettäkö. 🎲",
+            "Hmm, minne täst... 🤔", "Vähän jännittää, mut hyväl taval. 😄",
     };
     // Idle banter tuned to how the bot is doing, so a random line still fits the situation.
     private static final String[] BANTER_LEAD = {
@@ -227,10 +231,16 @@ public final class BotChatter {
     private static final String[] JAIL_TAUNT = {
             "Hei, koppiin siitä! 😂", "Nauttikaa sellist. 😏", "Yks vähemmän liikkeel. 😎",
             "Hah, linnareissu! 😆", "Moro, nähää kolmen kierroksen päästä. 👋", "Sinne meni. 😏",
+            "Sori et nauran. 😂", "Terkkuja sellist! 👋",
     };
     private static final String[] PLAYER_LEFT = {
             "No sepä harmi, joku lähti.", "Yks vähemmän pöydäs.", "Peli jatkuu ilman sitä. 🤷",
             "Ai lähti? No lisää fyrkkaa mulle. 😎",
+    };
+    // Bystander commentary: a bot enjoys the drama when two OTHER players trade a big rent.
+    private static final String[] SPECTATE_RENT = {
+            "Ohohoh, kallista! 😮", "Katotaas tätä draamaa. 🍿", "Auts, ei onneks mun rahat. 😅",
+            "Popkornit esiin. 🍿", "Tosta se toinen kärsi. 😬", "Nam, tykkään ku muut maksaa. 😏",
     };
 
     // ── Reaction pools (must be from the backend allow-list) ────────────────────────────────
@@ -356,6 +366,10 @@ public final class BotChatter {
                 }
                 if (isBot(author, botIds) && amount >= BIG_RENT) {
                     return maybeMessage(author, K_RENT_PAIN, RENT_PAIN, 0.40, nowMs);
+                }
+                // Neither party is a bot — on a big one, a bystander bot enjoys the drama. 🍿
+                if (amount >= BIG_RENT && !isBot(author, botIds)) {
+                    return maybeMessageFromOther(null, K_SPECTATE, SPECTATE_RENT, REACT_RENT, 0.22, state, botIds, nowMs);
                 }
                 break;
             }
