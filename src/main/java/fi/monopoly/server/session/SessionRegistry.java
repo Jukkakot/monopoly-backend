@@ -126,7 +126,7 @@ public final class SessionRegistry {
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, botConfigs, strategy,
-                (botId, kind, content, msgKey) -> postBotChat(sessionId, botId, kind, content, msgKey));
+                (botId, kind, content, msgKey, targetId) -> postBotChat(sessionId, botId, kind, content, msgKey, targetId));
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
         // Generate player tokens for all human seats so that commands can be authenticated.
         // Player IDs are deterministic: "player-" + (inputIndex + 1).
@@ -645,7 +645,7 @@ public final class SessionRegistry {
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, botConfigs, strategy,
-                (botId, kind, content, msgKey) -> postBotChat(sessionId, botId, kind, content, msgKey));
+                (botId, kind, content, msgKey, targetId) -> postBotChat(sessionId, botId, kind, content, msgKey, targetId));
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
 
         List<String> humanNames = gameState.seats().stream()
@@ -680,16 +680,33 @@ public final class SessionRegistry {
     private static final java.util.Set<String> ALLOWED_REACTIONS = java.util.Set.of(
             "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "💰", "🎲", "🤝", "😎", "🍀", "👏", "🤔", "😅", "💀");
 
+    /** Minimum gap between two chat posts from the same human player — a light spam guard.
+     *  Short enough that normal type-then-Enter never trips it; long enough to stop a held key
+     *  or a script flooding the log. Reactions and messages share the budget. */
+    private static final long HUMAN_CHAT_MIN_GAP_MS = 700L;
+    /** Last accepted human chat post, keyed by "sessionId|playerId". Bots bypass this. */
+    private final Map<String, Long> lastHumanChatAt = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * Posts a chat message or emoji reaction from a player, broadcast to everyone as a CHAT
-     * game event (data: kind=MESSAGE|REACTION, content, name). Validates the sender's token;
-     * caps message length and whitelists reaction emoji. Returns false if rejected.
+     * game event (data: kind=MESSAGE|REACTION, content, name; optional replyToId). Validates the
+     * sender's token; caps message length and whitelists reaction emoji; enforces a per-player
+     * rate limit. Returns false if rejected.
+     *
+     * @param replyToId the id of the CHAT event this reaction is attached to (WhatsApp-style),
+     *                  or null for a free-standing message/reaction.
      */
-    public boolean postChat(String sessionId, String playerId, String playerToken, String kind, String content) {
+    public boolean postChat(String sessionId, String playerId, String playerToken, String kind, String content, Long replyToId) {
         Entry entry = sessions.get(sessionId);
         if (entry == null || playerId == null) return false;
         String expected = entry.playerTokens().get(playerId);
         if (expected == null || !expected.equals(playerToken)) return false;  // impersonation guard
+
+        // Per-player rate limit — reject bursts rather than flooding every viewer's log.
+        String rateKey = sessionId + "|" + playerId;
+        long now = System.currentTimeMillis();
+        Long last = lastHumanChatAt.get(rateKey);
+        if (last != null && now - last < HUMAN_CHAT_MIN_GAP_MS) return false;
 
         boolean reaction = "REACTION".equals(kind);
         String text = content == null ? "" : content.strip();
@@ -701,12 +718,16 @@ public final class SessionRegistry {
         }
         final String finalText = text;
         final String eventKind = reaction ? "REACTION" : "MESSAGE";
+        Map<String, String> data = new HashMap<>();
+        data.put("kind", eventKind);
+        data.put("content", finalText);
+        if (replyToId != null) data.put("replyToId", String.valueOf(replyToId));
         // runExclusive serializes the append with command handling so it can't be lost to a
         // concurrently-executing command's derived state (see SessionCommandPublisher#runExclusive).
         entry.publisher().runExclusive(() ->
-                entry.baseStore().update(state -> appendChatEvent(state, playerId,
-                        java.util.Map.of("kind", eventKind, "content", finalText))));
-        lastActivityAt.put(sessionId, System.currentTimeMillis());
+                entry.baseStore().update(state -> appendChatEvent(state, playerId, data)));
+        lastHumanChatAt.put(rateKey, now);
+        lastActivityAt.put(sessionId, now);
         return true;
     }
 
@@ -729,9 +750,10 @@ public final class SessionRegistry {
      *
      * <p>For a MESSAGE only {@code msgKey} (the situation) is sent — the client owns the text and
      * picks the variant from the CHAT event id. For a REACTION {@code content} is the emoji and
-     * {@code msgKey} is null.</p>
+     * {@code msgKey} is null. {@code targetId}, when present on a MESSAGE, is the player the line is
+     * aimed at — the client renders it as an @mention in that player's colour.</p>
      */
-    void postBotChat(String sessionId, String botPlayerId, String kind, String content, String msgKey) {
+    void postBotChat(String sessionId, String botPlayerId, String kind, String content, String msgKey, String targetId) {
         Entry entry = sessions.get(sessionId);
         if (entry == null || botPlayerId == null) return;
         boolean reaction = "REACTION".equals(kind);
@@ -745,6 +767,9 @@ public final class SessionRegistry {
             if (msgKey == null || msgKey.isBlank()) return;
             data.put("kind", "MESSAGE");
             data.put("botMsgKey", msgKey);
+            if (targetId != null && !targetId.isBlank() && !targetId.equals(botPlayerId)) {
+                data.put("targetPlayerId", targetId);
+            }
         }
         entry.publisher().runExclusive(() ->
                 entry.baseStore().update(state -> appendChatEvent(state, botPlayerId, data)));

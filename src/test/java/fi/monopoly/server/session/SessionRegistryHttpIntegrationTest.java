@@ -480,6 +480,24 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     @Test
+    void backToBackChatFromTheSamePlayerIsRateLimited() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId    = extractSessionId(createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String validToken   = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+
+        String body = "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken
+                + "\",\"kind\":\"MESSAGE\",\"content\":\"moi\"}";
+
+        // First message accepted…
+        assertEquals(200, post("/sessions/" + sessionId + "/chat", body).statusCode());
+        // …an immediate second one from the same player is rejected by the rate limit.
+        assertEquals(400, post("/sessions/" + sessionId + "/chat", body).statusCode(),
+                "A burst of chat from one player must be throttled");
+    }
+
+    @Test
     void postBotChatAppendsChatEventWithoutATokenCheck() throws Exception {
         // Bots have no player token, so they can't use the /chat endpoint — the registry posts
         // on their behalf via postBotChat (no impersonation guard). Verify a bot line lands in
@@ -491,11 +509,27 @@ class SessionRegistryHttpIntegrationTest {
         String sessionId = created.sessionId();
 
         // A bot MESSAGE carries only the situation key — the client owns the text.
-        registry.postBotChat(sessionId, "player-1", "MESSAGE", "", "boughtProperty");
+        registry.postBotChat(sessionId, "player-1", "MESSAGE", "", "boughtProperty", null);
 
         String snap = get("/sessions/" + sessionId + "/snapshot").body();
         assertTrue(snap.contains("\"CHAT\"") && snap.contains("botMsgKey") && snap.contains("boughtProperty"),
                 "Bot message should appear as a CHAT event with a localization key, got: " + snap);
+    }
+
+    @Test
+    void postBotChatCarriesADirectedMentionTarget() throws Exception {
+        var created = registry.create(
+                List.of("Botti Yksi", "Botti Kaksi"),
+                List.of("#E63946", "#2A9D8F"),
+                List.of(SeatKind.BOT, SeatKind.BOT));
+        String sessionId = created.sessionId();
+
+        // A directed line (e.g. gloating over the player who paid rent) carries the target's id.
+        registry.postBotChat(sessionId, "player-1", "MESSAGE", "", "rentGloat", "player-2");
+
+        String snap = get("/sessions/" + sessionId + "/snapshot").body();
+        assertTrue(snap.contains("targetPlayerId") && snap.contains("player-2"),
+                "Directed bot message should carry targetPlayerId, got: " + snap);
     }
 
     // -------------------------------------------------------------------------

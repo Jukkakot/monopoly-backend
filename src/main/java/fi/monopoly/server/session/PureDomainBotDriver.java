@@ -29,8 +29,9 @@ public final class PureDomainBotDriver implements ClientSessionListener {
     @FunctionalInterface
     public interface ChatPoster {
         /** For a MESSAGE, {@code msgKey} is the situation the client renders text for and
-         *  {@code content} is unused; for a REACTION {@code msgKey} is null and {@code content} is the emoji. */
-        void post(String botPlayerId, String kind, String content, String msgKey);
+         *  {@code content} is unused; for a REACTION {@code msgKey} is null and {@code content} is the emoji.
+         *  {@code targetId} is the player the line is aimed at (rendered as an @mention), or null. */
+        void post(String botPlayerId, String kind, String content, String msgKey, String targetId);
     }
 
     // Fallback delay used when situational logic cannot determine a better value.
@@ -374,7 +375,7 @@ public final class PureDomainBotDriver implements ClientSessionListener {
         for (var intent : intents) {
             scheduler.schedule(
                     () -> {
-                        try { chatPoster.post(intent.botId(), intent.kind(), intent.content(), intent.msgKey()); }
+                        try { chatPoster.post(intent.botId(), intent.kind(), intent.content(), intent.msgKey(), intent.targetId()); }
                         catch (Exception e) { log.warn("Bot chat post failed", e); }
                     },
                     intent.delayMs(), TimeUnit.MILLISECONDS);

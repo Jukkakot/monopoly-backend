@@ -244,5 +244,33 @@ class BotChatterTest {
         assertEquals(1, intents.size());
         assertEquals(BOT, intents.get(0).botId());
         assertEquals("MESSAGE", intents.get(0).kind());
+        assertEquals(HUMAN, intents.get(0).targetId(), "the gloat is aimed at whoever paid the rent");
+    }
+
+    @Test
+    void aRejectionLineIsAimedAtThePlayerWhoseOfferWasDeclined() {
+        BotChatter chatter = seededChatter(0.0);
+
+        // TRADE_DECLINED playerIds = [initiator, recipient]; the bot recipient rejects, aimed at initiator.
+        var intents = chatter.onNewEvents(
+                List.of(ev(3, "TRADE_DECLINED", List.of(HUMAN, BOT), Map.of())),
+                twoBotsAndHuman(), BOTS, 25_000L);
+
+        assertEquals(1, intents.size());
+        assertEquals(BOT, intents.get(0).botId());
+        assertEquals(HUMAN, intents.get(0).targetId(), "the rejection is aimed at the offerer");
+    }
+
+    @Test
+    void anUndirectedLineHasNoMentionTarget() {
+        BotChatter chatter = seededChatter(0.0);
+
+        // A bot commenting on its own purchase addresses no one.
+        var intents = chatter.onNewEvents(
+                List.of(ev(3, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
+                twoBotsAndHuman(), BOTS, 25_000L);
+
+        assertEquals(1, intents.size());
+        assertNull(intents.get(0).targetId());
     }
 }

@@ -501,7 +501,7 @@ public final class SessionHttpServer {
 
     private record SettingsRequest(BotSpeed botSpeed, Boolean viewerGating) {}
 
-    private record ChatRequest(String playerId, String playerToken, String kind, String content) {}
+    private record ChatRequest(String playerId, String playerToken, String kind, String content, Long replyToId) {}
 
     private void handleChat(Context ctx) {
         String id = ctx.pathParam("id");
@@ -514,7 +514,7 @@ public final class SessionHttpServer {
         } catch (Exception e) {
             throw new BadRequestResponse("Could not parse chat body");
         }
-        boolean ok = registry.postChat(id, req.playerId(), req.playerToken(), req.kind(), req.content());
+        boolean ok = registry.postChat(id, req.playerId(), req.playerToken(), req.kind(), req.content(), req.replyToId());
         if (!ok) throw new BadRequestResponse("Chat rejected");
         ctx.status(200).json(Map.of("ok", true));
     }

@@ -44,8 +44,13 @@ public final class BotChatter {
      * the variant deterministically from the CHAT event id so every viewer sees the same line. For
      * a REACTION, {@code content} is the emoji and {@code msgKey} is null. {@code content} is unused
      * for messages.
+     *
+     * <p>{@code targetId} is the player the line is aimed at, when the situation is inherently
+     * directed (gloating over the player who paid you rent, taunting whoever just got jailed, etc.).
+     * The client renders it as an "@Name" mention in that player's colour. Null for undirected
+     * lines and all reactions.</p>
      */
-    public record ChatIntent(String botId, String kind, String content, String msgKey, long delayMs) {}
+    public record ChatIntent(String botId, String kind, String content, String msgKey, String targetId, long delayMs) {}
 
     // A bot won't chat again until this long after its own last line — keeps a single bot from
     // dominating. There is deliberately NO shared/global cooldown: each bot chatters on its own
@@ -135,7 +140,7 @@ public final class BotChatter {
             if (rng.nextDouble() < 0.80) {
                 String greeter = pickEligibleBot(null, state, botIds, nowMs);
                 if (greeter != null) {
-                    ChatIntent g = new ChatIntent(greeter, "MESSAGE", "", K_GREETING, thinkDelay());
+                    ChatIntent g = new ChatIntent(greeter, "MESSAGE", "", K_GREETING, null, thinkDelay());
                     out.add(g);
                     lastChatAtByBot.put(greeter, nowMs + g.delayMs());
                 }
@@ -203,8 +208,8 @@ public final class BotChatter {
                 return maybeMessageFromOther(author, K_PLAYER_LEFT, REACT_TROUBLE, 0.50, state, botIds, nowMs);
             case "WENT_TO_JAIL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_JAIL, 0.30, nowMs);
-                // Someone else gets sent down — a bot enjoys it.
-                return maybeMessageFromOther(author, K_JAIL_TAUNT, REACT_JAIL_TAUNT, 0.25, state, botIds, nowMs);
+                // Someone else gets sent down — a bot enjoys it, aimed straight at them.
+                return maybeMessageFromOther(author, K_JAIL_TAUNT, REACT_JAIL_TAUNT, 0.25, state, botIds, nowMs, true);
             case "RELEASED_FROM_JAIL":
                 if (isBot(author, botIds)) return maybeMessage(author, K_JAIL_OUT, 0.28, nowMs);
                 // A rival is free again — a bot notes it now and then.
@@ -225,7 +230,7 @@ public final class BotChatter {
                 // own offer got turned down instead just shrugs it off.
                 String initiator = e.playerIds().isEmpty() ? null : e.playerIds().get(0);
                 String recipient = e.playerIds().size() > 1 ? e.playerIds().get(1) : null;
-                if (isBot(recipient, botIds)) return maybeMessage(recipient, K_REJECT_OFFER, 0.35, nowMs);
+                if (isBot(recipient, botIds)) return maybeMessage(recipient, K_REJECT_OFFER, initiator, 0.35, nowMs);
                 if (isBot(initiator, botIds)) return maybeMessage(initiator, K_TRADE_NO, 0.28, nowMs);
                 break;
             }
@@ -234,8 +239,8 @@ public final class BotChatter {
                 String creditor = e.playerIds().size() > 1 ? e.playerIds().get(1) : null;
                 int amount = parseInt(e.data().get("amount"));
                 if (isBot(creditor, botIds)) {
-                    // Bot received rent — gloat on a big one, otherwise a small chance of a 💰.
-                    if (amount >= BIG_RENT) return maybeMessage(creditor, K_RENT_GLOAT, 0.45, nowMs);
+                    // Bot received rent — gloat on a big one (aimed at the payer), otherwise a small chance of a 💰.
+                    if (amount >= BIG_RENT) return maybeMessage(creditor, K_RENT_GLOAT, author, 0.45, nowMs);
                     return maybeReaction(creditor, REACT_RENT, 0.18, state, nowMs);
                 }
                 if (isBot(author, botIds) && amount >= BIG_RENT) {
@@ -249,8 +254,8 @@ public final class BotChatter {
             }
             case "WENT_BANKRUPT":
                 if (isBot(author, botIds)) return maybeMessage(author, K_SELF_BANKRUPT, 0.85, nowMs);
-                // A human (or another already-processed player) went bankrupt — a surviving bot reacts.
-                return maybeMessageFromOther(author, K_OPP_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs);
+                // A human (or another already-processed player) went bankrupt — a surviving bot reacts, at them.
+                return maybeMessageFromOther(author, K_OPP_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs, true);
             case "TRADE_ACCEPTED": {
                 for (String pid : e.playerIds()) {
                     if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE, 0.30, nowMs);
@@ -288,13 +293,20 @@ public final class BotChatter {
     // ── Emission helpers ────────────────────────────────────────────────────────────────────
 
     private ChatIntent maybeMessage(String botId, String msgKey, double probability, long nowMs) {
+        return maybeMessage(botId, msgKey, null, probability, nowMs);
+    }
+
+    /** A self-authored message aimed at {@code targetId} (rendered as an @mention). */
+    private ChatIntent maybeMessage(String botId, String msgKey, String targetId, double probability, long nowMs) {
         if (!canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
-        return new ChatIntent(botId, "MESSAGE", "", msgKey, thinkDelay());
+        // Never aim a line at the speaker themselves.
+        String target = (targetId != null && !targetId.equals(botId)) ? targetId : null;
+        return new ChatIntent(botId, "MESSAGE", "", msgKey, target, thinkDelay());
     }
 
     private ChatIntent maybeReaction(String botId, String[] pool, double probability, SessionState state, long nowMs) {
         if (!isActive(botId, state) || !canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
-        return new ChatIntent(botId, "REACTION", pick(pool), null, thinkDelay());
+        return new ChatIntent(botId, "REACTION", pick(pool), null, null, thinkDelay());
     }
 
     /** A random surviving bot other than {@code excludeId} reacts with an emoji. */
@@ -302,18 +314,25 @@ public final class BotChatter {
         if (rng.nextDouble() >= probability) return null;
         String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
         if (reactor == null) return null;
-        return new ChatIntent(reactor, "REACTION", pick(pool), null, thinkDelay());
+        return new ChatIntent(reactor, "REACTION", pick(pool), null, null, thinkDelay());
     }
 
-    /** A random surviving bot other than {@code excludeId} comments — a message, or (30 %) an emoji reaction. */
     private ChatIntent maybeMessageFromOther(String excludeId, String msgKey, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+        return maybeMessageFromOther(excludeId, msgKey, reactPool, probability, state, botIds, nowMs, false);
+    }
+
+    /** A random surviving bot other than {@code excludeId} comments — a message, or (30 %) an emoji reaction.
+     *  When {@code directed} the message is aimed at {@code excludeId} (the player being commented on),
+     *  rendered client-side as an @mention. Reactions are never directed. */
+    private ChatIntent maybeMessageFromOther(String excludeId, String msgKey, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs, boolean directed) {
         if (rng.nextDouble() >= probability) return null;
         String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
         if (reactor == null) return null;
         if (rng.nextDouble() < 0.30) {
-            return new ChatIntent(reactor, "REACTION", pick(reactPool), null, thinkDelay());
+            return new ChatIntent(reactor, "REACTION", pick(reactPool), null, null, thinkDelay());
         }
-        return new ChatIntent(reactor, "MESSAGE", "", msgKey, thinkDelay());
+        String target = (directed && excludeId != null && !excludeId.equals(reactor)) ? excludeId : null;
+        return new ChatIntent(reactor, "MESSAGE", "", msgKey, target, thinkDelay());
     }
 
     private String pickEligibleBot(String excludeId, SessionState state, Set<String> botIds, long nowMs) {

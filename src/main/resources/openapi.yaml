@@ -552,7 +552,13 @@ paths:
         from a player. Broadcast to everyone as a `CHAT` game event
         (`data.kind`, `data.content`, `data.name`). The sender is authenticated by
         `playerToken`; messages are capped at 200 chars and reactions must be one of a
-        curated emoji set.
+        curated emoji set. A per-player rate limit throttles bursts (≈700 ms between posts).
+
+        Optional `replyToId` attaches a reaction to a specific earlier CHAT event
+        (WhatsApp-style); the client renders it under that message's bubble rather than
+        floating it. Bot-authored CHAT events may also carry `data.targetPlayerId` (the
+        player an @mention is aimed at) and `data.botMsgKey` (the situation the client
+        localises) — those are server-generated and never accepted from this endpoint.
       parameters:
         - $ref: '#/components/parameters/sessionId'
       requestBody:
@@ -567,6 +573,7 @@ paths:
                 playerToken: { type: string }
                 kind: { type: string, enum: [MESSAGE, REACTION] }
                 content: { type: string, description: 'message text, or a single emoji for reactions' }
+                replyToId: { type: integer, format: int64, nullable: true, description: 'id of the CHAT event this reaction is attached to' }
             example:
               playerId: player-abc
               playerToken: tok-123
@@ -582,7 +589,7 @@ paths:
                 properties:
                   ok: { type: boolean, example: true }
         '400':
-          description: Rejected (bad token, empty/oversized message, or disallowed reaction)
+          description: Rejected (bad token, empty/oversized message, disallowed reaction, or rate-limited)
           content:
             application/json:
               schema:
