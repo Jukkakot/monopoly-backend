@@ -109,18 +109,19 @@ class BotChatterTest {
         assertEquals(1, intents.size());
         assertEquals(BOT, intents.get(0).botId());
         assertEquals("MESSAGE", intents.get(0).kind());
-        assertFalse(intents.get(0).content().isBlank());
+        assertEquals("boughtProperty", intents.get(0).msgKey());
     }
 
     @Test
-    void aMessageCarriesALocalizationKeyAndVariantButAReactionDoesNot() {
+    void aMessageCarriesALocalizationKeyButAReactionDoesNot() {
         BotChatter chatter = seededChatter(0.0);
         var msg = chatter.onNewEvents(
                 List.of(ev(3, "BOUGHT_PROPERTY", List.of(BOT), Map.of("property", "B1"))),
                 twoBotsAndHuman(), BOTS, 25_000L);
         assertEquals(1, msg.size());
         assertEquals("boughtProperty", msg.get(0).msgKey(), "messages must be localizable by key");
-        assertTrue(msg.get(0).variant() >= 0);
+        // The backend sends no text for messages — the client owns it.
+        assertTrue(msg.get(0).content().isEmpty());
 
         // A small rent received by a bot is an emoji reaction — no localization key needed.
         BotChatter r = seededChatter(0.0);

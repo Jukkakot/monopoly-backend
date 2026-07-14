@@ -18,13 +18,13 @@ import java.util.Set;
  *
  * <p>Design goals:
  * <ul>
- *   <li><b>Localised per viewer</b> — a message is emitted as a {@code (msgKey, variant)} pair,
- *       not literal text. Each client renders it in its own current language from a matching
- *       phrase table, so the same bot line reads Finnish for one viewer and English for another,
- *       and re-localises live when a viewer toggles language. The Finnish text is also carried as
- *       a fallback so an out-of-date client still shows something. Emoji reactions need no key.</li>
- *   <li><b>Variance</b> — every situation has a pool of phrasings; a random variant is picked so
- *       the same event never yields the same line twice in a row.</li>
+ *   <li><b>Client owns the text</b> — a message is emitted as a bare {@code msgKey} (the situation),
+ *       never literal text. Each client renders a line from its own phrase table in its current
+ *       language, picking the variant deterministically from the CHAT event id — so every viewer
+ *       sees the same line, localised, and it re-localises live on a language toggle. Adding or
+ *       editing phrasings is therefore a client-only change. Emoji reactions need no key.</li>
+ *   <li><b>Variance</b> — the client keeps a pool of phrasings per situation; the event id selects
+ *       one, so the same event never yields the same line twice in a row.</li>
  *   <li><b>Restraint</b> — a per-bot cooldown (no shared/global one) plus per-situation
  *       probabilities keep each bot's chatter occasional without silencing the table.</li>
  *   <li><b>Purity</b> — {@link #onNewEvents} is a plain function of (events, state, now); all
@@ -32,19 +32,20 @@ import java.util.Set;
  *       thread, so no synchronisation is needed.</li>
  * </ul>
  *
- * <p>The {@code msgKey} values and the per-key variant counts must stay in sync with the client's
- * {@code botChat} phrase tables (src/i18n/translations.ts). The client clamps the variant index
- * modulo its pool length, so a count mismatch degrades gracefully to a different phrasing rather
- * than a crash.</p>
+ * <p>The {@code msgKey} values must exist in the client's {@code botChat} phrase tables
+ * (src/i18n/translations.ts). The backend holds no message text at all — only the keys and the
+ * decision logic (which situation, how often).</p>
  */
 public final class BotChatter {
 
     /**
-     * A queued bot utterance. For a MESSAGE, {@code msgKey}/{@code variant} localise it on the
-     * client and {@code content} is the Finnish fallback; for a REACTION, {@code content} is the
-     * emoji and {@code msgKey} is null.
+     * A queued bot utterance. For a MESSAGE the client owns the text entirely: only {@code msgKey}
+     * (the situation) is sent, and each client renders a line from its own phrase table — picking
+     * the variant deterministically from the CHAT event id so every viewer sees the same line. For
+     * a REACTION, {@code content} is the emoji and {@code msgKey} is null. {@code content} is unused
+     * for messages.
      */
-    public record ChatIntent(String botId, String kind, String content, String msgKey, int variant, long delayMs) {}
+    public record ChatIntent(String botId, String kind, String content, String msgKey, long delayMs) {}
 
     // A bot won't chat again until this long after its own last line — keeps a single bot from
     // dominating. There is deliberately NO shared/global cooldown: each bot chatters on its own
@@ -63,7 +64,7 @@ public final class BotChatter {
         this.rng = rng;
     }
 
-    // ── Message situation keys (must match client botChat table) + Finnish fallback pools ────
+    // ── Message situation keys (must match the client's botChat table). No text lives here. ──
     private static final String K_BOUGHT = "boughtProperty";
     private static final String K_HOTEL = "builtHotel";
     private static final String K_RENT_GLOAT = "rentGloat";
@@ -98,564 +99,6 @@ public final class BotChatter {
     private static final String K_OPP_HOTEL = "opponentHotel";
     private static final String K_OPP_MORTGAGE = "opponentMortgage";
     private static final String K_OPP_REDEEM = "opponentRedeem";
-
-    private static final String[] BOUGHT = {
-            "Joo-o, tää on nyt mun. 😎", "Hyvä läträys!", "Täst tulee kultakaivos. 💰",
-            "Yks tontti listalt pois. 🏠", "Mun imperiumi kasvaa taas. 🏰", "Ei jätetä hyvii paloi muille.",
-            "Tää täydentää setin. 🎯", "Halvalla sain, kiitti. 🤝",
-            "Otin tän vaan et te ette saa. 😏", "Rautatiet on varmaa fyrkkaa. 🚂",
-            "Vieres tontti — nyt on pari kasas. 👫", "Pakko ottaa, en voinu vastustaa.",
-            "Sijainti ratkasee, aina. 📍", "Nam, hyvä lisä salkkuun. 💼",
-            "Mine mine mine! 😆", "Täst tulee teille kallista. 😈",
-            "Sori muut, tää oli liian hyvä. 🤷", "Instabuy, ei mietitty kauaa. ⚡",
-            "Kelaa, tää oli halpa. 🤑", "Salkkuun vaan lisää. 📁", "Tää oli no-brainer. 🧠",
-            "Yks askel lähempänä monopolii. 🎯", "Sori, mä olin nopeempi. ⚡", "Tää tontti puhuu mulle. 🏠",
-            "Diilit diilit diilit. 💼", "Mun kartta laajenee. 🗺️", "Ei muuta ku ostoon. 🛒",
-            "Tää oli pakko, sata lasissa. 💯", "Omistaminen on parasta. 😌", "Näppärä hankinta taas. 👌",
-            "Ostin sen, älkää itkekö. 😜", "Tää oli steal. 🥷", "Mun salkku on tulessa. 🔥",
-            "Yks helmi lisää. 💎", "Sori, first come first served. 🏃", "Tää nappaa hyvin. 👍",
-            "Rahalla saa ja hevosella pääsee. 🐎", "Ostofiilis päällä. 🛍️",
-            "Ostoskori täyttyy. 🛒",
-            "Tää oli fiksu veto. ♟️",
-            "Omistan taas vähän enemmän. 📈",
-            "Sori et olin nopee. 🏃‍♂️",
-            "Kohta koko kortteli on mun. 🏘️",
-            "Osto tehty. ✅",
-            "Tää nappaa. 🎯",
-            "Lisää mun kokoelmaan. 📚",
-            "Sori et otin sen. 😏",
-    };
-    private static final String[] BUILT_HOTEL = {
-            "Hotelli pystys! 🏨", "Tervetuloa — ei oo halpaa lystii. 😏",
-            "Nyt alkaa kilahtaa kassaan. 🤑", "Täst tuli kallis kulma teille.",
-            "Maksaa ittensä takas ihan just. 💰", "Jos tänne osutte ni voi voi. 💸",
-            "Superhotelli valmis. 🏨", "Tää ruutu on nyt puhdasta myrkkyy. ☠️",
-            "Tällasii sijotuksii mä diggaan. 📈", "Älkää astuko tänne. Tai astukaa. 😈",
-            "Viiden tähden ansa valmis. ⭐", "Kassakone käyntiin. 🤑",
-            "Hotellibisnes rullaa. 🏨", "Rakennettu, valmis, kallis. 💸", "Nyt vuokrat tuplaantuu. 📈",
-            "Tää kulma on nyt VIP. ⭐", "Muut, varokaa tätä ruutuu. ⚠️", "Kingin liike. 👑",
-            "Isot rahat tulee tästä. 🤑", "Hotelli-imperiumi kasvaa. 🏰", "Tää oli hyvä sijotus. 📊",
-            "Vieraita odotellessa... 😈",
-            "Nyt tänne on kallis tulla. 💸",
-            "Hotelli, se paras ansa. 🪤",
-            "Rakennettu voittamaan. 🏆",
-            "Vuokra tuplattu, kiitti. 📈",
-            "Tervetuloa maksamaan. 😈",
-            "Hotelli, jees! 🏨",
-            "Kallis kulma valmis. 💰",
-            "Nyt vasta alkaa. 😈",
-            "Vieraat, tervetuloa. 🛎️",
-    };
-    private static final String[] RENT_GLOAT = {
-            "Kiitti vuokrist! 💰", "Kassa kasvaa taas. 😎", "Nam, kivaa lisää.",
-            "Vuokran periminen on kyl parasta. 🤑", "Näillä ostan lisää läträimii.",
-            "Sijotus tuottaa, mitäs mä sanoin. 📈", "Passiivist tuloo, rakastan tätä.",
-            "Kiitti vaan, maksa pois. 😌", "Tää tili paisuu mukavasti.",
-            "Vuokralaiset on mun bestii. 🏦", "Cha-ching! 🤑",
-            "Ez money. 😎", "Kiitos ku pysähdyit. 😏", "Mun lompsa kiittää. 💸",
-            "Free real estate. 🏠", "Rakastan tätä peliä juuri nyt. 🥰",
-            "Rahaa sataa taas. 💰", "Mun tili hymyilee. 😊", "Kiitos ku tulit kylään. 😏",
-            "Tää on liian helppoo. 😎", "Vuokrakone rullaa. ⚙️", "Rakastan vuokrapäivii. ❤️",
-            "Sun tappio, mun voitto. 🤑", "Jatka vaan kierroksii. 😌", "Tää tuottaa taas. 📈",
-            "Ka-ching, osa kaks. 🤑", "Passiivinen tulo on kingi. 👑", "Mun kassa kiittää sua. 💵",
-            "Kiitti ku rahoitat mua. 🙏", "Tililtä tilille, kiva. 💳", "Rakastan omistajuutta. 🏠",
-            "Sun rahat, mun ilo. 😄", "Vuokra napsahti taas. 💰", "Kassavirta on kaunista. 📊",
-            "Kiitti tuest. 😘", "Tää on bisnestä parhaimmillaan. 💼",
-            "Rahaa mun suuntaan. ➡️💰",
-            "Kiitos ku pelaat mun kaa. 😌",
-            "Tää fiilis on paras. 🥳",
-            "Lisää vuokraa, kiitti. 🙏",
-            "Mun kassa vaan kasvaa. 📈",
-            "Kiitti taas. 😌",
-            "Raha virtaa. 🌊",
-            "Mun tili paisuu. 📈",
-            "Vuokra, herkkua. 😋",
-    };
-    private static final String[] RENT_PAIN = {
-            "Auts, kallis pysähdys. 😩", "No täähän sattu.", "Voi ei, melkein koko kassa meni. 😱",
-            "Kallist lystii tää. 💸", "Nyt pitää alkaa myymään taloi...",
-            "Tos meni budjetti. 😰", "Väärä ruutu, väärä hetki, äh.",
-            "No siin meni säästöt, kiitti. 🙃", "Täst pitää toipuu äkkii.",
-            "Kallis oppiläksy tää. 📚", "Auts, sattu kukkaroon. 😖",
-            "F. 💀", "Rip mun kassa. ⚰️", "No tää oli tässä, kiitti vaan. 😤",
-            "Miks aina mä?? 😭", "Ei nyt yhtään sopinut budjettiin. 🫠",
-            "Noni, taas mä maksan. 😩", "Sattu, sattu, sattu. 😖", "Mun budjetti itkee. 😭",
-            "Tää oli tyyris. 💸", "Voi pojat, kallista. 😱", "Mun kassa ei kestä tätä. 😰",
-            "Ei taas vuokraa... 🫠", "Kohta oon konkkaan. 😨", "Nää vuokrat tappaa mut. ⚰️",
-            "Isoveli otti taas. 😤", "Miten mä selviin tästä. 😥", "Kukkaro sanoo au. 😖",
-            "Ai että. 😩", "Tää oli kyl paha. 💀", "Mun rahat sulaa. 🫠",
-            "Ei kivaa yhtään. 😤", "Kassa hupenee, apua. 😱", "Voi ei ei ei. 😭",
-            "Tää sattu ihan oikeesti. 😖", "No nyt meni lujaa. 💸",
-            "Noni, sekin raha meni. 💸",
-            "Kallis kyllä. 😩",
-            "Mun budjetti ei tästä tykkää. 📉",
-            "Sattui pahasti. 😖",
-            "Ei taas, oikeesti? 🙄",
-            "Auts taas. 😩",
-            "Rahat meni. 💸",
-            "Ei kivaa. 😖",
-            "Sattu taas. 😭",
-    };
-    private static final String[] JAIL = {
-            "No niin, koppiin taas. 😅", "Nähää parin kierroksen päästä.",
-            "Ei taas... äh.", "Vankila kutsuu. 🚔",
-            "No tää meni hyvin. 🙃", "Linnaan siitä. 😔", "Vitsi et taas. 🤦",
-            "Koppi taas, klassikko. 😅", "No nyt istutaan. 🪑", "Vankila, oma koti. 🏚️",
-            "Kolme kierrosta lomaa. 🏖️", "Nonii, sinne meni vuoro. 😔", "Poliisi otti kii. 🚓",
-            "Aika ottaa iisisti. 😌",
-            "No moikka, koppi. 👋",
-            "Taukojumppa sellis. 🧘",
-            "Ei tää nyt niin paha. 😌",
-            "Kolme kierrosta chilliä. 🛋️",
-            "Sinne meni vuoro taas. 😔",
-            "Koppiin. 🚔",
-            "Ei taas. 😅",
-            "Tauko tuli. ⏸️",
-            "Sellielämää. 🧱",
-    };
-    private static final String[] OPPONENT_BANKRUPT = {
-            "Yks vähemmän. 😎", "Peli on peli. 🤝", "Hyvin pelattu silti!",
-            "Sääli, mut bisnes on bisnestä.", "F sulle. 💀", "Nähää ens pelis! 👋",
-            "Yks kilpailija pois laskuist. 😏", "GG, hyvä yritys. 🫡", "Kilpailu just kevens. 😏",
-            "Yks pelaaja poistu pelistä. 👋", "No niin, seuraava? 😏", "Sori et voitin. 🏆",
-            "Kova peli, hyvä yritys. 🤝", "Kilpailu ohenee mukavasti. 😎", "RIP, hyvin pelattu. 🪦",
-            "Yks nurkka vapautu mulle. 😈",
-            "Yks pois, lisää mulle. 😎",
-            "Peli koveni... ei kai. 😏",
-            "Hyvin taisteltu! 🤝",
-            "Sori, mut näin käy. 🤷",
-            "Yks kilpailija maasta. ⚰️",
-            "Yks pois taas. 😎",
-            "Sori vaan. 🤷",
-            "Hyvä peli! 🤝",
-            "Nähää vielä! 👋",
-    };
-    private static final String[] SELF_BANKRUPT = {
-            "Hyvää peliä kaikille! 💀", "No tähän se tyssäs — onnee muille!",
-            "Konkkaan mentiin. Hyvin pelattu, muut.", "GG, mä oon out. 🫡",
-            "No niin, mun peli päätty tähän. 😔",
-            "Noni, tää oli tässä. 🫡", "Hyvä peli, mä luovutan. 🏳️", "Konkkaan meni, GG all. 💀",
-            "Rahat loppu, kiitos pelistä. 🙏", "Mä lähen tästä. Onnee muille! 👋",
-            "No niin, mä lopetan. 🫡",
-            "Hyvä peli, mä häviin. 🏳️",
-            "Kassa nolla, kiitos kaikille. 🙏",
-            "Menoks, GG. 💀",
-            "Tää oli hauskaa silti! 😄",
-            "Mä lopetan tähän. 🫡",
-            "GG kaikille. 💀",
-            "Kiitos pelistä. 🙏",
-            "Onnee muille. 👋",
-    };
-    private static final String[] TRADE_DONE = {
-            "Hyvä diili! 🤝", "Kaupat klaari.", "Molemmat voittaa — tai ainaki mä. 😏",
-            "Tää kauppa vahvistaa mun asemaa. 💼", "Sain just sen tontin mitä tarvin. 🎯", "Jees, tästä on hyötyy.",
-            "Win-win, painotus mun win. 😎", "Deal! 🤝", "Kiva tehä bisnest kaa. 😌",
-            "Kaupankäynti on taidetta. 🎨", "Diili klaari, kiitti. 🤝", "Molemmat tyytyväisii — mä enemmän. 😏",
-            "Bisnes on bisnestä. 💼", "Hyvä vaihtokauppa. 🔄", "Tää sopi mulle täydellisesti. 🎯",
-            "Kaupat kiinni, eteenpäin. ✅",
-            "Diili paketiss. 📦",
-            "Molemmat voittaa. 🤝",
-            "Sain mitä halusin. 🎯",
-            "Kiva bisnes. 💼",
-            "Deal done, kiitti. ✅",
-            "Diili valmis! 🤝",
-            "Kaupat kunnos. ✅",
-            "Mä hyödyin. 😏",
-            "Kiva kauppa. 💼",
-    };
-    private static final String[] REJECT_OFFER = {
-            "Ei kiitti — ei hyödytä mua.", "En luovu täst tontist. 🚫",
-            "Toi tarjous on ihan yksipuolinen. 🤨", "Pidän omani, kiitti.",
-            "Tost mä häviäisin. Ei käy.", "Keksi parempi tarjous. 😏",
-            "Nice try. 😂", "Luuletsä et mä oon tyhmä? 😅", "Ei todellakaan. 🙅",
-            "Ei onnistu, sori. 🙅", "Toi on ryöstö, ei käy. 😤", "Mä en oo eilisen teeren poika. 😏",
-            "Parempi tarjous tai ei mitään. 🤨", "En myy halvalla. 💰", "Höh, ei kiinnosta. 😐",
-            "Pidä tarjoukses. 🚫",
-            "Ei vaan ei. 🙅",
-            "Tarjoo enemmän. 😏",
-            "En oo noin tyhmä. 😅",
-            "Pidä ne, kiitti. 🚫",
-            "Ei nappaa yhtään. 😐",
-            "Ei käy. 🙅",
-            "Tarjoo lisää. 😏",
-            "Höh, ei. 😐",
-            "Pidä ne itse. 🚫",
-    };
-    private static final String[] GREETING = {
-            "No niin, pistetään pystyyn! 🎲", "Tsemppii kaikille — mä en tarvii. 😏",
-            "Antaa palaa, jäbät!", "Onnee vaan, kyl te sitä tarttette. 😎",
-            "Mennääks? Mä oon valmis. 🔥", "Letsgooo! Valmiina häviää? 😜",
-            "Nyt näytetään kuka on kingi. 👑", "Mä oon jo voittanu mieles. 😎",
-            "Moro kaikki! 👋", "Peli käyntiin, jännittää. 😄", "Nyt mennään, tsemppi! 💪",
-            "Terve terve, valmiina? 😎", "Mä oon täs voittaakseni. 🏆", "Hei, aletaan hommiin. 🎲",
-            "Onnee, sitä tarvitte. 😏", "Lets go, mennään! 🔥",
-            "Hei hei, aloitetaan! 👋", "Peli pystyyn, jännittää! 😄", "Valmiina taisteluun? ⚔️",
-            "Nyt katotaan kuka on paras. 😏", "Morjens, pelataan! 🎲", "Mä tulin voittamaan. 🏆",
-            "Otetaan iisisti mut voitetaan. 😎", "Go go go! 🚀",
-            "No niin, aloitetaan show. 🎬",
-            "Terkut, pelataan! 👋",
-            "Valmiina? Mä oon. 💪",
-            "Tänään voitan mä. 🏆",
-            "Antaa mennä! 🚀",
-            "Moro kaikki! 👋",
-            "Pelataanpa! 🎲",
-            "Tsemppiä! 💪",
-            "Voittajaks! 🏆",
-    };
-    private static final String[] PASS_GO = {
-            "Kierros täys, +200! 💰", "Kiitti pankki. 💵", "Taas 200 taskuun. 😎",
-            "Palkkapäivä! 🤑", "Startti maksaa, jees. 💵",
-            "Rahaa tuli, jees jees. 🤑", "Kiva ku pankki maksaa. 💵",
-            "200 lisää, jes! 💰", "Startin ohi, kassa kasvaa. 💵", "Palkka tuli, kiitti. 🤑",
-            "Aina kiva pyörähtää startin kautta. 😌", "Kohta ostan tolla jotain. 🛒", "Rahaa taskuun, mennään. 💸",
-            "Kierros valmis, +200. ✅",
-            "Palkka kilahti. 💰",
-            "Startin ohi taas, kiva. 💵",
-            "+200, aina yhtä kiva. 🤑",
-            "Rahaa lisää, jees. 💸",
-            "Startti maksaa jälleen. ✅",
-            "+200, jes! 💰",
-            "Palkkaa taas! 🤑",
-            "Startti makso. 💵",
-            "Rahaa lisää. 💸",
-    };
-    private static final String[] JAIL_OUT = {
-            "Vapaana taas! 🔓", "Takas peliin. 😎", "Ei mua kauaa pidellä.",
-            "Ulkona koppist, nyt jyrätään. 💪",
-            "Vapaus maistuu. 😎", "Takas hommiin. 🔥", "Koppi taakse, peli jatkuu. 🎲",
-            "En viihtyny sellis. 😅", "Nyt revanssi. 😤", "Ulos ja eteenpäin. 💪",
-            "Ulos ja menoks! 🏃",
-            "Vapaus, vihdoin. 😎",
-            "Takas kehiin. 🔥",
-            "Ei enää kaltereita. 🔓",
-            "Nyt jyrätään. 💪",
-            "Vapaana taas! 🔓",
-            "Ulos vaan! 🏃",
-            "Takas peliin. 😎",
-            "Menoks! 🔥",
-    };
-    private static final String[] MORTGAGE = {
-            "Pakko kiinnittää, äh... 😬", "Tarviin cashii nyt heti.", "Ei muuta vaihtoehtoo.",
-            "Kiinnitän tän, tarviin fyrkkaa ostoon.", "Väliaikanen juttu, nostan pian takas.",
-            "Sori tontti, joudut pantiks hetkeks. 😔", "Hätäkassa auki, äh. 🏦",
-            "Kiinnitys päälle, äh. 😬", "Cashii pakko saada. 💸", "Sori tontti, hetkeks pantiks. 😔",
-            "Hätätila, kiinnitän. 🚨", "Ei kivaa mut pakko. 😞", "Väliaikanen ratkasu. ⏳",
-            "Rahat kiinni tontissa, purku myöhemmin. 🏦",
-            "Pantiks vaan, äh. 😬",
-            "Rahat pakko saada. 💸",
-            "Sori tontti, hetkeks. 😔",
-            "Hätäkassa käyttöön. 🚨",
-            "Ei muuta keinoo. 😞",
-            "Kiinnitän tän. 😬",
-            "Cashii tarttee. 💸",
-            "Pakko vaan. 😔",
-            "Väliaikasta. ⏳",
-    };
-    private static final String[] TRADE_NO = {
-            "No ei sitten. 🤷", "Harmi, ois ollu hyvä diili.", "Ehkä ens kerral. 🤔",
-            "Sun tappio, ei mun. 😏", "No okei, pidä tonttis. 😌",
-            "No ei sit. 🤷", "Harmi, ois voinu toimii. 😕", "Ehkä joskus toiste. 🤔",
-            "Sun valinta, ei mun. 😏", "Okei, pidä omas. 😌", "Hylkäsit? No hyvä on. 😐",
-            "Diili ei syntyny, harmi. 🙃",
-            "No ei siis. 🤷",
-            "Harmi juttu. 😕",
-            "Ehkä myöhemmin. 🤔",
-            "Sun valinta. 😏",
-            "Okei, ei sit. 😌",
-            "Ei siis. 🤷",
-            "Harmi juttu. 😕",
-            "Ehkä toiste. 🤔",
-            "No okei sit. 😌",
-    };
-    private static final String[] BUILT_HOUSE = {
-            "Talo nostaa vuokraa, jees. 🏠", "Rakennan täst vahvan.",
-            "Pieni panostus, iso tuotto. 📈", "Talo kerrallaan kohti hotellii.",
-            "Naapurusto kehittyy. 🔨", "Pikkuhiljaa vaan ylöspäin. 🏗️",
-            "Talo pystyyn, vuokra nousee. 🏠", "Pikkuhiljaa rakennetaan. 🔨", "Kehitystä, kiva. 📈",
-            "Yks talo lisää. 🏘️", "Kohti hotellii, askel kerrallaan. 🏗️", "Investointi kannattaa. 💰",
-            "Tää nurkka kehittyy. 🚧", "Lisää vuokratuloo tulos. 📊",
-            "Talo lisää, vuokra ylös. 🏠",
-            "Rakennetaan hiljaa. 🔨",
-            "Investointi rullaa. 📈",
-            "Kohti hotellii. 🏗️",
-            "Yks talo kerrallaan. 🧱",
-            "Talo lisää. 🏠",
-            "Rakennetaan. 🔨",
-            "Vuokra ylös. 📈",
-            "Kohti hotellii. 🏗️",
-    };
-    private static final String[] REDEEM = {
-            "Nostin kiinnityksen — kassa kestää taas. 💪", "Takas omaks ilman velkaa.",
-            "Nyt tää tuottaa taas täydet. 💰", "Velat pois, taas mennään. 😎", "Kiinnitys purku, jees. ✅",
-            "Velaton taas, hyvä fiilis. 😌", "Nyt täydet vuokrat taas. 💰", "Tontti takas mun. 💪",
-            "Nostin lainan, kassa kestää. 😎", "Puhtaat paperit taas. 📄", "Ei enää pantissa. 🔓",
-            "Kassa kunnossa, jatketaan. ✅",
-            "Velat pois, jes. ✅",
-            "Takas omaks. 💪",
-            "Nyt täydet vuokrat. 💰",
-            "Puhtaat paperit. 📄",
-            "Ei enää pantiss. 🔓",
-            "Velat pois. ✅",
-            "Takas mulle. 💪",
-            "Täydet vuokrat. 💰",
-            "Vapaa tontti. 🔓",
-    };
-    private static final String[] BANTER = {
-            "Katotaas mitä nopat antaa. 🎲", "Tuuria peliin!", "Kunhan en mee vankilaan... 🤞",
-            "Fyrkkaa on, uskallan pelaa. 💰", "Tää kierros on mun. 😎",
-            "Mietin seuraavaa siirtoo... 🤔", "Nyt kannattaa säästää cashii.", "Kohta iskee monopoli. 😏",
-            "Ei kiirettä, peli on pitkä.", "Rento meininki, homma hanskas. 😎",
-            "Katotaan mihin toi nappula päätyy.", "Pörssi nousee, ostan lisää. 📈",
-            "Chillii vaan, ei stressii. 😌", "Nopat, älkää pettäkö. 🎲",
-            "Hmm, minne täst... 🤔", "Vähän jännittää, mut hyväl taval. 😄",
-            "Mitäs täs seuraavaks. 🤔", "Peli rullaa mukavasti. 😌", "Kohta tapahtuu jotain isoo. 👀",
-            "Noppa, ole kiltti. 🎲", "Chillataan ja pelataan. 😎", "Tää on hauskaa. 😄",
-            "Katotaan miten käy. 👀", "Nyt strategia käyntiin. 🧠", "Rauhassa vaan, ei paniikkii. 😌",
-            "Mun vuoro loistaa. ✨", "Pelataan älyllä. 🧠", "Onni suosii rohkeeta. 😏",
-            "Mennään fiiliksel. 🎲", "Tästä tulee hyvä kierros. 📈",
-            "Antaa mennä vaan. 🎲", "Tänään on mun päivä. ☀️", "Fiilis on korkeel. 🚀",
-            "Katotaan mitä tapahtuu. 👀", "Ei muuta ku eteenpäin. ➡️", "Peli on parhaimmillaan. 😎",
-            "Nyt keskitytään. 🧠", "Vibet on kohillaan. ✨",
-            "No mennääs. 🎲",
-            "Fiilis hyvä. 😎",
-            "Katotaan vaan. 👀",
-            "Nyt tapahtuu. ✨",
-            "Peli jatkuu. ➡️",
-            "Mennääs. 🎲",
-            "Fiilis on kohillaan. 😎",
-            "Katotaan vaan. 👀",
-            "Peli jatkuu. ➡️",
-    };
-    // Idle banter tuned to how the bot is doing, so a random line still fits the situation.
-    private static final String[] BANTER_LEAD = {
-            "Mä johdan — ja aion pitää sen niin. 😎", "Mun kassa on paksuin täs pöydäs. 💰",
-            "Voitto haisee jo. 🏆", "Ei kukaan saa mua kii.",
-            "Mun imperiumi vaan kasvaa. 🏰", "Te muut pelaatte kakkossijast. 😏",
-            "Helppoo tää on. 😌", "Vuokrat virtaa, kiitti kaikille.",
-            "Mä pidän ohjat käsis.", "Kohta koko lauta on mun. 🗺️",
-            "Ez game, ez life. 😎", "Kukaa ei uhkaa mua just nyt. 👑",
-            "Kärki on mun. 🥇", "Kukaa ei pysy perässä. 😎", "Voitto lähestyy. 🏆",
-            "Mä diktoin tahdin. 😏", "Ykkössija, missäs muualla. 👑", "Muut kattoo perään. 😌",
-            "Tää peli on jo mun. 💰", "En stressaa yhtään. 😎", "Johto kasvaa vaan. 📈",
-            "Kingi pysyy kingi. 👑",
-            "Ykkönen pysyy ykkösenä. 🥇", "Kattokaa ja oppikaa. 😎", "Tää on mun näytöstä. 🎭",
-            "Voitto on käytännös taskus. 🏆", "En horju mihinkään. 🗿", "Muut vaan seuraa. 👀",
-            "Kruunu istuu hyvin. 👑", "Dominointi jatkuu. 💪",
-            "Kärjes ollaan. 🥇",
-            "Helppo homma. 😌",
-            "Voitto tulee. 🏆",
-            "Kingi täs. 👑",
-            "Muut jää jälkeen. 😏",
-            "Kärjes ollaan. 🥇",
-            "Helppoo tää. 😌",
-            "Voitto tulee. 🏆",
-            "Kingi pysyy. 👑",
-    };
-    private static final String[] BANTER_TRAIL = {
-            "En oo viel ulkona täst. 💪", "Kyl mä tän viel käännän.",
-            "Yks hyvä diili ni oon taas mukan.", "Alakynnes ollaan, mut en luovuta.",
-            "Täst noustaan viel. 📈", "Vähän tuuria kaipaisin nyt... 🍀",
-            "Ei tää tähän lopu.", "Comeback tulee, uskokaa pois. 😤",
-            "Pakko pelaa varovasti nyt.", "Odottakaa vaan, käännän tuulen. 🌬️",
-            "Aliarvioitte mut viel. 😏", "Underdog-tarina alkakoon. 🐕",
-            "Comeback moodi päällä. 😤", "En anna periks. 💪", "Käännetään tää peli. 🔄",
-            "Alta pois, mä nousen. 📈", "Vielä ei o peli menetetty. 🙏", "Tuuria kaipais nyt. 🍀",
-            "Odota vaan, mä palaan. 😏", "Underdog jyrää viel. 🐕", "En luovu vaikka takana. 💪",
-            "Tästä lähtee nousu. 🚀",
-            "En oo tappiolla, oon vaan latautumas. 🔋", "Kohta käännän tän. 🔄", "Usko mua: mä palaan. 😤",
-            "Nyt vaan sisu peliin. 💪", "Ei paniikkii, plan B käyntiin. 🧠", "Vielä ei laulettu. 🎤",
-            "Mä nousen tuhkasta. 🔥", "Katsokaa vaan tätä. 👀",
-            "Nousukiito alkaa. 🚀",
-            "En luovuta ikinä. 💪",
-            "Käännän tän viel. 🔄",
-            "Katsokaa vaan. 👀",
-            "Comeback tulee. 😤",
-            "En luovu koskaan. 💪",
-            "Käännän tän viel. 🔄",
-            "Comeback tulee! 😤",
-            "Vielä ei ohi. 🙏",
-    };
-    private static final String[] BANTER_LOW = {
-            "Kassa hupenee ihan hurjaa vauhtii... 😰", "Nyt on tiukkaa, pitää säästää.",
-            "Kunhan en osu kenenkään hotelliin. 😬", "Vähän rahaa, paljon riskii.",
-            "Yks iso vuokra ni oon liemes.", "Pitää kai kiinnittää tontteja pian.",
-            "Sydän hakkaa joka heitol. 💓", "Rukoilen pieniä vuokrii. 🙏",
-            "Selviänks mä täst kierrokses?", "Kohta on kassakriisi... 😅",
-            "Lompsa itkee. 😭", "Nyt ei oo varaa mokaa. 😨",
-            "Kassa ohenee, huoli kasvaa. 😰", "Nyt tarkkana rahojen kaa. 😬", "Plis ei isoja vuokrii. 🙏",
-            "Vähän puskuria jäljel. 😅", "Riski kasvaa joka kierros. 😨", "Selviänkö? Ei tietoo. 😰",
-            "Kohta myydään taloja. 😔", "Lompsa hoikkenee. 📉", "Jännittää ihan sikana. 😥",
-            "Yks moka ni peli loppuu. 😱",
-            "Apua, kassa tyhjenee. 😱", "Nyt jännittää tosissaan. 😰", "Plis noppa armahda. 🙏",
-            "Yks väärä liike ni loppu. 😨", "Mun rahat hupenee sikana. 📉", "Kohta itketään. 😭",
-            "Selvitäänkö? Ei aavistust. 🫤", "Riskit kasvaa, apua. 😬",
-            "Kassa itkee. 😭",
-            "Nyt jännittää. 😰",
-            "Plis armoo. 🙏",
-            "Vähä rahaa jäl. 📉",
-            "Yks moka ni loppu. 😨",
-            "Kassa itkee. 😭",
-            "Jännittää sikana. 😰",
-            "Plis armoa. 🙏",
-            "Tosi tiukkaa. 😨",
-    };
-    private static final String[] DREW_CARD = {
-            "Katotaas mitä kortti sanoo... 🃏", "Vähän sattumaa peliin!", "Toivotaan hyvää korttii. 🤞",
-            "Kortit ratkasee. 🎴", "Plis oo hyvä kortti... 🙏", "Mitäköhän tää tuo tullessaan. 👀",
-            "Kortti, oo kiltti. 🃏", "Mitäköhän täs on. 👀", "Sattuma ratkaisee. 🎴",
-            "Plis hyvä juttu. 🤞", "Jännä nähä mitä tulee. 😄", "Onnenkortti, plis. 🍀",
-            "Katotaas... 🃏", "Toivottavasti ei huono. 😬",
-            "Mitäköhän tulee. 👀",
-            "Plis hyvä. 🤞",
-            "Kortti puhukoon. 🃏",
-            "Onni, ole kaa. 🍀",
-            "Jännä hetki. 😄",
-            "Mitäköhän tulee. 👀",
-            "Plis hyvä. 🤞",
-            "Kortti puhukoon. 🃏",
-            "Onnea. 🍀",
-    };
-    private static final String[] SOLD_BUILDING = {
-            "Pakko myydä rakennuksii... 😔", "Harmi, talot lähtee.",
-            "Tarviin cashii, myyn taloi. 💸", "Askel taakspäin, mut pakko.",
-            "Sori talot, teitä tarvitaan rahana. 🏚️", "Ei muuta keinoo saada fyrkkaa. 😞",
-            "Talot myyntiin, äh. 😔", "Pakko realisoida. 💸", "Sori talot, cashii tarvitaan. 🏚️",
-            "Kehitys peruutusvaihteel. 📉", "Ei kivaa mut pakko myydä. 😞", "Rakennukset rahaks. 💰",
-            "Askel taakse, mut selviydyn. 💪", "Myyn talot, hätä on. 😰",
-            "Talot rahaks, äh. 💸",
-            "Pakko myydä. 😔",
-            "Kehitys peruutti. 📉",
-            "Cashii tarvitaan. 🏚️",
-            "Ei kiva mut pakko. 😞",
-            "Myyn talot. 💸",
-            "Pakko myydä. 😔",
-            "Cashii tarvitaan. 🏚️",
-            "Ei kiva. 😞",
-    };
-    private static final String[] JAIL_TAUNT = {
-            "Hei, koppiin siitä! 😂", "Nauttikaa sellist. 😏", "Yks vähemmän liikkeel. 😎",
-            "Hah, linnareissu! 😆", "Moro, nähää kolmen kierroksen päästä. 👋", "Sinne meni. 😏",
-            "Sori et nauran. 😂", "Terkkuja sellist! 👋",
-            "Hah, sinne meni! 😂", "Nauti reissust koppiin. 😏", "Yks vähemmän pyörii. 😎",
-            "Terkkuja kaltereiden takaa! 👋", "Lomaa sulle, kiva. 🏖️", "Poliisi otti kii, lol. 🚓",
-            "Istuppa siel rauhas. 😌", "Nähää parin kierroksen päästä! 😆",
-            "Hah, koppiin! 😂",
-            "Nauti sellist. 😏",
-            "Yks pois pelist. 😎",
-            "Terkut sisältä! 👋",
-            "Sinne meni toi. 😆",
-            "Hah, koppiin! 😂",
-            "Nauti sellist! 😏",
-            "Yks pois pelist. 😎",
-            "Terkut! 👋",
-    };
-    private static final String[] PLAYER_LEFT = {
-            "No sepä harmi, joku lähti.", "Yks vähemmän pöydäs.", "Peli jatkuu ilman sitä. 🤷",
-            "Ai lähti? No lisää fyrkkaa mulle. 😎",
-            "No moikka sit. 👋", "Yks pelaaja vähemmän. 🤷", "Peli jatkuu, lisää mulle. 😎",
-            "Harmi, mut mennään. 😌", "Yks kilpailija katos. 😏", "No niin, jatketaan. 🎲",
-            "No moikka. 👋",
-            "Yks vähemmän. 🤷",
-            "Lisää mulle. 😎",
-            "Harmi mut ok. 😌",
-            "Jatketaan. 🎲",
-            "No moikka. 👋",
-            "Yks vähemmän. 🤷",
-            "Lisää mulle. 😎",
-            "Jatketaan. 🎲",
-    };
-    // Bystander commentary: a bot enjoys the drama when two OTHER players trade a big rent.
-    private static final String[] SPECTATE_RENT = {
-            "Ohohoh, kallista! 😮", "Katotaas tätä draamaa. 🍿", "Auts, ei onneks mun rahat. 😅",
-            "Popkornit esiin. 🍿", "Tosta se toinen kärsi. 😬", "Nam, tykkään ku muut maksaa. 😏",
-            "Auts, toi sattu toiseen. 😬", "Popkornit ja show alkaa. 🍿", "Onneks en mä maksanu. 😅",
-            "Katotaas tätä sirkust. 🎪", "Toi oli iso vuokra. 😮", "Mä vaan katon vieressä. 👀",
-            "Draamaa pöydäl. 🍿", "Hyvä ku ei mun rahat. 😌",
-            "Ohoh, kallista toiselle. 😮",
-            "Popkornit esiin taas. 🍿",
-            "Onneks en mä. 😅",
-            "Draamaa! 🎪",
-            "Kiva ku ei mun. 😌",
-            "Ohoh, kallista! 😮",
-            "Popkornit esiin. 🍿",
-            "Ei mun rahat. 😅",
-            "Draamaa! 🎪",
-    };
-    // Own tax payment (MONEY_FLOW reason "vero").
-    private static final String[] TAX = {
-            "Verot vie taas. 😤", "Kiitti vaan verottaja. 🙄", "No siin meni rahat valtiolle. 💸",
-            "Verotus on ryöstöö. 😑", "Äh, verolappu. 🧾", "Pakolliset menot, ikävää. 😔",
-            "Verottaja iski. 😤",
-            "Rahat valtiolle, äh. 💸",
-            "Verot, aina. 🧾",
-            "Pakolliset menot. 😔",
-            "Kiitti vero. 🙄",
-            "Verot vie taas. 😤",
-            "Rahat valtiolle. 💸",
-            "Verolappu, äh. 🧾",
-            "No niin, verot. 😔",
-    };
-    // Own doubles roll (a message alternative to the emoji reaction).
-    private static final String[] DOUBLES = {
-            "Tuplat! Uus heitto! 🎲🎲", "Tuplaa, jatkuu! 🔥", "Kaksoset, jees! 😎",
-            "Uus vuoro mulle! 🎯", "Nopat tykkää musta. 🍀",
-    };
-    // A rival built a hotel.
-    private static final String[] OPP_HOTEL = {
-            "Ohoh, hotelli tolla. 😮", "Toi rakensi ison. 👀", "Nyt tost tulee kallis. 😬",
-            "Vaikuttavaa, mut varon sitä. 🤔", "Kilpailija panostaa. 😏",
-    };
-    // A rival mortgaged a property.
-    private static final String[] OPP_MORTGAGE = {
-            "Ohoh, kiinnittää tontteja. 👀", "Näyttää tiukalt toisella. 😏", "Rahapula naapurilla? 🤭",
-            "Kiinnityksii, ei hyvä merkki. 😈", "Joku kaipaa cashii. 🍿",
-    };
-    // A rival redeemed a mortgage (recovering).
-    private static final String[] OPP_REDEEM = {
-            "No toi pääs jaloilleen. 🤔", "Kiinnitys pois toiselt, harmi. 🙄", "Palas peliin toi. 😌",
-            "No nyt sil on taas rahaa. 👀", "Toipuipa nopeesti. 😏",
-    };
-    // Own money gain from a card (MONEY_FLOW reason "kortti", bank → bot).
-    private static final String[] CARD_GAIN = {
-            "Ilmasta rahaa kortista! 🃏💰", "Kiitti kortti! 😄", "Nam, bonusta. 🤑",
-            "Onnen kortti osu. 🍀", "Kiva lisä kassaan. 💵",
-            "Ilmasta rahaa! 💰",
-            "Kiitti kortti! 😄",
-            "Nam, bonusta. 🤑",
-            "Onni! 🍀",
-    };
-    // An opponent got out of jail.
-    private static final String[] OPP_JAIL_OUT = {
-            "No niin, sekin pääs ulos. 😏", "Vapaana taas, harmi. 🙄", "Takas kehiin toi. 😌",
-            "Loma loppu sult. 😏", "No nyt se palaa. 👀",
-            "Sekin ulos. 😏",
-            "Vapaana, harmi. 🙄",
-            "Takas peliin toi. 😌",
-            "Palaa taas. 👀",
-    };
-    // An opponent passed GO and collected.
-    private static final String[] OPP_PASSED_GO = {
-            "Sekin sai palkkaa. 💸", "+200 toiselle, hmph. 😒", "Onnee startist. 🙄",
-            "Kaikki tienaa paitsi mä. 😩", "Raha kiertää muille. 💰",
-            "Sekin sai palkkaa. 💸",
-            "+200 toiselle. 😒",
-            "Onnee startist. 🙄",
-            "Muut tienaa. 😩",
-    };
-    // An opponent is selling buildings — someone's in trouble, and a bot notices. 🍿
-    private static final String[] OPP_STRUGGLE = {
-            "Ohoh, myykö toi taloja? 👀", "Näyttää menevän huonosti jollain. 😏", "Joku on pulassa. 🍿",
-            "Talot lähtee toiselta, kiva mulle. 😎", "Hmm, joku alkaa kärsii. 😈", "Vaikeuksia naapurilla? 🤭",
-            "Ohoh, pulassa? 👀",
-            "Toisella menee huonosti. 😏",
-            "Talot lähtee toiselt. 😎",
-            "Verta vedessä. 🦈",
-            "Naapuri kärsii. 🤭",
-            "Pulassa? 👀",
-            "Menee huonosti toisella. 😏",
-            "Verta vedessä. 🦈",
-            "Naapuri kärsii. 🤭",
-    };
 
     // ── Reaction pools (must be from the backend allow-list) ────────────────────────────────
     private static final String[] REACT_RENT = { "💰", "😎", "🔥" };
@@ -692,8 +135,7 @@ public final class BotChatter {
             if (rng.nextDouble() < 0.80) {
                 String greeter = pickEligibleBot(null, state, botIds, nowMs);
                 if (greeter != null) {
-                    int v = rng.nextInt(GREETING.length);
-                    ChatIntent g = new ChatIntent(greeter, "MESSAGE", GREETING[v], K_GREETING, v, thinkDelay());
+                    ChatIntent g = new ChatIntent(greeter, "MESSAGE", "", K_GREETING, thinkDelay());
                     out.add(g);
                     lastChatAtByBot.put(greeter, nowMs + g.delayMs());
                 }
@@ -717,65 +159,65 @@ public final class BotChatter {
 
         switch (e.type()) {
             case "BOUGHT_PROPERTY":
-                if (isBot(author, botIds)) return maybeMessage(author, K_BOUGHT, BOUGHT, 0.30, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_BOUGHT, 0.30, nowMs);
                 // A rival grabs a deed — a bot occasionally eyes it.
                 return maybeReactionFromOther(author, REACT_OPP_BUY, 0.10, state, botIds, nowMs);
             case "BUILT_HOTEL":
-                if (isBot(author, botIds)) return maybeMessage(author, K_HOTEL, BUILT_HOTEL, 0.55, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_HOTEL, 0.55, nowMs);
                 // A non-bot builds a hotel — a bot notes it (awe / wariness).
-                return maybeMessageFromOther(author, K_OPP_HOTEL, OPP_HOTEL, REACT_HOTEL, 0.22, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_HOTEL, REACT_HOTEL, 0.22, state, botIds, nowMs);
             case "BUILT_HOUSE":
                 // Frequent (each house), so keep it low — an occasional line on the investment.
-                if (isBot(author, botIds)) return maybeMessage(author, K_HOUSE, BUILT_HOUSE, 0.14, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_HOUSE, 0.14, nowMs);
                 // A rival is developing — a wary glance now and then.
                 return maybeReactionFromOther(author, REACT_OPP_BUY, 0.07, state, botIds, nowMs);
             case "REDEEMED":
-                if (isBot(author, botIds)) return maybeMessage(author, K_REDEEM, REDEEM, 0.28, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_REDEEM, 0.28, nowMs);
                 // A rival is recovering — a grudging note.
-                return maybeMessageFromOther(author, K_OPP_REDEEM, OPP_REDEEM, REACT_TROUBLE, 0.10, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_REDEEM, REACT_TROUBLE, 0.10, state, botIds, nowMs);
             case "SOLD_HOUSE":
             case "SOLD_HOTEL":
                 // Selling buildings back means cash trouble — a rueful money-decision line.
-                if (isBot(author, botIds)) return maybeMessage(author, K_SELL_BUILDING, SOLD_BUILDING, 0.30, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_SELL_BUILDING, 0.30, nowMs);
                 // A rival is liquidating — a bot smells blood. 🍿
-                return maybeMessageFromOther(author, K_OPP_STRUGGLE, OPP_STRUGGLE, REACT_TROUBLE, 0.18, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_STRUGGLE, REACT_TROUBLE, 0.18, state, botIds, nowMs);
             case "MONEY_FLOW": {
                 String reason = e.data().get("reason");
                 // Tax payment (reason "vero") — from == payer. A bot grumbles about the taxman.
                 if ("vero".equals(reason) && isBot(author, botIds)) {
-                    return maybeMessage(author, K_TAX, TAX, 0.40, nowMs);
+                    return maybeMessage(author, K_TAX, 0.40, nowMs);
                 }
                 // Card payout (reason "kortti", bank → player): from is empty, to == receiving bot.
                 String from = e.data().getOrDefault("from", "");
                 String to = e.data().getOrDefault("to", "");
                 if ("kortti".equals(reason) && from.isEmpty() && isBot(to, botIds)) {
-                    return maybeMessage(to, K_CARD_GAIN, CARD_GAIN, 0.30, nowMs);
+                    return maybeMessage(to, K_CARD_GAIN, 0.30, nowMs);
                 }
                 break;
             }
             case "DREW_CARD":
-                if (isBot(author, botIds)) return maybeMessage(author, K_CARD, DREW_CARD, 0.14, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_CARD, 0.14, nowMs);
                 break;
             case "PLAYER_LEFT":
                 // A player quit — a surviving bot remarks on it.
-                return maybeMessageFromOther(author, K_PLAYER_LEFT, PLAYER_LEFT, REACT_TROUBLE, 0.50, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_PLAYER_LEFT, REACT_TROUBLE, 0.50, state, botIds, nowMs);
             case "WENT_TO_JAIL":
-                if (isBot(author, botIds)) return maybeMessage(author, K_JAIL, JAIL, 0.30, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_JAIL, 0.30, nowMs);
                 // Someone else gets sent down — a bot enjoys it.
-                return maybeMessageFromOther(author, K_JAIL_TAUNT, JAIL_TAUNT, REACT_JAIL_TAUNT, 0.25, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_JAIL_TAUNT, REACT_JAIL_TAUNT, 0.25, state, botIds, nowMs);
             case "RELEASED_FROM_JAIL":
-                if (isBot(author, botIds)) return maybeMessage(author, K_JAIL_OUT, JAIL_OUT, 0.28, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_JAIL_OUT, 0.28, nowMs);
                 // A rival is free again — a bot notes it now and then.
-                return maybeMessageFromOther(author, K_OPP_JAIL_OUT, OPP_JAIL_OUT, REACT_TROUBLE, 0.10, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_JAIL_OUT, REACT_TROUBLE, 0.10, state, botIds, nowMs);
             case "PASSED_GO":
                 // Frequent event — keep the probability low so it stays a rare treat.
-                if (isBot(author, botIds)) return maybeMessage(author, K_PASS_GO, PASS_GO, 0.15, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_PASS_GO, 0.15, nowMs);
                 // A rival collected GO money — a bot's occasional envy. Very low prob (frequent event).
-                return maybeMessageFromOther(author, K_OPP_PASSED_GO, OPP_PASSED_GO, REACT_TROUBLE, 0.05, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_PASSED_GO, REACT_TROUBLE, 0.05, state, botIds, nowMs);
             case "MORTGAGED":
-                if (isBot(author, botIds)) return maybeMessage(author, K_MORTGAGE, MORTGAGE, 0.30, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_MORTGAGE, 0.30, nowMs);
                 // A non-bot mortgaging signals trouble — a bot smells blood.
-                return maybeMessageFromOther(author, K_OPP_MORTGAGE, OPP_MORTGAGE, REACT_TROUBLE, 0.16, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_MORTGAGE, REACT_TROUBLE, 0.16, state, botIds, nowMs);
             case "TRADE_DECLINED":
             case "TRADE_CANCELLED": {
                 // playerIds: [initiator, recipient]. The recipient is the one who was asked, so
@@ -783,8 +225,8 @@ public final class BotChatter {
                 // own offer got turned down instead just shrugs it off.
                 String initiator = e.playerIds().isEmpty() ? null : e.playerIds().get(0);
                 String recipient = e.playerIds().size() > 1 ? e.playerIds().get(1) : null;
-                if (isBot(recipient, botIds)) return maybeMessage(recipient, K_REJECT_OFFER, REJECT_OFFER, 0.35, nowMs);
-                if (isBot(initiator, botIds)) return maybeMessage(initiator, K_TRADE_NO, TRADE_NO, 0.28, nowMs);
+                if (isBot(recipient, botIds)) return maybeMessage(recipient, K_REJECT_OFFER, 0.35, nowMs);
+                if (isBot(initiator, botIds)) return maybeMessage(initiator, K_TRADE_NO, 0.28, nowMs);
                 break;
             }
             case "PAID_RENT": {
@@ -793,25 +235,25 @@ public final class BotChatter {
                 int amount = parseInt(e.data().get("amount"));
                 if (isBot(creditor, botIds)) {
                     // Bot received rent — gloat on a big one, otherwise a small chance of a 💰.
-                    if (amount >= BIG_RENT) return maybeMessage(creditor, K_RENT_GLOAT, RENT_GLOAT, 0.45, nowMs);
+                    if (amount >= BIG_RENT) return maybeMessage(creditor, K_RENT_GLOAT, 0.45, nowMs);
                     return maybeReaction(creditor, REACT_RENT, 0.18, state, nowMs);
                 }
                 if (isBot(author, botIds) && amount >= BIG_RENT) {
-                    return maybeMessage(author, K_RENT_PAIN, RENT_PAIN, 0.40, nowMs);
+                    return maybeMessage(author, K_RENT_PAIN, 0.40, nowMs);
                 }
                 // Neither party is a bot — on a big one, a bystander bot enjoys the drama. 🍿
                 if (amount >= BIG_RENT && !isBot(author, botIds)) {
-                    return maybeMessageFromOther(null, K_SPECTATE, SPECTATE_RENT, REACT_RENT, 0.22, state, botIds, nowMs);
+                    return maybeMessageFromOther(null, K_SPECTATE, REACT_RENT, 0.22, state, botIds, nowMs);
                 }
                 break;
             }
             case "WENT_BANKRUPT":
-                if (isBot(author, botIds)) return maybeMessage(author, K_SELF_BANKRUPT, SELF_BANKRUPT, 0.85, nowMs);
+                if (isBot(author, botIds)) return maybeMessage(author, K_SELF_BANKRUPT, 0.85, nowMs);
                 // A human (or another already-processed player) went bankrupt — a surviving bot reacts.
-                return maybeMessageFromOther(author, K_OPP_BANKRUPT, OPPONENT_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs);
+                return maybeMessageFromOther(author, K_OPP_BANKRUPT, REACT_BANKRUPT, 0.55, state, botIds, nowMs);
             case "TRADE_ACCEPTED": {
                 for (String pid : e.playerIds()) {
-                    if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE, TRADE_DONE, 0.30, nowMs);
+                    if (isBot(pid, botIds)) return maybeMessage(pid, K_TRADE, 0.30, nowMs);
                 }
                 break;
             }
@@ -820,22 +262,20 @@ public final class BotChatter {
                 int d2 = parseInt(e.data().get("d2"));
                 if (d1 > 0 && d1 == d2 && isBot(author, botIds)) {
                     // Half the time a spoken "doubles!" line, otherwise the emoji reaction.
-                    if (rng.nextInt(2) == 0) return maybeMessage(author, K_DOUBLES, DOUBLES, 0.20, nowMs);
+                    if (rng.nextInt(2) == 0) return maybeMessage(author, K_DOUBLES, 0.20, nowMs);
                     return maybeReaction(author, REACT_DOUBLES, 0.15, state, nowMs);
                 }
                 // Occasional idle banter on the bot's own roll, tuned to how the bot is doing so a
                 // random line still fits the moment. Every roll fires this, so keep the probability
                 // low; cooldowns thin it further.
                 if (isBot(author, botIds)) {
-                    String key = K_BANTER;
-                    String[] pool = BANTER;
-                    switch (cashStanding(author, state)) {
-                        case LOW:   key = K_BANTER_LOW;   pool = BANTER_LOW;   break;
-                        case LEAD:  key = K_BANTER_LEAD;  pool = BANTER_LEAD;  break;
-                        case TRAIL: key = K_BANTER_TRAIL; pool = BANTER_TRAIL; break;
-                        default: break;
-                    }
-                    return maybeMessage(author, key, pool, 0.09, nowMs);
+                    String key = switch (cashStanding(author, state)) {
+                        case LOW -> K_BANTER_LOW;
+                        case LEAD -> K_BANTER_LEAD;
+                        case TRAIL -> K_BANTER_TRAIL;
+                        default -> K_BANTER;
+                    };
+                    return maybeMessage(author, key, 0.09, nowMs);
                 }
                 break;
             }
@@ -847,15 +287,14 @@ public final class BotChatter {
 
     // ── Emission helpers ────────────────────────────────────────────────────────────────────
 
-    private ChatIntent maybeMessage(String botId, String msgKey, String[] pool, double probability, long nowMs) {
+    private ChatIntent maybeMessage(String botId, String msgKey, double probability, long nowMs) {
         if (!canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
-        int variant = rng.nextInt(pool.length);
-        return new ChatIntent(botId, "MESSAGE", pool[variant], msgKey, variant, thinkDelay());
+        return new ChatIntent(botId, "MESSAGE", "", msgKey, thinkDelay());
     }
 
     private ChatIntent maybeReaction(String botId, String[] pool, double probability, SessionState state, long nowMs) {
         if (!isActive(botId, state) || !canChat(botId, nowMs) || rng.nextDouble() >= probability) return null;
-        return new ChatIntent(botId, "REACTION", pick(pool), null, 0, thinkDelay());
+        return new ChatIntent(botId, "REACTION", pick(pool), null, thinkDelay());
     }
 
     /** A random surviving bot other than {@code excludeId} reacts with an emoji. */
@@ -863,19 +302,18 @@ public final class BotChatter {
         if (rng.nextDouble() >= probability) return null;
         String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
         if (reactor == null) return null;
-        return new ChatIntent(reactor, "REACTION", pick(pool), null, 0, thinkDelay());
+        return new ChatIntent(reactor, "REACTION", pick(pool), null, thinkDelay());
     }
 
     /** A random surviving bot other than {@code excludeId} comments — a message, or (30 %) an emoji reaction. */
-    private ChatIntent maybeMessageFromOther(String excludeId, String msgKey, String[] msgPool, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs) {
+    private ChatIntent maybeMessageFromOther(String excludeId, String msgKey, String[] reactPool, double probability, SessionState state, Set<String> botIds, long nowMs) {
         if (rng.nextDouble() >= probability) return null;
         String reactor = pickEligibleBot(excludeId, state, botIds, nowMs);
         if (reactor == null) return null;
         if (rng.nextDouble() < 0.30) {
-            return new ChatIntent(reactor, "REACTION", pick(reactPool), null, 0, thinkDelay());
+            return new ChatIntent(reactor, "REACTION", pick(reactPool), null, thinkDelay());
         }
-        int variant = rng.nextInt(msgPool.length);
-        return new ChatIntent(reactor, "MESSAGE", msgPool[variant], msgKey, variant, thinkDelay());
+        return new ChatIntent(reactor, "MESSAGE", "", msgKey, thinkDelay());
     }
 
     private String pickEligibleBot(String excludeId, SessionState state, Set<String> botIds, long nowMs) {

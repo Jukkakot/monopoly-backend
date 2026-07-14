@@ -126,7 +126,7 @@ public final class SessionRegistry {
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 publisher, initialState, botConfigs, strategy,
-                (botId, kind, content, msgKey, variant) -> postBotChat(sessionId, botId, kind, content, msgKey, variant));
+                (botId, kind, content, msgKey) -> postBotChat(sessionId, botId, kind, content, msgKey));
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
         // Generate player tokens for all human seats so that commands can be authenticated.
         // Player IDs are deterministic: "player-" + (inputIndex + 1).
@@ -645,7 +645,7 @@ public final class SessionRegistry {
         fi.monopoly.server.bot.BotStrategy strategy = buildBotStrategy(botConfigs);
         PureDomainBotDriver botDriver = PureDomainBotDriver.createAndRegisterIfNeeded(
                 entry.publisher(), gameState, botConfigs, strategy,
-                (botId, kind, content, msgKey, variant) -> postBotChat(sessionId, botId, kind, content, msgKey, variant));
+                (botId, kind, content, msgKey) -> postBotChat(sessionId, botId, kind, content, msgKey));
         if (botDriver != null) botDriver.setViewerGatingEnabled(true);
 
         List<String> humanNames = gameState.seats().stream()
@@ -727,23 +727,24 @@ public final class SessionRegistry {
      * {@link #postChat} there is no token check — the caller is the trusted in-process bot
      * driver, not a network client. Silently no-ops if the session or bot has gone away.
      *
-     * <p>For a MESSAGE, {@code msgKey}/{@code variant} let each client localise the line to its
-     * own language; {@code content} is the Finnish fallback for clients that don't know the key.
-     * For a REACTION {@code msgKey} is null.</p>
+     * <p>For a MESSAGE only {@code msgKey} (the situation) is sent — the client owns the text and
+     * picks the variant from the CHAT event id. For a REACTION {@code content} is the emoji and
+     * {@code msgKey} is null.</p>
      */
-    void postBotChat(String sessionId, String botPlayerId, String kind, String content, String msgKey, int variant) {
+    void postBotChat(String sessionId, String botPlayerId, String kind, String content, String msgKey) {
         Entry entry = sessions.get(sessionId);
-        if (entry == null || botPlayerId == null || content == null) return;
-        String eventKind = "REACTION".equals(kind) ? "REACTION" : "MESSAGE";
-        String text = content.strip();
-        if (text.isEmpty()) return;
-        if (!"REACTION".equals(eventKind) && text.length() > MAX_CHAT_LEN) text = text.substring(0, MAX_CHAT_LEN);
+        if (entry == null || botPlayerId == null) return;
+        boolean reaction = "REACTION".equals(kind);
         Map<String, String> data = new HashMap<>();
-        data.put("kind", eventKind);
-        data.put("content", text);
-        if (msgKey != null && !msgKey.isBlank()) {
+        if (reaction) {
+            String emoji = content == null ? "" : content.strip();
+            if (emoji.isEmpty()) return;
+            data.put("kind", "REACTION");
+            data.put("content", emoji);
+        } else {
+            if (msgKey == null || msgKey.isBlank()) return;
+            data.put("kind", "MESSAGE");
             data.put("botMsgKey", msgKey);
-            data.put("botMsgVariant", Integer.toString(variant));
         }
         entry.publisher().runExclusive(() ->
                 entry.baseStore().update(state -> appendChatEvent(state, botPlayerId, data)));

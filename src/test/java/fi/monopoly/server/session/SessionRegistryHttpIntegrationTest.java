@@ -490,13 +490,12 @@ class SessionRegistryHttpIntegrationTest {
                 List.of(SeatKind.BOT, SeatKind.BOT));
         String sessionId = created.sessionId();
 
-        registry.postBotChat(sessionId, "player-1", "MESSAGE", "Hyvä siirto! 😎", "boughtProperty", 2);
+        // A bot MESSAGE carries only the situation key — the client owns the text.
+        registry.postBotChat(sessionId, "player-1", "MESSAGE", "", "boughtProperty");
 
         String snap = get("/sessions/" + sessionId + "/snapshot").body();
-        assertTrue(snap.contains("\"CHAT\"") && snap.contains("Hyvä siirto"),
-                "Bot chat should appear in the event log, got: " + snap);
-        assertTrue(snap.contains("botMsgKey") && snap.contains("boughtProperty"),
-                "Bot message should carry a localization key, got: " + snap);
+        assertTrue(snap.contains("\"CHAT\"") && snap.contains("botMsgKey") && snap.contains("boughtProperty"),
+                "Bot message should appear as a CHAT event with a localization key, got: " + snap);
     }
 
     // -------------------------------------------------------------------------
