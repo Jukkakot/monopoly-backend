@@ -821,9 +821,22 @@ public final class SessionRegistry {
     public void remove(String sessionId) {
         Entry entry = sessions.remove(sessionId);
         lastActivityAt.remove(sessionId);
+        forgetChatRateLimits(sessionId);
         if (entry != null && entry.botDriver() != null) {
             entry.botDriver().stop();
         }
+    }
+
+    /** Drops this session's per-player chat rate-limit entries so the map doesn't grow forever as
+     *  sessions come and go (the keys are "sessionId|playerId", so match by prefix). */
+    private void forgetChatRateLimits(String sessionId) {
+        String prefix = sessionId + "|";
+        lastHumanChatAt.keySet().removeIf(k -> k.startsWith(prefix));
+    }
+
+    /** Test hook: how many chat rate-limit keys are currently tracked (to prove they're evicted). */
+    int chatRateLimitKeyCount() {
+        return lastHumanChatAt.size();
     }
 
     public void shutdown() {
@@ -833,6 +846,7 @@ public final class SessionRegistry {
         });
         sessions.clear();
         lastActivityAt.clear();
+        lastHumanChatAt.clear();
     }
 
     // -------------------------------------------------------------------------
@@ -997,6 +1011,7 @@ public final class SessionRegistry {
             if (entry.getValue() < cutoff) {
                 log.info("Evicting idle session {} (idle > {} min)", entry.getKey(), TTL_MINUTES);
                 Entry session = sessions.remove(entry.getKey());
+                forgetChatRateLimits(entry.getKey());
                 if (session != null && session.botDriver() != null) {
                     session.botDriver().stop();
                 }

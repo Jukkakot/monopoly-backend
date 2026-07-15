@@ -502,6 +502,26 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     @Test
+    void removingASessionEvictsItsChatRateLimitEntries() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId    = extractSessionId(createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String validToken   = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+
+        // A chat post records a rate-limit entry keyed by this session+player.
+        assertEquals(200, post("/sessions/" + sessionId + "/chat",
+                "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken
+                        + "\",\"kind\":\"MESSAGE\",\"content\":\"moi\"}").statusCode());
+        assertTrue(registry.chatRateLimitKeyCount() > 0, "chat post should record a rate-limit entry");
+
+        // Removing the session must drop that entry (no unbounded growth as sessions come and go).
+        registry.remove(sessionId);
+        assertEquals(0, registry.chatRateLimitKeyCount(),
+                "the session's chat rate-limit entries should be evicted on removal");
+    }
+
+    @Test
     void backToBackChatFromTheSamePlayerIsRateLimited() throws Exception {
         HttpResponse<String> createResp = post("/sessions",
                 "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
