@@ -556,7 +556,8 @@ paths:
 
         Optional `replyToId` attaches a reaction to a specific earlier CHAT event
         (WhatsApp-style); the client renders it under that message's bubble rather than
-        floating it. Bot-authored CHAT events may also carry `data.targetPlayerId` (the
+        floating it. Such reactions are idempotent per (player, message, emoji) — the same
+        player posting the same emoji on the same message again is ignored. Bot-authored CHAT events may also carry `data.targetPlayerId` (the
         player an @mention is aimed at) and `data.botMsgKey` (the situation the client
         localises) — those are server-generated and never accepted from this endpoint.
       parameters:

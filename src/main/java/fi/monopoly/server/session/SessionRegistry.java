@@ -722,13 +722,33 @@ public final class SessionRegistry {
         data.put("kind", eventKind);
         data.put("content", finalText);
         if (replyToId != null) data.put("replyToId", String.valueOf(replyToId));
-        // runExclusive serializes the append with command handling so it can't be lost to a
-        // concurrently-executing command's derived state (see SessionCommandPublisher#runExclusive).
+        // A message reaction is idempotent per (player, message, emoji): the same person can't
+        // stack the same emoji on the same message twice. runExclusive serializes the append with
+        // command handling so it can't be lost to a concurrently-executing command's derived state
+        // (see SessionCommandPublisher#runExclusive), and makes the duplicate check atomic.
+        final boolean dedupe = reaction && replyToId != null;
+        final long replyTo = replyToId == null ? 0L : replyToId;
         entry.publisher().runExclusive(() ->
-                entry.baseStore().update(state -> appendChatEvent(state, playerId, data)));
+                entry.baseStore().update(state ->
+                        dedupe && hasMessageReaction(state, playerId, finalText, replyTo)
+                                ? state
+                                : appendChatEvent(state, playerId, data)));
         lastHumanChatAt.put(rateKey, now);
         lastActivityAt.put(sessionId, now);
         return true;
+    }
+
+    /** True if {@code playerId} has already reacted to CHAT event {@code replyToId} with {@code emoji}. */
+    private static boolean hasMessageReaction(SessionState state, String playerId, String emoji, long replyToId) {
+        String replyStr = String.valueOf(replyToId);
+        for (GameEventEntry e : state.eventLog()) {
+            if (!"CHAT".equals(e.type())) continue;
+            Map<String, String> d = e.data();
+            if (!"REACTION".equals(d.get("kind"))) continue;
+            if (!emoji.equals(d.get("content")) || !replyStr.equals(d.get("replyToId"))) continue;
+            if (!e.playerIds().isEmpty() && playerId.equals(e.playerIds().get(0))) return true;
+        }
+        return false;
     }
 
     /** Appends a CHAT event authored by {@code playerId}, filling in the sender's display name.

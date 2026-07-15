@@ -480,6 +480,28 @@ class SessionRegistryHttpIntegrationTest {
     }
 
     @Test
+    void aPlayerCannotStackTheSameEmojiOnAMessageTwice() throws Exception {
+        HttpResponse<String> createResp = post("/sessions",
+                "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
+        String sessionId    = extractSessionId(createResp.body());
+        String hostPlayerId = extractPattern(PLAYER_ID_PATTERN,  createResp.body());
+        String validToken   = extractPattern(PLAYER_TOKEN_PATTERN, createResp.body());
+
+        // React 🎉 to (pretend) message id 5.
+        String react = "{\"playerId\":\"" + hostPlayerId + "\",\"playerToken\":\"" + validToken
+                + "\",\"kind\":\"REACTION\",\"content\":\"🎉\",\"replyToId\":5}";
+        assertEquals(200, post("/sessions/" + sessionId + "/chat", react).statusCode());
+
+        // Same emoji on the same message again (spaced past the rate limit) — must not add a second.
+        Thread.sleep(760);
+        post("/sessions/" + sessionId + "/chat", react);
+
+        String snap = get("/sessions/" + sessionId + "/snapshot").body();
+        int count = snap.split("🎉", -1).length - 1;
+        assertEquals(1, count, "the same player's duplicate emoji reaction must be ignored, got: " + snap);
+    }
+
+    @Test
     void backToBackChatFromTheSamePlayerIsRateLimited() throws Exception {
         HttpResponse<String> createResp = post("/sessions",
                 "{\"lobbyMode\":true,\"hostName\":\"Alice\",\"hostColor\":\"#E63946\"}");
